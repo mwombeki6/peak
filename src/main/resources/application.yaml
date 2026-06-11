@@ -18,6 +18,9 @@ spring:
 peak:
   runtime:
     mode: ${PEAK_RUNTIME_MODE:api}
+  security:
+    request-context:
+      allow-header-identity: ${PEAK_ALLOW_HEADER_IDENTITY:false}
 
 management:
   endpoints:
