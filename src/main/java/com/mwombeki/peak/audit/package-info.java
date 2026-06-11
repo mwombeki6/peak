@@ -1,7 +1,7 @@
 @ApplicationModule(
         id = "audit",
         displayName = "Audit",
-        allowedDependencies = {"shared"}
+        allowedDependencies = {"shared::context"}
 )
 package com.mwombeki.peak.audit;
 

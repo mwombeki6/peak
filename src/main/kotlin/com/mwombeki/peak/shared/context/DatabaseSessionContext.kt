@@ -2,12 +2,17 @@ package com.mwombeki.peak.shared.context
 
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
+import org.springframework.transaction.support.TransactionSynchronizationManager
 
 @Component
 class DatabaseSessionContext(
     private val jdbcTemplate: JdbcTemplate,
 ) {
     fun bind(identity: RequestIdentity) {
+        require(TransactionSynchronizationManager.isActualTransactionActive()) {
+            "Database session context must be bound inside an active transaction"
+        }
+
         clear()
 
         when (identity) {
