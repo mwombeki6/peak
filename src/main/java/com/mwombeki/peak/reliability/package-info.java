@@ -1,7 +1,7 @@
 @ApplicationModule(
         id = "reliability",
         displayName = "Reliability",
-        allowedDependencies = {"shared", "audit"}
+        allowedDependencies = {"shared::context", "audit::api"}
 )
 package com.mwombeki.peak.reliability;
 
