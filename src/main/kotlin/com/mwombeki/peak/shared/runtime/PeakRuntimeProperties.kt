@@ -1,0 +1,14 @@
+package com.mwombeki.peak.shared.runtime
+
+import org.springframework.boot.context.properties.ConfigurationProperties
+
+@ConfigurationProperties(prefix = "peak.runtime")
+data class PeakRuntimeProperties(
+    val mode: PeakRuntimeMode = PeakRuntimeMode.API,
+)
+
+enum class PeakRuntimeMode {
+    API,
+    WORKER,
+    MIGRATION,
+}

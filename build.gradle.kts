@@ -161,5 +161,18 @@ kotlin {
 }
 
 tasks.withType<Test>().configureEach {
+    val runtimeDir = System.getenv("XDG_RUNTIME_DIR")
+    val podmanSocket = runtimeDir?.let {
+        file("$it/podman/podman.sock")
+    }
+
+    if (System.getenv("DOCKER_HOST").isNullOrBlank() && podmanSocket?.exists() == true) {
+        environment("DOCKER_HOST", "unix://${podmanSocket.absolutePath}")
+        environment(
+            "TESTCONTAINERS_RYUK_DISABLED",
+            System.getenv("TESTCONTAINERS_RYUK_DISABLED") ?: "true",
+        )
+    }
+
     useJUnitPlatform()
 }

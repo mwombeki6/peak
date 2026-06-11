@@ -1,5 +1,6 @@
 package com.mwombeki.peak
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection
 import org.springframework.context.annotation.Bean
@@ -12,6 +13,11 @@ class TestcontainersConfiguration {
 
     @Bean
     @ServiceConnection
+    @ConditionalOnProperty(
+        prefix = "peak.testcontainers.lgtm",
+        name = ["enabled"],
+        havingValue = "true",
+    )
     fun grafanaLgtmContainer(): LgtmStackContainer {
         return LgtmStackContainer(DockerImageName.parse("grafana/otel-lgtm:latest"))
     }
@@ -19,7 +25,7 @@ class TestcontainersConfiguration {
     @Bean
     @ServiceConnection
     fun postgresContainer(): PostgreSQLContainer {
-        return PostgreSQLContainer(DockerImageName.parse("postgres:latest"))
+        return PostgreSQLContainer(DockerImageName.parse("postgres:18"))
     }
 
 }
