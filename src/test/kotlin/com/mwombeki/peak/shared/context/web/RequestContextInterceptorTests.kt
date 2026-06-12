@@ -1,14 +1,15 @@
 package com.mwombeki.peak.shared.context.web
 
+import com.mwombeki.peak.shared.context.ExternalIdentityResolver
+import com.mwombeki.peak.shared.context.PeakRequestHeaders
+import com.mwombeki.peak.shared.context.RequestContextHolder
+import com.mwombeki.peak.shared.context.RequestContextProperties
+import com.mwombeki.peak.shared.context.RequestContextResolver
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
-import com.mwombeki.peak.shared.context.PeakRequestHeaders
-import com.mwombeki.peak.shared.context.RequestContextHolder
-import com.mwombeki.peak.shared.context.RequestContextProperties
-import com.mwombeki.peak.shared.context.RequestContextResolver
 
 class RequestContextInterceptorTests {
 
@@ -54,6 +55,7 @@ class RequestContextInterceptorTests {
         return RequestContextInterceptor(
             resolver = RequestContextResolver(
                 RequestContextProperties(allowHeaderIdentity = false),
+                ExternalIdentityResolver { null },
             ),
             holder = holder,
         )
