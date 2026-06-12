@@ -32,12 +32,14 @@ enum class GuardMode {
     STAFF_PERMISSION,
     MODULE_ONLY,
     PLATFORM_PERMISSION,
+    PUBLIC_TOKEN,
 }
 
 enum class RouteScope {
     TENANT,
     PROPERTY,
     PUBLIC_PROPERTY,
+    PUBLIC,
     PLATFORM,
 }
 

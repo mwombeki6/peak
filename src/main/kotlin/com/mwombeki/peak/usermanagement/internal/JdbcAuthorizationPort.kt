@@ -30,6 +30,7 @@ class JdbcAuthorizationPort(
             GuardMode.STAFF_PERMISSION -> authorizeStaffPermission(identity, request)
             GuardMode.MODULE_ONLY -> authorizePublicModule(identity, request)
             GuardMode.PLATFORM_PERMISSION -> authorizePlatformPermission(identity, request)
+            GuardMode.PUBLIC_TOKEN -> authorizePublicToken(identity, request)
         }
     }
 
@@ -139,5 +140,25 @@ class JdbcAuthorizationPort(
         } else {
             AuthorizationDecision.denied("Platform user lacks required permission")
         }
+    }
+
+    private fun authorizePublicToken(
+        identity: RequestIdentity,
+        request: RouteAuthorizationRequest,
+    ): AuthorizationDecision {
+        if (identity !is RequestIdentity.Public) {
+            return AuthorizationDecision.denied("Public identity is required")
+        }
+        if (request.routeScope != RouteScope.PUBLIC) {
+            return AuthorizationDecision.denied("Invalid route scope for public token guard")
+        }
+        if (request.permissionCode != null) {
+            return AuthorizationDecision.denied("Public token guard must not require permission")
+        }
+        if (request.tenantId != null || request.propertyId != null) {
+            return AuthorizationDecision.denied("Public token guard must not include tenant or property")
+        }
+
+        return AuthorizationDecision.allowed()
     }
 }
