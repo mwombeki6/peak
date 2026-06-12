@@ -21,12 +21,16 @@ import java.util.UUID
 import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
 import org.springframework.http.ResponseEntity
+import org.springframework.security.core.Authentication
+import org.springframework.security.oauth2.jwt.Jwt
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.server.ResponseStatusException
 
 @RestController
 @RequestMapping("/api/v1")
@@ -57,13 +61,16 @@ class TenantUserInvitationController(
     @PostMapping("/invitations/accept")
     fun acceptTenantUserInvitation(
         @Valid @RequestBody request: AcceptTenantUserInvitationHttpRequest,
+        authentication: Authentication?,
     ): TenantUserInvitationAcceptanceHttpResponse {
+        val oidcIdentity = authentication.requireOidcIdentity()
+
         return invitationPort.acceptTenantUserInvitation(
             AcceptTenantUserInvitationCommand(
                 invitationToken = request.invitationToken,
-                issuer = request.issuer,
-                subject = request.subject,
-                email = request.email,
+                issuer = oidcIdentity.issuer,
+                subject = oidcIdentity.subject,
+                email = oidcIdentity.email,
                 fullName = request.fullName,
             ),
         ).toHttpResponse()
@@ -118,6 +125,49 @@ class TenantUserInvitationController(
 
     private fun IllegalArgumentException.publicMessage(): String {
         return message ?: "Invitation request is invalid"
+    }
+
+    private fun Authentication?.requireOidcIdentity(): OidcInvitationIdentity {
+        if (this !is JwtAuthenticationToken || !isAuthenticated) {
+            throw ResponseStatusException(
+                HttpStatus.UNAUTHORIZED,
+                "Authenticated OIDC identity is required",
+            )
+        }
+
+        return token.toOidcInvitationIdentity()
+    }
+
+    private fun Jwt.toOidcInvitationIdentity(): OidcInvitationIdentity {
+        val issuer = issuer?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+            ?: stringClaim("iss")
+            ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "OIDC issuer is required")
+        val subject = subject?.trim()?.takeIf { it.isNotEmpty() }
+            ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "OIDC subject is required")
+        val email = stringClaim("email")?.lowercase()
+            ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "OIDC email is required")
+
+        if (!booleanClaim("email_verified")) {
+            throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "OIDC email must be verified")
+        }
+
+        return OidcInvitationIdentity(
+            issuer = issuer,
+            subject = subject,
+            email = email,
+        )
+    }
+
+    private fun Jwt.stringClaim(name: String): String? {
+        return claims[name]?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
+    private fun Jwt.booleanClaim(name: String): Boolean {
+        return when (val value = claims[name]) {
+            true -> true
+            is String -> value.equals("true", ignoreCase = true)
+            else -> false
+        }
     }
 
     private fun TenantUserInvitationReceipt.toHttpResponse(): TenantUserInvitationHttpResponse {
@@ -175,12 +225,6 @@ data class TenantUserInvitationHttpResponse(
 data class AcceptTenantUserInvitationHttpRequest(
     @field:NotBlank
     val invitationToken: String,
-    @field:NotBlank
-    val issuer: String,
-    @field:NotBlank
-    val subject: String,
-    @field:Email
-    val email: String? = null,
     val fullName: String? = null,
 )
 
@@ -192,4 +236,10 @@ data class TenantUserInvitationAcceptanceHttpResponse(
     val email: String,
     val identityLinkId: UUID,
     val replayed: Boolean,
+)
+
+private data class OidcInvitationIdentity(
+    val issuer: String,
+    val subject: String,
+    val email: String,
 )
