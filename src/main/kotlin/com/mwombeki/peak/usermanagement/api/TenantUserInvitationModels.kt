@@ -32,6 +32,36 @@ data class TenantUserInvitationReceipt(
     val replayed: Boolean,
 )
 
+data class AcceptTenantUserInvitationCommand(
+    val invitationToken: String,
+    val issuer: String,
+    val subject: String,
+    val email: String? = null,
+    val fullName: String? = null,
+) {
+    init {
+        require(invitationToken.isNotBlank()) {
+            "Invitation token is required"
+        }
+        require(issuer.isNotBlank()) {
+            "OIDC issuer is required"
+        }
+        require(subject.isNotBlank()) {
+            "OIDC subject is required"
+        }
+    }
+}
+
+data class TenantUserInvitationAcceptanceReceipt(
+    val invitationId: UUID,
+    val tenantId: UUID,
+    val userId: UUID,
+    val tenantRoleId: UUID,
+    val email: String,
+    val identityLinkId: UUID,
+    val replayed: Boolean,
+)
+
 sealed class TenantUserInvitationException(message: String) : RuntimeException(message)
 
 class TenantUserInvitationConflictException(
@@ -39,5 +69,9 @@ class TenantUserInvitationConflictException(
 ) : TenantUserInvitationException(message)
 
 class TenantUserInvitationInProgressException(
+    message: String,
+) : TenantUserInvitationException(message)
+
+class TenantUserInvitationAcceptanceRejectedException(
     message: String,
 ) : TenantUserInvitationException(message)

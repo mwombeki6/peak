@@ -10,21 +10,24 @@ import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
+import com.mwombeki.peak.shared.context.RequestContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.usermanagement.api.AcceptTenantUserInvitationCommand
 import com.mwombeki.peak.usermanagement.api.InviteTenantUserCommand
+import com.mwombeki.peak.usermanagement.api.TenantUserInvitationAcceptanceReceipt
+import com.mwombeki.peak.usermanagement.api.TenantUserInvitationAcceptanceRejectedException
 import com.mwombeki.peak.usermanagement.api.TenantUserInvitationConflictException
 import com.mwombeki.peak.usermanagement.api.TenantUserInvitationInProgressException
 import com.mwombeki.peak.usermanagement.api.TenantUserInvitationPort
 import com.mwombeki.peak.usermanagement.api.TenantUserInvitationReceipt
-import java.security.MessageDigest
-import java.security.SecureRandom
+import java.sql.ResultSet
 import java.sql.Timestamp
 import java.time.Clock
 import java.time.Instant
-import java.util.Base64
 import java.util.Locale
 import java.util.UUID
+import org.springframework.dao.DataAccessException
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
@@ -47,6 +50,16 @@ class TenantUserInvitationService(
         return requireNotNull(
             transactionTemplate.execute {
                 inviteInsideTransaction(command.normalized())
+            },
+        )
+    }
+
+    override fun acceptTenantUserInvitation(
+        command: AcceptTenantUserInvitationCommand,
+    ): TenantUserInvitationAcceptanceReceipt {
+        return requireNotNull(
+            transactionTemplate.execute {
+                acceptInsideTransaction(command.normalized())
             },
         )
     }
@@ -92,8 +105,8 @@ class TenantUserInvitationService(
         requireNoActiveUserWithEmail(command.tenantId, command.email)
 
         val invitationId = UUID.randomUUID()
-        val token = invitationToken()
-        val tokenHash = token.sha256Url()
+        val token = InvitationTokens.newToken()
+        val tokenHash = InvitationTokens.hash(token)
         val expiresAt = clock.instant().plusSeconds(command.expiresInSeconds)
 
         try {
@@ -196,6 +209,148 @@ class TenantUserInvitationService(
         return snapshot.toReceipt(invitationToken = null, replayed = true)
     }
 
+    private fun acceptInsideTransaction(
+        command: NormalizedAcceptCommand,
+    ): TenantUserInvitationAcceptanceReceipt {
+        val originalContext = requestContextHolder.current()
+        databaseSessionContext.bind(originalContext.identity)
+
+        val reservation = idempotencyPort.reserve(
+            IdempotencyCommand(
+                operationType = "tenant.user.invitation.accept",
+                requestPayload = mapOf(
+                    "tokenHash" to command.tokenHash,
+                    "issuer" to command.issuer,
+                    "subject" to command.subject,
+                    "email" to command.email,
+                    "fullName" to command.fullName,
+                ),
+                resourceType = "tenant_user_invitations",
+            ),
+        )
+
+        return when (reservation) {
+            is IdempotencyReservation.Started -> acceptStarted(
+                command = command,
+                originalContext = originalContext,
+                idempotencyKeyId = reservation.recordId,
+            )
+
+            is IdempotencyReservation.Replay -> replayAcceptance(reservation)
+            is IdempotencyReservation.InProgress -> throw TenantUserInvitationInProgressException(
+                "Tenant user invitation acceptance is already being processed for this idempotency key",
+            )
+
+            is IdempotencyReservation.Conflict -> throw TenantUserInvitationConflictException(
+                "Idempotency key was already used for a different invitation acceptance request",
+            )
+        }
+    }
+
+    private fun acceptStarted(
+        command: NormalizedAcceptCommand,
+        originalContext: RequestContext,
+        idempotencyKeyId: UUID,
+    ): TenantUserInvitationAcceptanceReceipt {
+        val snapshot = try {
+            jdbcTemplate.queryForObject(
+                """
+                SELECT *
+                FROM accept_tenant_user_invitation(?, ?, ?, ?, ?)
+                """.trimIndent(),
+                ::mapAcceptanceSnapshot,
+                command.tokenHash,
+                command.issuer,
+                command.subject,
+                command.email,
+                command.fullName,
+            )
+        } catch (ex: DataAccessException) {
+            throw TenantUserInvitationAcceptanceRejectedException(
+                ex.mostSpecificCause.message ?: "Invitation acceptance was rejected",
+            )
+        }
+
+        idempotencyPort.markSucceeded(
+            recordId = idempotencyKeyId,
+            responseCode = 200,
+            responseBody = snapshot,
+            resourceId = snapshot.invitationId,
+        )
+
+        recordAcceptanceSideEffects(snapshot, originalContext)
+
+        return snapshot.toAcceptanceReceipt(replayed = false)
+    }
+
+    private fun recordAcceptanceSideEffects(
+        snapshot: AcceptanceSnapshot,
+        originalContext: RequestContext,
+    ) {
+        val acceptedIdentity = RequestIdentity.Tenant(
+            tenantId = snapshot.tenantId,
+            tenantUserId = snapshot.userId,
+            correlationId = originalContext.correlationId,
+        )
+        val acceptedContext = originalContext.copy(identity = acceptedIdentity)
+
+        try {
+            requestContextHolder.set(acceptedContext)
+            databaseSessionContext.bind(acceptedIdentity)
+
+            auditPort.recordTenantEvent(
+                TenantAuditEvent(
+                    tenantId = snapshot.tenantId,
+                    action = "tenant.users.invitation.accept",
+                    resource = AuditResource("tenant_user_invitations", snapshot.invitationId),
+                    after = mapOf(
+                        "userId" to snapshot.userId,
+                        "tenantRoleId" to snapshot.tenantRoleId,
+                        "identityLinkId" to snapshot.identityLinkId,
+                        "email" to snapshot.email,
+                    ),
+                ),
+            )
+
+            outboxPort.enqueue(
+                OutboxEventCommand(
+                    aggregateType = "tenant_user_invitations",
+                    aggregateId = snapshot.invitationId,
+                    tenantId = snapshot.tenantId,
+                    eventType = "tenant.user.invitation.accepted",
+                    destination = OutboxDestination.PLATFORM,
+                    payload = mapOf(
+                        "invitationId" to snapshot.invitationId,
+                        "tenantId" to snapshot.tenantId,
+                        "userId" to snapshot.userId,
+                        "tenantRoleId" to snapshot.tenantRoleId,
+                        "identityLinkId" to snapshot.identityLinkId,
+                        "email" to snapshot.email,
+                    ),
+                    priority = 5,
+                ),
+            )
+        } finally {
+            requestContextHolder.set(originalContext)
+        }
+    }
+
+    private fun replayAcceptance(
+        reservation: IdempotencyReservation.Replay,
+    ): TenantUserInvitationAcceptanceReceipt {
+        if (reservation.responseBody.isNullOrBlank()) {
+            throw TenantUserInvitationConflictException(
+                "Invitation acceptance replay does not contain a stored response body",
+            )
+        }
+
+        val snapshot = objectMapper.readValue(
+            reservation.responseBody,
+            AcceptanceSnapshot::class.java,
+        )
+        return snapshot.toAcceptanceReceipt(replayed = true)
+    }
+
     private fun actorFor(
         identity: RequestIdentity,
         tenantId: UUID,
@@ -290,6 +445,23 @@ class TenantUserInvitationService(
         )
     }
 
+    private fun AcceptTenantUserInvitationCommand.normalized(): NormalizedAcceptCommand {
+        val email = email?.trim()?.lowercase(Locale.ROOT)?.takeIf { it.isNotBlank() }
+        if (email != null) {
+            require(EMAIL_PATTERN.matches(email)) {
+                "Invitation acceptance email is invalid"
+            }
+        }
+
+        return NormalizedAcceptCommand(
+            tokenHash = InvitationTokens.hash(invitationToken.trim()),
+            issuer = issuer.trim(),
+            subject = subject.trim(),
+            email = email,
+            fullName = fullName?.trim()?.takeIf { it.isNotBlank() },
+        )
+    }
+
     private fun InvitationSnapshot.toReceipt(
         invitationToken: String?,
         replayed: Boolean,
@@ -305,15 +477,32 @@ class TenantUserInvitationService(
         )
     }
 
-    private fun invitationToken(): String {
-        val bytes = ByteArray(TOKEN_BYTES)
-        secureRandom.nextBytes(bytes)
-        return base64Url.encodeToString(bytes)
+    private fun mapAcceptanceSnapshot(
+        rs: ResultSet,
+        rowNumber: Int,
+    ): AcceptanceSnapshot {
+        return AcceptanceSnapshot(
+            invitationId = rs.getObject("invitation_id", UUID::class.java),
+            tenantId = rs.getObject("tenant_id", UUID::class.java),
+            userId = rs.getObject("user_id", UUID::class.java),
+            tenantRoleId = rs.getObject("tenant_role_id", UUID::class.java),
+            email = rs.getString("email"),
+            identityLinkId = rs.getObject("identity_link_id", UUID::class.java),
+        )
     }
 
-    private fun String.sha256Url(): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest(toByteArray(Charsets.UTF_8))
-        return base64Url.encodeToString(digest)
+    private fun AcceptanceSnapshot.toAcceptanceReceipt(
+        replayed: Boolean,
+    ): TenantUserInvitationAcceptanceReceipt {
+        return TenantUserInvitationAcceptanceReceipt(
+            invitationId = invitationId,
+            tenantId = tenantId,
+            userId = userId,
+            tenantRoleId = tenantRoleId,
+            email = email,
+            identityLinkId = identityLinkId,
+            replayed = replayed,
+        )
     }
 
     private data class NormalizedInviteCommand(
@@ -323,6 +512,14 @@ class TenantUserInvitationService(
         val fullName: String?,
         val expiresInSeconds: Long,
         val metadata: Map<String, Any?>,
+    )
+
+    private data class NormalizedAcceptCommand(
+        val tokenHash: String,
+        val issuer: String,
+        val subject: String,
+        val email: String?,
+        val fullName: String?,
     )
 
     private data class InvitationActor(
@@ -338,10 +535,16 @@ class TenantUserInvitationService(
         val expiresAt: Instant,
     )
 
+    private data class AcceptanceSnapshot(
+        val invitationId: UUID,
+        val tenantId: UUID,
+        val userId: UUID,
+        val tenantRoleId: UUID,
+        val email: String,
+        val identityLinkId: UUID,
+    )
+
     private companion object {
-        const val TOKEN_BYTES = 32
         val EMAIL_PATTERN = Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")
-        val secureRandom = SecureRandom()
-        val base64Url = Base64.getUrlEncoder().withoutPadding()
     }
 }
