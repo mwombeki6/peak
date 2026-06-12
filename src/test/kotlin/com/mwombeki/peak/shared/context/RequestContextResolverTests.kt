@@ -98,6 +98,98 @@ class RequestContextResolverTests {
     }
 
     @Test
+    fun resolvesTenantOidcJwtIdentity() {
+        val tenantId = UUID.randomUUID()
+        val tenantUserId = UUID.randomUUID()
+        val request = MockHttpServletRequest("GET", "/api/v1/tenants/$tenantId/profile")
+        request.addHeader(PeakRequestHeaders.CORRELATION_ID, "corr-oidc-tenant")
+
+        val context = resolver(
+            externalIdentityResolver = ExternalIdentityResolver { principal ->
+                assertEquals("oidc", principal.provider)
+                assertEquals("https://issuer.example.com/realms/peak", principal.issuer)
+                assertEquals("tenant-subject", principal.subject)
+                assertEquals("tenant@example.com", principal.email)
+
+                ResolvedExternalIdentity.Tenant(
+                    tenantId = tenantId,
+                    tenantUserId = tenantUserId,
+                )
+            },
+        ).resolve(
+            request,
+            jwtAuthentication(
+                "iss" to "https://issuer.example.com/realms/peak",
+                "sub" to "tenant-subject",
+                "email" to "tenant@example.com",
+            ),
+        )
+
+        assertEquals(
+            RequestIdentity.Tenant(tenantId, tenantUserId, "corr-oidc-tenant"),
+            context.identity,
+        )
+    }
+
+    @Test
+    fun resolvesPlatformOidcJwtIdentity() {
+        val platformUserId = UUID.randomUUID()
+        val request = MockHttpServletRequest("GET", "/api/v1/platform/tenants")
+        request.addHeader(PeakRequestHeaders.CORRELATION_ID, "corr-oidc-platform")
+
+        val context = resolver(
+            externalIdentityResolver = ExternalIdentityResolver { principal ->
+                assertEquals("https://issuer.example.com/realms/peak", principal.issuer)
+                assertEquals("platform-subject", principal.subject)
+
+                ResolvedExternalIdentity.Platform(platformUserId)
+            },
+        ).resolve(
+            request,
+            jwtAuthentication(
+                "iss" to "https://issuer.example.com/realms/peak",
+                "sub" to "platform-subject",
+            ),
+        )
+
+        assertEquals(
+            RequestIdentity.Platform(platformUserId, "corr-oidc-platform"),
+            context.identity,
+        )
+    }
+
+    @Test
+    fun rejectsUnlinkedOidcJwtIdentity() {
+        val request = MockHttpServletRequest("GET", "/api/v1/tenants")
+
+        val error = assertFailsWith<RequestContextException> {
+            resolver().resolve(
+                request,
+                jwtAuthentication(
+                    "iss" to "https://issuer.example.com/realms/peak",
+                    "sub" to "missing-subject",
+                ),
+            )
+        }
+
+        assertEquals("OIDC identity is not linked", error.message)
+    }
+
+    @Test
+    fun rejectsOidcJwtWithoutIssuer() {
+        val request = MockHttpServletRequest("GET", "/api/v1/tenants")
+
+        val error = assertFailsWith<RequestContextException> {
+            resolver().resolve(
+                request,
+                jwtAuthentication("sub" to "missing-issuer"),
+            )
+        }
+
+        assertEquals("JWT claim iss is required", error.message)
+    }
+
+    @Test
     fun rejectsIdentityHeadersByDefault() {
         val request = MockHttpServletRequest("GET", "/api/v1/platform/tenants")
         request.addHeader(PeakRequestHeaders.PLATFORM_USER_ID, UUID.randomUUID().toString())
@@ -174,9 +266,11 @@ class RequestContextResolverTests {
 
     private fun resolver(
         allowHeaderIdentity: Boolean = false,
+        externalIdentityResolver: ExternalIdentityResolver = ExternalIdentityResolver { null },
     ): RequestContextResolver {
         return RequestContextResolver(
             RequestContextProperties(allowHeaderIdentity = allowHeaderIdentity),
+            externalIdentityResolver,
         )
     }
 
