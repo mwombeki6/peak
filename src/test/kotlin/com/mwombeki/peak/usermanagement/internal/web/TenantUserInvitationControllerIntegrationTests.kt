@@ -15,6 +15,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.context.annotation.Import
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt as mockJwt
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
@@ -159,6 +160,13 @@ class TenantUserInvitationControllerIntegrationTests {
         val acceptResult = mockMvc.perform(
             post("/api/v1/invitations/accept")
                 .secure(true)
+                .with(
+                    oidcJwt(
+                        issuer = "https://issuer.example.com/realms/peak",
+                        subject = "web-subject-${fixture.tenantId}",
+                        email = "ACCEPT-WEB-${fixture.tenantId}@Example.com",
+                    ),
+                )
                 .contentType(MediaType.APPLICATION_JSON)
                 .header(PeakRequestHeaders.CORRELATION_ID, "corr-web-accept")
                 .header(PeakRequestHeaders.IDEMPOTENCY_KEY, "idem-web-accept")
@@ -166,9 +174,9 @@ class TenantUserInvitationControllerIntegrationTests {
                     """
                     {
                       "invitationToken": "$invitationToken",
-                      "issuer": "https://issuer.example.com/realms/peak",
-                      "subject": "web-subject-${fixture.tenantId}",
-                      "email": "ACCEPT-WEB-${fixture.tenantId}@Example.com",
+                      "issuer": "https://forged.example.com/realms/attacker",
+                      "subject": "forged-subject",
+                      "email": "forged@example.com",
                       "fullName": "Accepted Web"
                     }
                     """.trimIndent(),
@@ -199,6 +207,22 @@ class TenantUserInvitationControllerIntegrationTests {
         )
 
         assertEquals(1, roleCount)
+
+        val identityLinkId = UUID.fromString(
+            JsonPath.read(acceptResult.response.contentAsString, "$.identityLinkId"),
+        )
+        val identityLink = jdbcTemplate.queryForMap(
+            """
+            SELECT issuer, subject, email
+            FROM identity_links
+            WHERE id = ?
+            """.trimIndent(),
+            identityLinkId,
+        )
+
+        assertEquals("https://issuer.example.com/realms/peak", identityLink["issuer"])
+        assertEquals("web-subject-${fixture.tenantId}", identityLink["subject"])
+        assertEquals("accept-web-${fixture.tenantId}@example.com", identityLink["email"])
     }
 
     @Test
@@ -206,16 +230,20 @@ class TenantUserInvitationControllerIntegrationTests {
         mockMvc.perform(
             post("/api/v1/invitations/accept")
                 .secure(true)
+                .with(
+                    oidcJwt(
+                        issuer = "https://issuer.example.com/realms/peak",
+                        subject = "missing-subject",
+                        email = "missing@example.com",
+                    ),
+                )
                 .contentType(MediaType.APPLICATION_JSON)
                 .header(PeakRequestHeaders.CORRELATION_ID, "corr-web-invalid-token")
                 .header(PeakRequestHeaders.IDEMPOTENCY_KEY, "idem-web-invalid-token")
                 .content(
                     """
                     {
-                      "invitationToken": "not-a-valid-token",
-                      "issuer": "https://issuer.example.com/realms/peak",
-                      "subject": "missing-subject",
-                      "email": "missing@example.com"
+                      "invitationToken": "not-a-valid-token"
                     }
                     """.trimIndent(),
                 ),
@@ -224,6 +252,50 @@ class TenantUserInvitationControllerIntegrationTests {
             .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
             .andExpect(content().string(containsString("Invitation token is invalid")))
             .andExpect(content().string(not(containsString("ERROR:"))))
+    }
+
+    @Test
+    fun rejectsInvitationAcceptanceWithoutOidcJwt() {
+        mockMvc.perform(
+            post("/api/v1/invitations/accept")
+                .secure(true)
+                .contentType(MediaType.APPLICATION_JSON)
+                .header(PeakRequestHeaders.CORRELATION_ID, "corr-web-accept-no-jwt")
+                .content(
+                    """
+                    {
+                      "invitationToken": "not-a-valid-token"
+                    }
+                    """.trimIndent(),
+                ),
+        )
+            .andExpect(status().isUnauthorized)
+    }
+
+    @Test
+    fun rejectsInvitationAcceptanceWithUnverifiedOidcEmail() {
+        mockMvc.perform(
+            post("/api/v1/invitations/accept")
+                .secure(true)
+                .with(
+                    oidcJwt(
+                        issuer = "https://issuer.example.com/realms/peak",
+                        subject = "unverified-subject",
+                        email = "unverified@example.com",
+                        emailVerified = false,
+                    ),
+                )
+                .contentType(MediaType.APPLICATION_JSON)
+                .header(PeakRequestHeaders.CORRELATION_ID, "corr-web-accept-unverified")
+                .content(
+                    """
+                    {
+                      "invitationToken": "not-a-valid-token"
+                    }
+                    """.trimIndent(),
+                ),
+        )
+            .andExpect(status().isUnauthorized)
     }
 
     private fun tenantFixture(): WebTenantFixture {
@@ -324,6 +396,19 @@ class TenantUserInvitationControllerIntegrationTests {
             fixture.tenantId,
             fixture.inviterRoleId,
         )
+    }
+
+    private fun oidcJwt(
+        issuer: String,
+        subject: String,
+        email: String,
+        emailVerified: Boolean = true,
+    ) = mockJwt().jwt { jwt ->
+        jwt.claim("iss", issuer)
+        jwt.claim("sub", subject)
+        jwt.claim("email", email)
+        jwt.claim("email_verified", emailVerified)
+        jwt.claim("aud", listOf("peak-api"))
     }
 
     private data class WebTenantFixture(

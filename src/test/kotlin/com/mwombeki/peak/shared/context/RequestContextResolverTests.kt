@@ -159,20 +159,19 @@ class RequestContextResolverTests {
     }
 
     @Test
-    fun rejectsUnlinkedOidcJwtIdentity() {
+    fun resolvesUnlinkedOidcJwtIdentityAsPublic() {
         val request = MockHttpServletRequest("GET", "/api/v1/tenants")
+        request.addHeader(PeakRequestHeaders.CORRELATION_ID, "corr-unlinked-oidc")
 
-        val error = assertFailsWith<RequestContextException> {
-            resolver().resolve(
-                request,
-                jwtAuthentication(
-                    "iss" to "https://issuer.example.com/realms/peak",
-                    "sub" to "missing-subject",
-                ),
-            )
-        }
+        val context = resolver().resolve(
+            request,
+            jwtAuthentication(
+                "iss" to "https://issuer.example.com/realms/peak",
+                "sub" to "missing-subject",
+            ),
+        )
 
-        assertEquals("OIDC identity is not linked", error.message)
+        assertEquals(RequestIdentity.Public(correlationId = "corr-unlinked-oidc"), context.identity)
     }
 
     @Test

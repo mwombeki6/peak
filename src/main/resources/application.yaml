@@ -22,6 +22,8 @@ peak:
     http:
       jwt:
         enabled: ${PEAK_SECURITY_JWT_ENABLED:false}
+        issuer-uri: ${PEAK_SECURITY_JWT_ISSUER_URI:}
+        audience: ${PEAK_SECURITY_JWT_AUDIENCE:}
     request-context:
       allow-header-identity: ${PEAK_ALLOW_HEADER_IDENTITY:false}
 

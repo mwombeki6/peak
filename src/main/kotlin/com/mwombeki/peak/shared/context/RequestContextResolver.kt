@@ -131,7 +131,7 @@ class RequestContextResolver(
                 correlationId = correlationId,
             )
 
-            null -> throw RequestContextException("OIDC identity is not linked")
+            null -> RequestIdentity.Public(correlationId = correlationId)
         }
     }
 
