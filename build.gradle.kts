@@ -57,6 +57,7 @@ dependencies {
 
     // Kotlin and JSON
     implementation("org.jetbrains.kotlin:kotlin-reflect")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
     implementation("tools.jackson.module:jackson-module-kotlin")
 
     // Modular monolith
