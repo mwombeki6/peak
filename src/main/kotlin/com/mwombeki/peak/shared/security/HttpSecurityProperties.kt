@@ -15,6 +15,8 @@ data class HttpSecurityProperties(
 ) {
     data class Jwt(
         val enabled: Boolean = false,
+        val issuerUri: String? = null,
+        val audience: String? = null,
     )
 
     data class Cors(

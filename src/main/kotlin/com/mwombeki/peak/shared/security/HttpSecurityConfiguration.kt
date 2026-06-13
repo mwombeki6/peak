@@ -2,10 +2,15 @@ package com.mwombeki.peak.shared.security
 
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.http.SessionCreationPolicy
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator
+import org.springframework.security.oauth2.jwt.JwtDecoder
+import org.springframework.security.oauth2.jwt.JwtValidators
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter
 import org.springframework.web.cors.CorsConfiguration
@@ -108,5 +113,30 @@ class HttpSecurityConfiguration(
         val source = UrlBasedCorsConfigurationSource()
         source.registerCorsConfiguration("/**", configuration)
         return source
+    }
+
+    @Bean
+    @ConditionalOnProperty(
+        prefix = "peak.security.http.jwt",
+        name = ["enabled"],
+        havingValue = "true",
+    )
+    fun jwtDecoder(): JwtDecoder {
+        val issuerUri = properties.jwt.issuerUri?.trim()?.takeIf { it.isNotEmpty() }
+            ?: error("peak.security.http.jwt.issuer-uri is required when JWT is enabled")
+        val audience = properties.jwt.audience?.trim()?.takeIf { it.isNotEmpty() }
+            ?: error("peak.security.http.jwt.audience is required when JWT is enabled")
+
+        return NimbusJwtDecoder
+            .withIssuerLocation(issuerUri)
+            .build()
+            .also { decoder ->
+                decoder.setJwtValidator(
+                    DelegatingOAuth2TokenValidator(
+                        JwtValidators.createDefaultWithIssuer(issuerUri),
+                        JwtAudienceValidator(audience),
+                    ),
+                )
+            }
     }
 }

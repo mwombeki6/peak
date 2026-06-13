@@ -18,10 +18,28 @@ spring:
 peak:
   runtime:
     mode: ${PEAK_RUNTIME_MODE:api}
+  reliability:
+    outbox:
+      worker:
+        enabled: ${PEAK_OUTBOX_WORKER_ENABLED:false}
+        worker-id: ${PEAK_OUTBOX_WORKER_ID:}
+        batch-size: ${PEAK_OUTBOX_WORKER_BATCH_SIZE:50}
+        max-parallelism: ${PEAK_OUTBOX_WORKER_MAX_PARALLELISM:4}
+        poll-interval: ${PEAK_OUTBOX_WORKER_POLL_INTERVAL:2s}
+        idle-poll-interval: ${PEAK_OUTBOX_WORKER_IDLE_POLL_INTERVAL:10s}
+        delivery-timeout: ${PEAK_OUTBOX_WORKER_DELIVERY_TIMEOUT:30s}
+        retry-initial-delay: ${PEAK_OUTBOX_WORKER_RETRY_INITIAL_DELAY:30s}
+        retry-max-delay: ${PEAK_OUTBOX_WORKER_RETRY_MAX_DELAY:15m}
+        reclaim-stale-locks: ${PEAK_OUTBOX_WORKER_RECLAIM_STALE_LOCKS:true}
+        stale-lock-timeout: ${PEAK_OUTBOX_WORKER_STALE_LOCK_TIMEOUT:15m}
+        stale-reclaim-interval: ${PEAK_OUTBOX_WORKER_STALE_RECLAIM_INTERVAL:1m}
+        stale-reclaim-limit: ${PEAK_OUTBOX_WORKER_STALE_RECLAIM_LIMIT:500}
   security:
     http:
       jwt:
         enabled: ${PEAK_SECURITY_JWT_ENABLED:false}
+        issuer-uri: ${PEAK_SECURITY_JWT_ISSUER_URI:}
+        audience: ${PEAK_SECURITY_JWT_AUDIENCE:}
     request-context:
       allow-header-identity: ${PEAK_ALLOW_HEADER_IDENTITY:false}
 

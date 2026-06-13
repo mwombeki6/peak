@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component
 @Component
 class RequestContextResolver(
     private val properties: RequestContextProperties,
+    private val externalIdentityResolver: ExternalIdentityResolver,
 ) {
     fun resolve(
         request: HttpServletRequest,
@@ -37,9 +38,8 @@ class RequestContextResolver(
         val hasIdentityHeaders = PeakRequestHeaders.IDENTITY_HEADERS.any { header ->
             !request.getHeader(header).isNullOrBlank()
         }
-        val tokenIdentity = authentication.toRequestIdentity(correlationId)
 
-        if (tokenIdentity != null && hasIdentityHeaders) {
+        if (authentication.hasAuthenticatedPrincipal() && hasIdentityHeaders) {
             throw RequestContextException(
                 "Identity headers cannot be combined with authenticated identity",
             )
@@ -51,15 +51,19 @@ class RequestContextResolver(
             )
         }
 
-        return tokenIdentity
+        return authentication.toRequestIdentity(correlationId)
             ?: headerIdentity(request, correlationId)
             ?: RequestIdentity.Public(correlationId = correlationId)
+    }
+
+    private fun Authentication?.hasAuthenticatedPrincipal(): Boolean {
+        return this != null && this !is AnonymousAuthenticationToken && isAuthenticated
     }
 
     private fun Authentication?.toRequestIdentity(
         correlationId: String,
     ): RequestIdentity? {
-        if (this == null || this is AnonymousAuthenticationToken || !isAuthenticated) {
+        if (!hasAuthenticatedPrincipal()) {
             return null
         }
 
@@ -74,7 +78,7 @@ class RequestContextResolver(
 
     private fun Jwt.toRequestIdentity(correlationId: String): RequestIdentity {
         val mode = stringClaim("peak_identity_mode")
-            ?: throw RequestContextException("JWT claim peak_identity_mode is required")
+            ?: return toExternalRequestIdentity(correlationId)
 
         val raw = when (mode) {
             "tenant" -> RawRequestIdentity(
@@ -99,6 +103,36 @@ class RequestContextResolver(
         }
 
         return raw.validateContext()
+    }
+
+    private fun Jwt.toExternalRequestIdentity(correlationId: String): RequestIdentity {
+        val issuer = stringClaim("iss")
+            ?: throw RequestContextException("JWT claim iss is required")
+        val subject = stringClaim("sub")
+            ?: throw RequestContextException("JWT claim sub is required")
+
+        return when (
+            val resolved = externalIdentityResolver.resolve(
+                ExternalIdentityPrincipal(
+                    issuer = issuer,
+                    subject = subject,
+                    email = stringClaim("email"),
+                ),
+            )
+        ) {
+            is ResolvedExternalIdentity.Tenant -> RequestIdentity.Tenant(
+                tenantId = resolved.tenantId,
+                tenantUserId = resolved.tenantUserId,
+                correlationId = correlationId,
+            )
+
+            is ResolvedExternalIdentity.Platform -> RequestIdentity.Platform(
+                platformUserId = resolved.platformUserId,
+                correlationId = correlationId,
+            )
+
+            null -> RequestIdentity.Public(correlationId = correlationId)
+        }
     }
 
     private fun headerIdentity(
