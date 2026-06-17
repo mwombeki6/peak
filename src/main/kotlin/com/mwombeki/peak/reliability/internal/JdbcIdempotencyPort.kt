@@ -4,7 +4,6 @@ import com.mwombeki.peak.reliability.api.IdempotencyCommand
 import com.mwombeki.peak.reliability.api.IdempotencyPort
 import com.mwombeki.peak.reliability.api.IdempotencyReservation
 import com.mwombeki.peak.reliability.api.IdempotencyStatus
-import com.mwombeki.peak.shared.context.RequestContext
 import com.mwombeki.peak.shared.context.RequestContextException
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
