@@ -10,4 +10,5 @@ data class PeakRuntimeProperties(
 enum class PeakRuntimeMode {
     API,
     WORKER,
+    MIGRATION,
 }

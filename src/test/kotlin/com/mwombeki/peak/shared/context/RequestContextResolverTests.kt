@@ -122,6 +122,7 @@ class RequestContextResolverTests {
                 "iss" to "https://issuer.example.com/realms/peak",
                 "sub" to "tenant-subject",
                 "email" to "tenant@example.com",
+                "email_verified" to "true",
             ),
         )
 
@@ -168,10 +169,51 @@ class RequestContextResolverTests {
             jwtAuthentication(
                 "iss" to "https://issuer.example.com/realms/peak",
                 "sub" to "missing-subject",
+                "email" to "missing@example.com",
+                "email_verified" to "true",
             ),
         )
 
         assertEquals(RequestIdentity.Public(correlationId = "corr-unlinked-oidc"), context.identity)
+    }
+
+    @Test
+    fun rejectsExternalOidcJwtWithUnverifiedEmail() {
+        val request = MockHttpServletRequest("GET", "/api/v1/tenants")
+
+        val error = assertFailsWith<RequestContextException> {
+            resolver().resolve(
+                request,
+                jwtAuthentication(
+                    "iss" to "https://issuer.example.com/realms/peak",
+                    "sub" to "unverified-subject",
+                    "email" to "unverified@example.com",
+                    "email_verified" to "false",
+                ),
+            )
+        }
+
+        assertEquals("JWT email must be verified", error.message)
+    }
+
+    @Test
+    fun resolvesPublicPropertyIdentityFromRoute() {
+        val propertyId = UUID.randomUUID()
+        val request = MockHttpServletRequest(
+            "POST",
+            "/api/v1/public/properties/$propertyId/booking-engine/sessions",
+        )
+        request.addHeader(PeakRequestHeaders.CORRELATION_ID, "corr-public-property")
+
+        val context = resolver().resolve(request, null)
+
+        assertEquals(
+            RequestIdentity.Public(
+                propertyId = propertyId,
+                correlationId = "corr-public-property",
+            ),
+            context.identity,
+        )
     }
 
     @Test

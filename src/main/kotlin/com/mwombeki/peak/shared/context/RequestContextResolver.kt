@@ -55,6 +55,7 @@ class RequestContextResolver(
 
         return authentication.toRequestIdentity(correlationId)
             ?: headerIdentity(request, correlationId)
+            ?: publicRouteIdentity(request, correlationId)
             ?: RequestIdentity.Public(correlationId = correlationId)
     }
 
@@ -112,13 +113,18 @@ class RequestContextResolver(
             ?: throw RequestContextException("JWT claim iss is required")
         val subject = stringClaim("sub")
             ?: throw RequestContextException("JWT claim sub is required")
+        val email = stringClaim("email")
+
+        if (email != null && !booleanClaim("email_verified")) {
+            throw RequestContextException("JWT email must be verified")
+        }
 
         return when (
             val resolved = externalIdentityResolver.resolve(
                 ExternalIdentityPrincipal(
                     issuer = issuer,
                     subject = subject,
-                    email = stringClaim("email"),
+                    email = email,
                 ),
             )
         ) {
@@ -165,6 +171,23 @@ class RequestContextResolver(
         return if (hasIdentity) raw.validateContext() else null
     }
 
+    private fun publicRouteIdentity(
+        request: HttpServletRequest,
+        correlationId: String,
+    ): RequestIdentity? {
+        val propertyId = PUBLIC_PROPERTY_ROUTE_PATTERN
+            .matchEntire(request.requestURI)
+            ?.groupValues
+            ?.get(1)
+            ?.toUuid("public property route")
+            ?: return null
+
+        return RequestIdentity.Public(
+            propertyId = propertyId,
+            correlationId = correlationId,
+        )
+    }
+
     private fun resolveCorrelationId(request: HttpServletRequest): String {
         val headerValue = request.getHeader(PeakRequestHeaders.CORRELATION_ID)
             ?.trim()
@@ -198,6 +221,14 @@ class RequestContextResolver(
         return claims[name]?.toString()?.trim()?.takeIf { it.isNotEmpty() }
     }
 
+    private fun Jwt.booleanClaim(name: String): Boolean {
+        return when (val value = claims[name]) {
+            true -> true
+            is String -> value.equals("true", ignoreCase = true)
+            else -> false
+        }
+    }
+
     private fun Jwt.uuidClaim(name: String): UUID? {
         return stringClaim(name)?.toUuid(name)
     }
@@ -224,5 +255,10 @@ class RequestContextResolver(
 
     private companion object {
         val SAFE_CONTEXT_TOKEN = Regex("[A-Za-z0-9._:-]{1,128}")
+        val PUBLIC_PROPERTY_ROUTE_PATTERN = Regex(
+            "^/api(?:/v\\d+)?/public/properties/" +
+                    "([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-" +
+                    "[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?:/.*)?$",
+        )
     }
 }

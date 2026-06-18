@@ -33,11 +33,11 @@ data class HttpSecurityProperties(
             "Authorization",
             "Content-Type",
             "Idempotency-Key",
-            "X-Correlation-ID",
-            "X-Public-Tenant-ID",
-            "X-Public-Property-ID",
+            "X-Correlation-Id",
+            "X-Peak-Public-Tenant-Id",
+            "X-Peak-Public-Property-Id",
         ),
-        val exposedHeaders: List<String> = listOf("X-Correlation-ID"),
+        val exposedHeaders: List<String> = listOf("X-Correlation-Id"),
         val maxAgeSeconds: Long = 3600,
     )
 }

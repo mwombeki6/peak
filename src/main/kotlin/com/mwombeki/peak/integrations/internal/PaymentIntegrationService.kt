@@ -21,15 +21,23 @@ class PaymentIntegrationService(
     private val jdbcTemplate: JdbcTemplate,
     private val idempotencyPort: IdempotencyPort,
     private val requestContextHolder: RequestContextHolder,
+    private val publicRequestScopeResolver: PublicRequestScopeResolver,
     private val objectMapper: ObjectMapper
 ) : PaymentPort {
 
     private val logger = LoggerFactory.getLogger(javaClass)
 
     @Transactional
-    override fun initiatePayment(request: InitiatePaymentRequest): PaymentStatusResponse {
+    override fun initiatePayment(
+        propertyId: UUID,
+        request: InitiatePaymentRequest,
+    ): PaymentStatusResponse {
         val context = requestContextHolder.current()
-        val scope = context.requirePublicScope()
+        val scope = publicRequestScopeResolver.resolve(
+            context = context,
+            propertyId = propertyId,
+            moduleId = BOOKING_ENGINE_MODULE,
+        )
         val idempotencyKey = context.idempotencyKey
             ?: throw IllegalArgumentException("Idempotency-Key header is required")
 
@@ -188,5 +196,9 @@ class PaymentIntegrationService(
             com.mwombeki.peak.integrations.api.PaymentProvider.CRDB,
             com.mwombeki.peak.integrations.api.PaymentProvider.NBC -> "manual"
         }
+    }
+
+    private companion object {
+        const val BOOKING_ENGINE_MODULE = "booking_engine"
     }
 }
