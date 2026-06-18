@@ -45,6 +45,21 @@ peak:
         audience: ${PEAK_SECURITY_JWT_AUDIENCE:}
     request-context:
       allow-header-identity: ${PEAK_ALLOW_HEADER_IDENTITY:false}
+  integrations:
+    payment:
+      providers:
+        vodacom-mpesa:
+          base-url: ${PEAK_PAYMENT_VODACOM_MPESA_URL:https://api.vodacom.co.tz/v1/payment}
+        tigo-pesa:
+          base-url: ${PEAK_PAYMENT_TIGO_PESA_URL:https://api.tigo.co.tz/v1/payment}
+        airtel-money:
+          base-url: ${PEAK_PAYMENT_AIRTEL_MONEY_URL:https://api.airtel.co.tz/v1/payment}
+        halopesa:
+          base-url: ${PEAK_PAYMENT_HALOPESA_URL:https://api.halopesa.co.tz/v1/payment}
+        nmb:
+          base-url: ${PEAK_PAYMENT_NMB_URL:https://api.nmb.co.tz/v1/payment}
+        crdb:
+          base-url: ${PEAK_PAYMENT_CRDB_URL:https://api.crdb.co.tz/v1/payment}
 
 management:
   otlp:
