@@ -66,6 +66,7 @@ peak:
 *   **Commercial Agreement:** You **MUST** have a merchant account with the providers. The code is ready, but the providers won't allow us to talk to them without an account.
 *   **Security:** Never share your `api-key` or `api-secret` on GitHub or with anyone else.
 *   **Database:** All payments are tracked in the `payment_transactions` table. If a guest says "I paid but my booking is still pending", you can check this table using the `reference_id`.
+*   **Idempotency (Double-Payment Protection):** To prevent charging a guest twice if they click "Pay" too many times, send the `Idempotency-Key` header with your request. The system will recognize the duplicate and return the previous response without initiating a new payment.
 
 ---
 
