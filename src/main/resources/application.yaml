@@ -43,8 +43,23 @@ peak:
         enabled: ${PEAK_SECURITY_JWT_ENABLED:false}
         issuer-uri: ${PEAK_SECURITY_JWT_ISSUER_URI:}
         audience: ${PEAK_SECURITY_JWT_AUDIENCE:}
+      cors:
+        allowed-origins: ${PEAK_CORS_ALLOWED_ORIGINS:}
+        allowed-headers:
+          - Authorization
+          - Content-Type
+          - Idempotency-Key
+          - X-Correlation-Id
+          - X-Peak-Public-Tenant-Id
+          - X-Peak-Public-Property-Id
+        exposed-headers:
+          - X-Correlation-Id
     request-context:
       allow-header-identity: ${PEAK_ALLOW_HEADER_IDENTITY:false}
+    route-guard:
+      enabled: ${PEAK_ROUTE_GUARD_ENABLED:true}
+      deny-unregistered-api-routes: ${PEAK_ROUTE_GUARD_DENY_UNREGISTERED:true}
+      rule-cache-ttl: ${PEAK_ROUTE_GUARD_RULE_CACHE_TTL:30s}
   integrations:
     payment:
       providers:
@@ -78,3 +93,9 @@ management:
     web:
       exposure:
         include: health,info,prometheus
+
+springdoc:
+  api-docs:
+    enabled: ${PEAK_SPRINGDOC_API_DOCS_ENABLED:true}
+  swagger-ui:
+    enabled: ${PEAK_SWAGGER_UI_ENABLED:true}

@@ -34,5 +34,8 @@ data class PaymentStatusResponse(
 )
 
 interface PaymentPort {
-    fun initiatePayment(request: InitiatePaymentRequest): PaymentStatusResponse
+    fun initiatePayment(
+        propertyId: UUID,
+        request: InitiatePaymentRequest,
+    ): PaymentStatusResponse
 }

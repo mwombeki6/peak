@@ -18,6 +18,17 @@ There must be only one request identity path. Do not add tenant-specific thread 
 
 `shared.security` owns HTTP security headers, CORS, JWT validation wiring, and method-security enablement. Route authorization lives in `usermanagement` and uses the request context plus `module_access_matrix`.
 
+### Runtime Configuration
+
+`shared.config` owns typed runtime properties and production readiness validation. A production runtime must fail fast if:
+
+- JWT validation is disabled.
+- JWT issuer or audience is missing.
+- CORS origins are not explicit.
+- trusted header identity is enabled.
+- SpringDoc API docs or Swagger UI are enabled.
+- the API or worker uses the migration database login.
+
 ### Utilities And Errors
 
 `shared.util`, `shared.dto`, and `shared.exception` contain small cross-module utilities and error response helpers. Avoid putting module behavior here.
@@ -38,3 +49,4 @@ Audit primitives are not in `shared`. Use the published ports from `audit::api`.
 2. Prefer typed request identity over raw JWT claim access.
 3. Bind database session settings only through `DatabaseSessionContext`.
 4. Do not add idempotency, outbox, audit, or tenant workflow implementations to `shared`.
+5. Keep production validation strict; unsafe local defaults belong only in `dev` and `test`.

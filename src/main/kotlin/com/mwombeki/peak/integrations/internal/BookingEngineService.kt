@@ -15,15 +15,20 @@ import java.util.UUID
 class BookingEngineService(
     private val jdbcTemplate: JdbcTemplate,
     private val requestContextHolder: RequestContextHolder,
+    private val publicRequestScopeResolver: PublicRequestScopeResolver,
 ) : PublicBookingPort {
 
     @Transactional
-    override fun createPublicSession(request: PublicBookingSessionRequest): PublicBookingSessionResponse {
+    override fun createPublicSession(
+        propertyId: UUID,
+        request: PublicBookingSessionRequest,
+    ): PublicBookingSessionResponse {
         val context = requestContextHolder.current()
-        val scope = context.requirePublicScope()
-        require(request.propertyId == scope.propertyId) {
-            "Booking property does not match public request context"
-        }
+        val scope = publicRequestScopeResolver.resolve(
+            context = context,
+            propertyId = propertyId,
+            moduleId = BOOKING_ENGINE_MODULE,
+        )
 
         val nights = ChronoUnit.DAYS.between(request.checkInDate, request.checkOutDate)
         require(nights > 0) {
@@ -92,5 +97,9 @@ class BookingEngineService(
             totalAmount = 0.0,
             expiresAt = expirationTime
         )
+    }
+
+    private companion object {
+        const val BOOKING_ENGINE_MODULE = "booking_engine"
     }
 }

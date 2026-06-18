@@ -295,7 +295,9 @@ class TenantUserInvitationControllerIntegrationTests {
                     """.trimIndent(),
                 ),
         )
-            .andExpect(status().isUnauthorized)
+            .andExpect(status().isBadRequest)
+            .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+            .andExpect(content().string(containsString("JWT email must be verified")))
     }
 
     private fun tenantFixture(): WebTenantFixture {

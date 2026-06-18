@@ -144,6 +144,36 @@ class JdbcAuthorizationPortIntegrationTests {
     }
 
     @Test
+    fun resolvesTenantForPublicPropertyAuthorization() {
+        val fixture = publicModuleFixture()
+
+        val decision = requireNotNull(
+            transactionTemplate.execute {
+                insertPublicModuleFixture(fixture)
+                requestContextHolder.set(
+                    requestContext(
+                        RequestIdentity.Public(
+                            propertyId = fixture.propertyId,
+                            correlationId = "corr-auth-public-route",
+                        ),
+                    ),
+                )
+
+                authorizationPort.authorize(
+                    RouteAuthorizationRequest(
+                        moduleId = "booking_engine",
+                        guardMode = GuardMode.MODULE_ONLY,
+                        routeScope = RouteScope.PUBLIC_PROPERTY,
+                        propertyId = fixture.propertyId,
+                    ),
+                )
+            },
+        )
+
+        assertTrue(decision.allowed)
+    }
+
+    @Test
     fun allowsPlatformUserWithPlatformPermission() {
         val fixture = platformFixture()
 

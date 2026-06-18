@@ -16,12 +16,15 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.SmartLifecycle
 import org.springframework.stereotype.Component
 
 @Component
 class OutboxWorkerLifecycle(
     private val properties: OutboxWorkerProperties,
+    @Value("\${peak.runtime.mode:api}")
+    private val runtimeMode: String,
     private val dispatcher: OutboxEventDispatcher,
     private val processor: OutboxWorkerProcessor,
 ) : SmartLifecycle {
@@ -132,7 +135,7 @@ class OutboxWorkerLifecycle(
     }
 
     private fun shouldRun(): Boolean {
-        return properties.enabled
+        return properties.enabled && runtimeMode.equals(WORKER_RUNTIME_MODE, ignoreCase = true)
     }
 
     private fun destinationsToPoll(): List<OutboxDestination> {
@@ -142,6 +145,7 @@ class OutboxWorkerLifecycle(
     }
 
     private companion object {
+        const val WORKER_RUNTIME_MODE = "worker"
         private val logger = LoggerFactory.getLogger(OutboxWorkerLifecycle::class.java)
     }
 }

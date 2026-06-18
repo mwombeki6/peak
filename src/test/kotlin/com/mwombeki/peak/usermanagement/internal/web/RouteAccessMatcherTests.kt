@@ -120,4 +120,30 @@ class RouteAccessMatcherTests {
 
         assertNull(request)
     }
+
+    @Test
+    fun matchesPublicPropertyRouteWithoutTrustedHeaders() {
+        val propertyId = UUID.fromString("33333333-3333-3333-3333-333333333333")
+
+        val request = matcher.match(
+            httpMethod = "POST",
+            requestPath = "/api/v1/public/properties/$propertyId/booking-engine/sessions",
+            identity = RequestIdentity.Public(propertyId = propertyId),
+            rules = listOf(
+                RouteAccessRule(
+                    moduleId = "booking_engine",
+                    httpMethod = "POST",
+                    apiPattern = "/api/public/properties/:propertyId/booking-engine/sessions*",
+                    permissionCode = null,
+                    routeScope = RouteScope.PUBLIC_PROPERTY,
+                    guardMode = GuardMode.MODULE_ONLY,
+                ),
+            ),
+        )
+
+        requireNotNull(request)
+        assertEquals("booking_engine", request.moduleId)
+        assertEquals(propertyId, request.propertyId)
+        assertEquals(null, request.tenantId)
+    }
 }

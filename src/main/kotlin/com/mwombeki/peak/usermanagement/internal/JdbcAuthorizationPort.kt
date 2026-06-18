@@ -8,6 +8,7 @@ import com.mwombeki.peak.usermanagement.api.AuthorizationPort
 import com.mwombeki.peak.usermanagement.api.GuardMode
 import com.mwombeki.peak.usermanagement.api.RouteAuthorizationRequest
 import com.mwombeki.peak.usermanagement.api.RouteScope
+import java.util.UUID
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
 import org.springframework.transaction.support.TransactionSynchronizationManager
@@ -87,10 +88,14 @@ class JdbcAuthorizationPort(
         if (request.routeScope != RouteScope.PUBLIC_PROPERTY) {
             return AuthorizationDecision.denied("Invalid route scope for public module guard")
         }
-        if (request.tenantId == null || request.propertyId == null) {
-            return AuthorizationDecision.denied("Public module guard requires tenant and property")
+        if (request.propertyId == null) {
+            return AuthorizationDecision.denied("Public module guard requires property")
         }
-        if (identity.tenantId != null && identity.tenantId != request.tenantId) {
+        val tenantId = request.tenantId
+            ?: resolvePublicTenantId(request.propertyId, request.moduleId)
+            ?: return AuthorizationDecision.denied("Public module is not accessible")
+
+        if (identity.tenantId != null && identity.tenantId != tenantId) {
             return AuthorizationDecision.denied("Requested tenant does not match public identity")
         }
         if (identity.propertyId != null && identity.propertyId != request.propertyId) {
@@ -100,7 +105,7 @@ class JdbcAuthorizationPort(
         val allowed = jdbcTemplate.queryForObject(
             "SELECT can_access_public_module(?, ?, ?)",
             Boolean::class.java,
-            request.tenantId,
+            tenantId,
             request.propertyId,
             request.moduleId,
         ) == true
@@ -110,6 +115,21 @@ class JdbcAuthorizationPort(
         } else {
             AuthorizationDecision.denied("Public module is not accessible")
         }
+    }
+
+    private fun resolvePublicTenantId(
+        propertyId: UUID,
+        moduleId: String,
+    ): UUID? {
+        return jdbcTemplate.query(
+            """
+            SELECT tenant_id
+            FROM resolve_public_property_scope(?, ?)
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("tenant_id", UUID::class.java) },
+            propertyId,
+            moduleId,
+        ).singleOrNull()
     }
 
     private fun authorizePlatformPermission(

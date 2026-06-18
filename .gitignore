@@ -3,6 +3,8 @@ docs/
 .gradle
 build/
 test_output*.txt
+ops/production/.env
+backups/
 !gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/build/
 !**/src/test/**/build/

@@ -5,7 +5,6 @@ import java.time.LocalDate
 import java.util.UUID
 
 data class PublicBookingSessionRequest(
-    val propertyId: UUID,
     val roomTypeId: UUID,
     val checkInDate: LocalDate,
     val checkOutDate: LocalDate,
