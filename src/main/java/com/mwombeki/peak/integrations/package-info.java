@@ -1,7 +1,7 @@
 @ApplicationModule(
         id = "integrations",
         displayName = "Integrations",
-        allowedDependencies = {"shared", "audit", "reliability"}
+        allowedDependencies = {"shared::context", "reliability::api"}
 )
 package com.mwombeki.peak.integrations;
 

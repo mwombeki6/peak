@@ -19,13 +19,22 @@ class TestcontainersConfiguration {
         havingValue = "true",
     )
     fun grafanaLgtmContainer(): LgtmStackContainer {
-        return LgtmStackContainer(DockerImageName.parse("grafana/otel-lgtm:latest"))
+        return sharedGrafanaLgtmContainer
     }
 
     @Bean
     @ServiceConnection
     fun postgresContainer(): PostgreSQLContainer {
-        return PostgreSQLContainer(DockerImageName.parse("postgres:18"))
+        return sharedPostgresContainer
     }
 
+    private companion object {
+        val sharedGrafanaLgtmContainer: LgtmStackContainer by lazy {
+            LgtmStackContainer(DockerImageName.parse("grafana/otel-lgtm:latest"))
+        }
+
+        val sharedPostgresContainer: PostgreSQLContainer by lazy {
+            PostgreSQLContainer(DockerImageName.parse("postgres:18"))
+        }
+    }
 }
