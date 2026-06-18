@@ -1,95 +1,160 @@
 package com.mwombeki.peak.tenantmanagement.internal.application
 
-import com.mwombeki.peak.tenantmanagement.api.*
+import com.mwombeki.peak.shared.context.DatabaseSessionContext
+import com.mwombeki.peak.shared.context.RequestContextHolder
+import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.tenantmanagement.api.Tenant
+import com.mwombeki.peak.tenantmanagement.api.TenantOnboardingPort
+import com.mwombeki.peak.tenantmanagement.api.TenantProfile
+import com.mwombeki.peak.tenantmanagement.api.TenantRegisterRequest
+import com.mwombeki.peak.tenantmanagement.api.TenantResponse
+import com.mwombeki.peak.tenantmanagement.api.TenantStatus
 import com.mwombeki.peak.tenantmanagement.internal.TenantProfileRepository
 import com.mwombeki.peak.tenantmanagement.internal.TenantRepository
-import org.springframework.stereotype.Service
-import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 import java.util.UUID
+import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 
 @Service
 class TenantOnboardingService(
     private val tenantRepository: TenantRepository,
-    private val tenantProfileRepository: TenantProfileRepository
+    private val tenantProfileRepository: TenantProfileRepository,
+    private val requestContextHolder: RequestContextHolder,
+    private val databaseSessionContext: DatabaseSessionContext,
 ) : TenantOnboardingPort {
 
     @Transactional
     override fun registerNewTenant(request: TenantRegisterRequest): TenantResponse {
-        // Guard Clause: Block duplicate sub-domains/slugs before touching the database
-        if (tenantRepository.findBySlug(request.uniqueSlug) != null) {
-            throw IllegalArgumentException("A hotel tenant with slug '${request.uniqueSlug}' already exists.")
+        val operatorId = bindPlatformContext()
+        val slug = request.slug.trim().lowercase()
+
+        require(!tenantRepository.existsBySlug(slug)) {
+            "Tenant slug '$slug' is already in use"
+        }
+        require(tenantRepository.planExists(request.planId)) {
+            "Active subscription plan was not found"
         }
 
-        val targetTenantId = UUID.randomUUID()
-
-        // 1. Build the core tenant data
+        val now = Instant.now()
+        val tenantId = UUID.randomUUID()
         val tenant = Tenant(
-            id = targetTenantId,
-            name = request.name,
-            uniqueSlug = request.uniqueSlug,
-            status = TenantStatus.PENDING_VERIFICATION,
-            createdAt = Instant.now(),
-            updatedAt = Instant.now()
+            id = tenantId,
+            name = request.name.trim(),
+            slug = slug,
+            status = TenantStatus.TRIAL,
+            schemaName = schemaNameFor(tenantId),
+            planId = request.planId,
+            countryCode = request.countryCode,
+            currencyCode = request.currencyCode,
+            createdAt = now,
+            updatedAt = now,
         )
-
-        // 2. Build the detailed profile metadata
         val profile = TenantProfile(
-            id = UUID.randomUUID(),
-            tenantId = targetTenantId,
-            businessRegistrationNumber = request.businessRegistrationNumber,
-            primaryEmail = request.primaryEmail,
-            primaryPhone = request.primaryPhone,
-            physicalAddress = request.physicalAddress,
-            country = request.country,
-            city = request.city,
-            updatedAt = Instant.now()
+            tenantId = tenantId,
+            legalName = request.legalName.trim(),
+            tradingName = request.tradingName?.trim()?.takeIf { it.isNotEmpty() },
+            entityType = request.entityType.trim(),
+            businessRegistrationNumber = request.businessRegistrationNumber
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() },
+            businessEmail = request.businessEmail.trim().lowercase(),
+            businessPhone = request.businessPhone.trim(),
+            registeredAddress = request.registeredAddress,
+            registrationCountryCode = request.countryCode,
+            updatedAt = now,
         )
 
-        // 3. Save everything transactionally via JdbcTemplate methods
         tenantRepository.save(tenant)
         tenantProfileRepository.save(profile)
-
-        return TenantResponse(
-            id = tenant.id,
-            name = tenant.name,
-            uniqueSlug = tenant.uniqueSlug,
-            status = tenant.status,
-            primaryEmail = profile.primaryEmail
+        tenantRepository.recordLifecycleEvent(
+            tenantId = tenantId,
+            eventType = "created",
+            reason = "Tenant registered by platform operator",
+            platformUserId = operatorId,
+            metadata = mapOf(
+                "slug" to slug,
+                "planId" to request.planId,
+            ),
         )
+
+        return response(tenant, profile)
     }
 
     @Transactional(readOnly = true)
     override fun getTenantById(id: UUID): TenantResponse? {
+        bindPlatformContext()
         val tenant = tenantRepository.findById(id) ?: return null
         val profile = tenantProfileRepository.findByTenantId(id)
-            ?: throw IllegalStateException("Database integrity error: Profile missing for tenant ID: $id")
+            ?: throw IllegalStateException("Tenant profile is missing for tenant $id")
 
-        return TenantResponse(
-            id = tenant.id,
-            name = tenant.name,
-            uniqueSlug = tenant.uniqueSlug,
-            status = tenant.status,
-            primaryEmail = profile.primaryEmail
-        )
+        return response(tenant, profile)
     }
 
     @Transactional
     override fun updateTenantStatus(id: UUID, status: TenantStatus): TenantResponse {
-        tenantRepository.findById(id) ?: throw IllegalArgumentException("Tenant not found with ID: $id")
+        val operatorId = bindPlatformContext()
+        val before = tenantRepository.findById(id)
+            ?: throw IllegalArgumentException("Tenant was not found")
 
-        // Execute our raw SQL status update command
         tenantRepository.updateStatus(id, status)
+        tenantRepository.recordLifecycleEvent(
+            tenantId = id,
+            eventType = status.lifecycleEventType(),
+            reason = "Tenant status changed from ${before.status.databaseValue} to ${status.databaseValue}",
+            platformUserId = operatorId,
+            metadata = mapOf(
+                "previousStatus" to before.status.databaseValue,
+                "newStatus" to status.databaseValue,
+            ),
+        )
 
-        val tenant = tenantRepository.findById(id)!!
-        val profile = tenantProfileRepository.findByTenantId(id)!!
+        val tenant = tenantRepository.findById(id)
+            ?: throw IllegalStateException("Tenant disappeared after status update")
+        val profile = tenantProfileRepository.findByTenantId(id)
+            ?: throw IllegalStateException("Tenant profile is missing for tenant $id")
 
+        return response(tenant, profile)
+    }
+
+    private fun bindPlatformContext(): UUID {
+        val identity = requestContextHolder.current().identity
+        val platformUserId = when (identity) {
+            is RequestIdentity.Platform -> identity.platformUserId
+            is RequestIdentity.Support -> identity.platformUserId
+            else -> throw IllegalStateException("Platform identity is required")
+        }
+        databaseSessionContext.bind(identity)
+        return platformUserId
+    }
+
+    private fun response(
+        tenant: Tenant,
+        profile: TenantProfile,
+    ): TenantResponse {
         return TenantResponse(
             id = tenant.id,
             name = tenant.name,
-            uniqueSlug = tenant.uniqueSlug,
+            slug = tenant.slug,
             status = tenant.status,
-            primaryEmail = profile.primaryEmail
+            planId = tenant.planId,
+            businessEmail = profile.businessEmail,
         )
+    }
+
+    private fun schemaNameFor(tenantId: UUID): String {
+        return "tenant_${tenantId.toString().replace("-", "")}"
+    }
+
+    private fun TenantStatus.lifecycleEventType(): String {
+        return when (this) {
+            TenantStatus.TRIAL -> "created"
+            TenantStatus.ACTIVE -> "activated"
+            TenantStatus.SUSPENDED -> "suspended"
+            TenantStatus.FROZEN -> "frozen"
+            TenantStatus.ARCHIVED -> "archived"
+            TenantStatus.TERMINATED -> "terminated"
+            TenantStatus.CANCELLED -> "cancelled"
+        }
     }
 }

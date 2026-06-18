@@ -2,7 +2,9 @@ package com.mwombeki.peak.reliability.api
 
 import java.time.Instant
 import java.util.UUID
+import org.springframework.modulith.NamedInterface
 
+@NamedInterface("api")
 data class OutboxEventCommand(
     val aggregateType: String,
     val eventType: String,
@@ -32,6 +34,7 @@ data class OutboxEventCommand(
     }
 }
 
+@NamedInterface("api")
 data class ClaimedOutboxEvent(
     val id: UUID,
     val tenantId: UUID?,
@@ -58,6 +61,7 @@ data class ClaimedOutboxEvent(
     val updatedAt: Instant,
 )
 
+@NamedInterface("api")
 enum class OutboxDestination(val databaseValue: String) {
     FISCAL("fiscal"),
     PAYMENT("payment"),
@@ -72,6 +76,7 @@ enum class OutboxDestination(val databaseValue: String) {
     PLATFORM("platform"),
 }
 
+@NamedInterface("api")
 enum class OutboxStatus(val databaseValue: String) {
     PENDING("pending"),
     LOCKED("locked"),

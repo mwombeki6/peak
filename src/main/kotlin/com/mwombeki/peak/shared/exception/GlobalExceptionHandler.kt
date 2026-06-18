@@ -1,13 +1,14 @@
 package com.mwombeki.peak.shared.exception
 
-import com.mwombeki.peak.shared.idempotency.IdempotencyException
 import jakarta.servlet.http.HttpServletRequest
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
+import org.springframework.http.ProblemDetail
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.server.ResponseStatusException
 import java.util.UUID
 
 /**
@@ -43,28 +44,6 @@ class GlobalExceptionHandler {
     }
 
     /**
-     * Handles idempotency conflict attempts cleanly.
-     */
-    @ExceptionHandler(IdempotencyException::class)
-    fun handleIdempotencyException(
-        ex: IdempotencyException,
-        request: HttpServletRequest
-    ): ResponseEntity<ErrorResponse> {
-        val traceId = UUID.randomUUID().toString()
-        log.warn("Idempotency conflict detected [Trace: {}]: {}", traceId, ex.message)
-
-        val errorResponse = ErrorResponse(
-            status = HttpStatus.CONFLICT.value(),
-            error = HttpStatus.CONFLICT.reasonPhrase,
-            errorCode = "DUPLICATE_REQUEST_SUBMISSION",
-            message = ex.message ?: "A duplicate request with this idempotency key is already processing or completed.",
-            path = request.requestURI,
-            traceId = traceId
-        )
-        return ResponseEntity(errorResponse, HttpStatus.CONFLICT)
-    }
-
-    /**
      * Catches and formats standard JSR-383 / Spring @Valid annotation validation failures.
      */
     @ExceptionHandler(MethodArgumentNotValidException::class)
@@ -87,6 +66,20 @@ class GlobalExceptionHandler {
             traceId = traceId
         )
         return ResponseEntity(errorResponse, HttpStatus.UNPROCESSABLE_ENTITY)
+    }
+
+    @ExceptionHandler(ResponseStatusException::class)
+    fun handleResponseStatusException(
+        ex: ResponseStatusException,
+    ): ResponseEntity<ProblemDetail> {
+        val problem = ProblemDetail.forStatusAndDetail(
+            ex.statusCode,
+            ex.reason ?: "Request failed",
+        )
+        problem.title = HttpStatus.resolve(ex.statusCode.value())?.reasonPhrase
+            ?: "Request failed"
+
+        return ResponseEntity.status(ex.statusCode).body(problem)
     }
 
     /**

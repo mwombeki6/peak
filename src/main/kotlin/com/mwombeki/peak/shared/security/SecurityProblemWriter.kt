@@ -3,8 +3,10 @@ package com.mwombeki.peak.shared.security
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
+import org.springframework.modulith.NamedInterface
 import org.springframework.stereotype.Component
 
+@NamedInterface("security")
 @Component
 class SecurityProblemWriter {
     fun write(

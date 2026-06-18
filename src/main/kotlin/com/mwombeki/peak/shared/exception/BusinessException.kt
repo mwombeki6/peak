@@ -1,19 +1,15 @@
 package com.mwombeki.peak.shared.exception
 
-import org.springframework.http.HttpStatus
 import java.time.Instant
-
+import org.springframework.http.HttpStatus
 
 /**
- * Production Base Domain Exception.
- * All predictable operational or business logic failures across the modular monolith
- * should extend this class to ensure structured error handling.
+ * Base domain exception for predictable operational or business failures.
  */
-
 open class BusinessException(
     override val message: String,
     val status: HttpStatus = HttpStatus.BAD_REQUEST,
     val errorCode: String = "Business Rule Violation",
-    val timestamp: Instant = Instant.now()
-
-) : RuntimeException(message)
+    val timestamp: Instant = Instant.now(),
+    cause: Throwable? = null,
+) : RuntimeException(message, cause)

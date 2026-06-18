@@ -1,6 +1,5 @@
 package com.mwombeki.peak.shared.security
 
-import com.mwombeki.peak.shared.context.TenantContextFilter
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
@@ -13,7 +12,6 @@ import org.springframework.security.oauth2.jwt.JwtDecoder
 import org.springframework.security.oauth2.jwt.JwtValidators
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder
 import org.springframework.security.web.SecurityFilterChain
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter
 import org.springframework.web.cors.CorsConfiguration
 import org.springframework.web.cors.CorsConfigurationSource
@@ -23,7 +21,6 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource
 class HttpSecurityConfiguration(
     private val properties: HttpSecurityProperties,
     private val problemWriter: SecurityProblemWriter,
-    private val tenantContextFilter: TenantContextFilter,
 ) {
     @Bean
     fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
@@ -99,8 +96,6 @@ class HttpSecurityConfiguration(
                 resourceServer.jwt { }
             }
         }
-
-        http.addFilterAfter(tenantContextFilter, UsernamePasswordAuthenticationFilter::class.java)
 
         return http.build()
     }

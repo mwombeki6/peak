@@ -2,7 +2,9 @@ package com.mwombeki.peak.reliability.api
 
 import java.time.Duration
 import java.util.UUID
+import org.springframework.modulith.NamedInterface
 
+@NamedInterface("api")
 data class IdempotencyCommand(
     val operationType: String,
     val requestPayload: Any?,
@@ -19,17 +21,21 @@ data class IdempotencyCommand(
     }
 }
 
+@NamedInterface("api")
 sealed interface IdempotencyReservation {
     val recordId: UUID
 
+    @NamedInterface("api")
     data class Started(
         override val recordId: UUID,
     ) : IdempotencyReservation
 
+    @NamedInterface("api")
     data class InProgress(
         override val recordId: UUID,
     ) : IdempotencyReservation
 
+    @NamedInterface("api")
     data class Replay(
         override val recordId: UUID,
         val responseCode: Int?,
@@ -37,11 +43,13 @@ sealed interface IdempotencyReservation {
         val status: IdempotencyStatus,
     ) : IdempotencyReservation
 
+    @NamedInterface("api")
     data class Conflict(
         override val recordId: UUID,
     ) : IdempotencyReservation
 }
 
+@NamedInterface("api")
 enum class IdempotencyStatus(val databaseValue: String) {
     PROCESSING("processing"),
     SUCCEEDED("succeeded"),

@@ -2,6 +2,7 @@ package com.mwombeki.peak.reliability.internal
 
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.time.toKotlinDuration
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -109,7 +110,7 @@ class OutboxWorkerLifecycle(
                 properties.idlePollInterval
             }
 
-            delay(delayFor.toMillis())
+            delay(delayFor.toKotlinDuration())
         }
     }
 
@@ -126,7 +127,7 @@ class OutboxWorkerLifecycle(
                 logger.error("Outbox stale-lock reclaim failed", ex)
             }
 
-            delay(properties.staleReclaimInterval.toMillis())
+            delay(properties.staleReclaimInterval.toKotlinDuration())
         }
     }
 

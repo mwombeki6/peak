@@ -1,7 +1,9 @@
 package com.mwombeki.peak.shared.context
 
 import java.util.UUID
+import org.springframework.modulith.NamedInterface
 
+@NamedInterface("context")
 data class RawRequestIdentity(
     val tenantId: UUID? = null,
     val tenantUserId: UUID? = null,

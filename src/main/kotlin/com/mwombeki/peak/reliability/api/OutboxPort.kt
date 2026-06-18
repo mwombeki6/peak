@@ -3,11 +3,14 @@ package com.mwombeki.peak.reliability.api
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
+import org.springframework.modulith.NamedInterface
 
+@NamedInterface("api")
 interface OutboxPort {
     fun enqueue(command: OutboxEventCommand): UUID
 }
 
+@NamedInterface("api")
 interface OutboxWorkerPort {
     fun claim(
         workerId: String,

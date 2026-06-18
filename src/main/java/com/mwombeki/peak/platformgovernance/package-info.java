@@ -1,15 +1,7 @@
 @ApplicationModule(
         id = "platformgovernance",
         displayName = "Platform Governance",
-        allowedDependencies = {
-                "shared",
-                "shared :: context",
-                "audit",
-                "reliability",
-                "integrations",
-                "tenantmanagement",
-                "usermanagement"
-        }
+        allowedDependencies = {"shared::context"}
 )
 package com.mwombeki.peak.platformgovernance;
 

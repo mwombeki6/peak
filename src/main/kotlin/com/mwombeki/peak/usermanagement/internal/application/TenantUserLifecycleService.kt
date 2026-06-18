@@ -126,7 +126,7 @@ class TenantUserLifecycleService(
             )
         }
 
-        val receipt = after.toReceipt(command.action, changed, replayed = false)
+        val receipt = after.toReceipt(command.action, changed)
 
         if (changed) {
             recordLifecycleSideEffects(command, before, after, idempotencyKeyId)
@@ -383,6 +383,7 @@ class TenantUserLifecycleService(
         ).copy(replayed = true)
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private fun mapTenantUser(rs: ResultSet, rowNumber: Int): TenantUserRow {
         return TenantUserRow(
             tenantId = rs.getObject("tenant_id", UUID::class.java),
@@ -393,6 +394,7 @@ class TenantUserLifecycleService(
         )
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private fun mapIdentityLink(rs: ResultSet, rowNumber: Int): IdentityLinkRow {
         return IdentityLinkRow(
             identityLinkId = rs.getObject("id", UUID::class.java),
@@ -427,7 +429,6 @@ class TenantUserLifecycleService(
     private fun TenantUserRow.toReceipt(
         action: TenantUserLifecycleAction,
         changed: Boolean,
-        replayed: Boolean,
     ): TenantUserLifecycleReceipt {
         return TenantUserLifecycleReceipt(
             tenantId = tenantId,
@@ -437,7 +438,7 @@ class TenantUserLifecycleService(
             isActive = isActive,
             lockedUntil = lockedUntil,
             changed = changed,
-            replayed = replayed,
+            replayed = false,
         )
     }
 

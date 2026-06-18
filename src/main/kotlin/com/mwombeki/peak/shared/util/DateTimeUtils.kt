@@ -42,7 +42,7 @@ object DateTimeUtils {
 
         val nights = ChronoUnit.DAYS.between(checkInDate, checkoutDate)
         if(nights <= 0){
-            // for a day use it is considered as a 1 night costs
+            // Day-use bookings are charged as one night.
             return 1
         }
         return nights

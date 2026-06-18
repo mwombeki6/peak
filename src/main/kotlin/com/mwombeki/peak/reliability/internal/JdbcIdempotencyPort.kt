@@ -35,7 +35,7 @@ class JdbcIdempotencyPort(
         val actor = actorFor(context.identity)
         val scope = scopeFor(context.identity)
 
-        val existing = findExisting(scope.tenantId, key, lock = true)
+        val existing = findExisting(scope.tenantId, key)
         if (existing != null) {
             return existing.toReservation(requestHash)
         }
@@ -76,7 +76,7 @@ class JdbcIdempotencyPort(
                 Timestamp.from(clock.instant().plus(command.ttl)),
             )
         } catch (ex: DuplicateKeyException) {
-            return requireNotNull(findExisting(scope.tenantId, key, lock = true)) {
+            return requireNotNull(findExisting(scope.tenantId, key)) {
                 "Duplicate idempotency key was not readable after conflict"
             }.toReservation(requestHash)
         }
@@ -135,9 +135,7 @@ class JdbcIdempotencyPort(
     private fun findExisting(
         tenantId: UUID?,
         key: String,
-        lock: Boolean,
     ): ExistingIdempotencyRecord? {
-        val lockClause = if (lock) " FOR UPDATE" else ""
         val rows = if (tenantId == null) {
             jdbcTemplate.query(
                 """
@@ -145,7 +143,7 @@ class JdbcIdempotencyPort(
                 FROM idempotency_keys
                 WHERE tenant_id IS NULL
                   AND idempotency_key = ?
-                $lockClause
+                FOR UPDATE
                 """.trimIndent(),
                 ::mapExisting,
                 key,
@@ -157,7 +155,7 @@ class JdbcIdempotencyPort(
                 FROM idempotency_keys
                 WHERE tenant_id = ?
                   AND idempotency_key = ?
-                $lockClause
+                FOR UPDATE
                 """.trimIndent(),
                 ::mapExisting,
                 tenantId,
@@ -168,6 +166,7 @@ class JdbcIdempotencyPort(
         return rows.singleOrNull()
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private fun mapExisting(rs: ResultSet, rowNumber: Int): ExistingIdempotencyRecord {
         return ExistingIdempotencyRecord(
             id = rs.getObject("id", UUID::class.java),

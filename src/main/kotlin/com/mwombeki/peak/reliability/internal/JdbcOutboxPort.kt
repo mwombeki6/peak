@@ -151,6 +151,7 @@ class JdbcOutboxPort(
         )
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private fun mapClaimed(rs: ResultSet, rowNumber: Int): ClaimedOutboxEvent {
         return ClaimedOutboxEvent(
             id = rs.getObject("id", UUID::class.java),

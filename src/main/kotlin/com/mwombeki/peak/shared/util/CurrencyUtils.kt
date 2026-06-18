@@ -14,7 +14,7 @@ object CurrencyUtils {
     // Tanzanian Shilling typically does not show minor fractional coins in standard modern receipts,
     // but the database must track decimals strictly for tax/VAT math accuracy.
     private const val MONEY_SCALE = 2
-    private val TZ_LOCALE = Locale("sw", "TZ")
+    private val TZ_LOCALE = Locale.of("sw", "TZ")
 
     /**
      * Standardizes any raw money value to a clean, scale-adjusted production BigDecimal value.

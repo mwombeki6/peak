@@ -1,59 +1,40 @@
-#  Shared Kernel: The Hotel's Foundation
+# Shared Kernel
 
-##  What is it? (The "Dummy" Version)
-If our application is a **Hotel**, then the **Shared Kernel** is the foundation, the pipes, the electricity, and the common rules that the entire building uses. 
+The shared module contains platform primitives that are safe for every module to depend on. It should stay small, stable, and free of business workflows.
 
-Without the foundation, the rooms (Modules like `Audit` or `TenantManagement`) would just fall over. The Shared Kernel doesn't "do" the business (it doesn't book rooms or cook food), but it provides the **tools** that everyone else uses to do their jobs.
+## Key Components
 
----
+### Request Context
 
-##  Key Components
+`shared.context` owns request identity resolution and request-local metadata:
 
-### 1.  Request Context: The "VIP Lanyard" (`shared.context`)
-Every time a request (a Guest) enters the hotel, they are given a **Lanyard**. 
-- **What’s on it?** Their Name (User ID), their Company (Tenant ID), and their permissions.
-- **Why?** Instead of the Guest having to tell every staff member who they are 100 times, the staff member just looks at the Lanyard.
-- **Automatic:** The `RequestContextInterceptor` automatically puts the lanyard on the guest the moment they walk through the door.
+- `RequestContextResolver` converts trusted headers or JWT claims into a typed `RequestIdentity`.
+- `RequestContextInterceptor` binds the context for the request lifecycle and attaches logging metadata.
+- `DatabaseSessionContext` binds PostgreSQL `app.current_*` settings inside transactions for RLS-aware database access.
 
-### 2. 🛡 Security: The "Front Gate" (`shared.security`)
-This is the security guard team at the main entrance.
-- **Keycloak Integration:** We use a professional ID office (Keycloak) to check if the guest's ID card is real.
-- **SecurityConfig:** These are the house rules. "Guests without a badge can't enter the Admin Wing."
-- **Tenant Isolation:** A very important rule—guests from Company A are **never** allowed to peek into the rooms of Company B.
+There must be only one request identity path. Do not add tenant-specific thread locals or servlet filters beside this system.
 
-### 3.  Common Utilities: The "Toolbelt" (`shared.util`, `shared.dto`, `shared.exception`)
-Every staff member (Module) carries the same toolbelt so they all work the same way.
-- **Exceptions:** If something goes wrong, everyone uses the same "Emergency Signs."
-- **Time Utils:** Everyone's watch is synced to the same clock so logs aren't confusing.
-- **IDs:** A standard way to generate "Room Keys" (UUIDs).
+### Security
 
-### 4.  Reliability: The "Assistant" (`shared.idempotency`, `shared.outbox`)
-- **Idempotency:** An assistant who remembers if a guest already asked for something. If a guest says "Book me a room" twice by mistake, the assistant says, "I already did that for you," instead of booking two rooms.
-- **Outbox:** A "To-Do" list for messages. If the hotel needs to send an email but the internet is down, the clerk puts the message in the Outbox and waits until the internet is back to send it.
+`shared.security` owns HTTP security headers, CORS, JWT validation wiring, and method-security enablement. Route authorization lives in `usermanagement` and uses the request context plus `module_access_matrix`.
 
----
+### Utilities And Errors
 
-##  How it's built (The Technical Map)
+`shared.util`, `shared.dto`, and `shared.exception` contain small cross-module utilities and error response helpers. Avoid putting module behavior here.
 
-### `shared.context`
-- `RequestContext`: The data structure of the Lanyard.
-- `RequestContextHolder`: The "hook" on the wall where the Lanyard is kept for easy access.
+## Related Modules
 
-###  `shared.security`
-- `SecurityConfig`: The master rules for who can go where.
-- `TenantContextFilter`: The tool that looks at the guest's ID and finds out which Company (Tenant) they belong to.
+Reliability primitives are not in `shared`. Use the published ports from `reliability::api`:
 
-###  `shared.exception`
-- `PeakException`: The base of all error messages in the project.
+- `IdempotencyPort`
+- `OutboxPort`
+- `OutboxWorkerPort`
 
----
+Audit primitives are not in `shared`. Use the published ports from `audit::api`.
 
-## The "Golden Rule"
-Because this is the **Foundation**, it is very special:
-1. **Everyone can use it:** Every other module in the project is allowed to "plug into" the Shared Kernel.
-2. **Don't break it:** If you change something here, it affects the **entire** hotel. Be very careful!
+## Rules
 
-## Critical Files to Know
-- `RequestContextInterceptor.kt`: The guest's first stop.
-- `SecurityConfig.kt`: The gatekeeper.
-- `TenantContextFilter.kt`: The tenant identifier.
+1. Keep shared code generic.
+2. Prefer typed request identity over raw JWT claim access.
+3. Bind database session settings only through `DatabaseSessionContext`.
+4. Do not add idempotency, outbox, audit, or tenant workflow implementations to `shared`.

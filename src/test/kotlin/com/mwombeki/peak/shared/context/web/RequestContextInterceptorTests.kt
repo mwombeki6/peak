@@ -5,6 +5,7 @@ import com.mwombeki.peak.shared.context.PeakRequestHeaders
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestContextProperties
 import com.mwombeki.peak.shared.context.RequestContextResolver
+import com.mwombeki.peak.shared.security.SecurityProblemWriter
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -55,9 +56,10 @@ class RequestContextInterceptorTests {
         return RequestContextInterceptor(
             resolver = RequestContextResolver(
                 RequestContextProperties(allowHeaderIdentity = false),
-                ExternalIdentityResolver { null },
+                { null },
             ),
             holder = holder,
+            problemWriter = SecurityProblemWriter(),
         )
     }
 }

@@ -1,27 +1,23 @@
-#  Tenant Management Module
+# Tenant Management Module
 
-## What is it?
-This is the **Reception Desk** of our application. Its primary job is to handle the onboarding and lifecycle of "Tenants" (the companies or hotels that use our software).
+Tenant management owns platform-led tenant onboarding and tenant account reads. It persists to the canonical foundation schema instead of maintaining module-specific tenant tables.
 
-## Key Responsibilities
-- **Registration:** Welcoming new tenants and creating their initial records.
-- **Profile Management:** Storing business details like registration numbers, contact info, and currency preferences.
-- **Status Control:** Keeping track of whether a tenant is `ACTIVE`, `PENDING_VERIFICATION`, or `SUSPENDED`.
+## Web API
 
-## The "Plugs" (API & Ports)
+- `POST /api/v1/platform/tenants`
+- `GET /api/v1/platform/tenants/{id}`
+- `PATCH /api/v1/platform/tenants/{id}/status`
 
-###  Web API (External)
-- `POST /api/v1/tenants/register`: Used to sign up a new company.
-- `GET /api/v1/tenants/{id}`: Retrieves details about a specific company.
-- `PATCH /api/v1/tenants/{id}/status`: Updates the status (e.g., activating a tenant).
+These routes are covered by the canonical `module_access_matrix` pattern `/api/platform/tenants*` after API version normalization.
 
-###  Internal Ports
-- `TenantOnboardingPort`: The standard socket used by the web controller to talk to the business logic.
+## Security
 
-## Data Structure (The Map)
-- `api/`: Contains the public "Models" (Guest Record Cards) and "Ports" (Sockets).
-- `internal/`: The "Staff Only" area containing the actual business logic (`TenantOnboardingService`) and database clerks (`TenantRepository`).
+The controller relies on the request-context and route-guard pipeline. The service requires a platform or support identity and binds `DatabaseSessionContext` before RLS-protected database access.
 
-## Database Tables 🗄
-- `tenants`: The main list of companies.
-- `tenant_profiles`: Detailed business information for each company.
+## Database Tables
+
+- `tenants`: tenant account, slug, status, schema name, and subscription plan.
+- `tenant_profiles`: legal/business profile for the tenant.
+- `tenant_lifecycle_events`: onboarding lifecycle event emitted when a tenant is created or status changes.
+
+Supported tenant status values come from the baseline schema: `trial`, `active`, `suspended`, `frozen`, `archived`, `terminated`, and `cancelled`.

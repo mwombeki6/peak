@@ -1,7 +1,9 @@
 package com.mwombeki.peak.shared.context
 
+import org.springframework.modulith.NamedInterface
 import org.springframework.stereotype.Component
 
+@NamedInterface("context")
 @Component
 class RequestContextHolder {
     private val currentContext = ThreadLocal<RequestContext>()

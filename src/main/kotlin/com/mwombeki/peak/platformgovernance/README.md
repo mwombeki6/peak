@@ -1,26 +1,23 @@
-# 🛡 Platform Governance Module
+# Platform Governance Module
 
-## What is it?
-This is the **Security and Manager's Office** for the entire platform. While `TenantManagement` handles the guests, `PlatformGovernance` is where the "Big Boss" (Platform Admin) makes final decisions about which hotels are allowed to stay open.
+Platform governance owns platform-operator actions against tenant accounts. It does not own tenant profile persistence; it coordinates lifecycle state transitions for tenant accounts that already exist.
 
-## Key Responsibilities
-- **Oversight:** Reviewing and approving new tenants before they can go live.
-- **Suspension:** Freezing accounts if they violate rules.
-- **Auditing:** Keeping a strict log of every management action taken by operators.
+## Web API
 
-## The "Plugs" (API & Ports)
+- `POST /api/v1/platform/tenants/{id}/approve`
+- `POST /api/v1/platform/tenants/{id}/suspend`
 
-###  Web API (External)
-- `POST /api/v1/governance/tenants/{id}/approve`: Activates a pending tenant.
-- `POST /api/v1/governance/tenants/{id}/suspend`: Temporarily disables a tenant.
+These routes are covered by the canonical `module_access_matrix` pattern `/api/platform/tenants*` after API version normalization.
 
-### 🔌 Internal Ports
-- `TenantGovernancePort`: The interface defining how the platform is managed.
+## Security
 
-## Security 
-This module is strictly guarded. Only users with the following badges (roles) from Keycloak can enter:
-- `ROLE_PLATFORM_SUPER_ADMIN`
-- `ROLE_PLATFORM_OPERATOR`
+Route authorization is enforced by the shared request context plus the user-management route guard. Platform governance requires a platform or support identity with the `platform.tenants.manage` permission.
 
-## Database Tables 
-- `tenant_lifecycle_logs`: The "Black Box" that records when and why a tenant was approved or suspended.
+The service binds `DatabaseSessionContext` before reading or writing RLS-protected tables.
+
+## Database Tables
+
+- `tenants`: canonical tenant account state.
+- `tenant_lifecycle_events`: canonical lifecycle audit stream for tenant account transitions.
+
+Do not write to `tenant_lifecycle_logs`; it was an obsolete duplicate table removed by migration.

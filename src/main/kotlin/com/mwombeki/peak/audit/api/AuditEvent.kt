@@ -1,7 +1,9 @@
 package com.mwombeki.peak.audit.api
 
 import java.util.UUID
+import org.springframework.modulith.NamedInterface
 
+@NamedInterface("api")
 data class TenantAuditEvent(
     val tenantId: UUID,
     val action: String,
@@ -17,6 +19,7 @@ data class TenantAuditEvent(
     }
 }
 
+@NamedInterface("api")
 data class PlatformAuditEvent(
     val action: String,
     val resource: AuditResource,

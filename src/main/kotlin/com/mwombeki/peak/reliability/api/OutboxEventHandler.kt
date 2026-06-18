@@ -1,5 +1,8 @@
 package com.mwombeki.peak.reliability.api
 
+import org.springframework.modulith.NamedInterface
+
+@NamedInterface("api")
 interface OutboxEventHandler {
     val destination: OutboxDestination
 

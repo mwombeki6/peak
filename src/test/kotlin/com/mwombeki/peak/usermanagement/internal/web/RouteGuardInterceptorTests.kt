@@ -3,6 +3,7 @@ package com.mwombeki.peak.usermanagement.internal.web
 import com.mwombeki.peak.shared.context.RequestContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.shared.security.SecurityProblemWriter
 import com.mwombeki.peak.usermanagement.api.AuthorizationDecision
 import com.mwombeki.peak.usermanagement.api.AuthorizationPort
 import com.mwombeki.peak.usermanagement.api.GuardMode
@@ -162,6 +163,7 @@ class RouteGuardInterceptorTests {
             authorizationPort = authorizationPort,
             requestContextHolder = holder,
             transactionTemplate = TransactionTemplate(NoopTransactionManager()),
+            problemWriter = SecurityProblemWriter(),
         )
     }
 
