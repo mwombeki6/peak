@@ -1,9 +1,9 @@
 package com.mwombeki.peak.usermanagement.internal.web
 
-import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.usermanagement.api.GuardMode
 import com.mwombeki.peak.usermanagement.api.RouteScope
 import java.util.UUID
+import com.mwombeki.peak.shared.context.RequestIdentity
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull

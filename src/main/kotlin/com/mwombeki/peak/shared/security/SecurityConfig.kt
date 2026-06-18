@@ -22,40 +22,12 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity(prePostEnabled = true)
-class SecurityConfig(private val tenantContextFilter: TenantContextFilter) {
-
-    @Bean
-    fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
-        http
-            // 1. Disable standard stateful protections since we are a stateless REST API using JWTs
-            .csrf { csrf -> csrf.disable() }
-            .sessionManagement { session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
-
-            // 2. Configure CORS policies to safely allow your React app to send requests
-            .cors { cors -> cors.configurationSource(corsConfigurationSource()) }
-
-            // 3. Define explicit access path rules
-            .authorizeHttpRequests { auth ->
-                auth
-                    // Allow open public access to your API interactive documentation (Swagger)
-                    .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
-                    // Allow open access to public booking engines
-                    .requestMatchers("/api/public/**").permitAll()
-                    // Every other single path requires a fully verified JWT authentication token
-                    .anyRequest().authenticated()
-            }
-
-            // 4. Tell Spring Security to expect and validate OAuth2 Bearer JWT Tokens
-            .oauth2ResourceServer { oauth2 ->
-                oauth2.jwt { }
-            }
-
-            // 5. CRITICAL STEP: Inject our multi-tenant extraction filter immediately after
-            // Spring verifies the JWT signature, but before it reaches your business controllers.
-            .addFilterAfter(tenantContextFilter, UsernamePasswordAuthenticationFilter::class.java)
-
-        return http.build()
-    }
+class SecurityConfig(
+    private val tenantContextFilter: TenantContextFilter,
+) {
+    // Note: SecurityFilterChain is now provided by HttpSecurityConfiguration to avoid duplication
+    // We should consider moving the TenantContextFilter logic to HttpSecurityConfiguration as well
+    // or use a custom Customizer.
 
     /**
      * Cross-Origin Resource Sharing (CORS) Production Policy Config.

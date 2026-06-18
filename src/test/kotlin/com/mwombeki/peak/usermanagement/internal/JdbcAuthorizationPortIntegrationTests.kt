@@ -2,8 +2,8 @@ package com.mwombeki.peak.usermanagement.internal
 
 import com.mwombeki.peak.TestcontainersConfiguration
 import com.mwombeki.peak.shared.context.RequestContext
-import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.usermanagement.api.AuthorizationDeniedException
 import com.mwombeki.peak.usermanagement.api.AuthorizationPort
 import com.mwombeki.peak.usermanagement.api.GuardMode

@@ -5,7 +5,6 @@ import com.mwombeki.peak.audit.api.PlatformAuditEvent
 import com.mwombeki.peak.audit.api.TenantAuditEvent
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
-import java.util.UUID
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
 import org.springframework.transaction.support.TransactionSynchronizationManager

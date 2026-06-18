@@ -3,6 +3,7 @@
         displayName = "Platform Governance",
         allowedDependencies = {
                 "shared",
+                "shared :: context",
                 "audit",
                 "reliability",
                 "integrations",
