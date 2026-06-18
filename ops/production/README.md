@@ -1,0 +1,37 @@
+# Production Operations
+
+This directory contains the Podman Compose deployment baseline for Peak phase 1.
+
+## Files
+
+- `compose.yaml`: PostgreSQL, Keycloak, migration, API, and worker services.
+- `.env.example`: required environment variables without real secrets.
+- `role-bootstrap.sql`: creates production login roles and grants them membership in Flyway-managed no-login roles.
+
+## Rollout Order
+
+1. Build and push an image through CI, or build locally with `podman build -t ghcr.io/mwombeki6/peak/peak:<tag> .`.
+2. Create `ops/production/.env` from `.env.example` and replace every placeholder secret.
+3. Start PostgreSQL and Keycloak: `podman compose --env-file ops/production/.env -f ops/production/compose.yaml up -d postgres keycloak-db keycloak`.
+4. Bootstrap production login roles: `ops/scripts/bootstrap-db-roles.sh`.
+5. Run Flyway through the migration profile: `podman compose --env-file ops/production/.env -f ops/production/compose.yaml --profile migration run --rm peak-migration`.
+6. Start API and worker: `podman compose --env-file ops/production/.env -f ops/production/compose.yaml up -d peak-api peak-worker`.
+7. Verify health: `ops/scripts/healthcheck.sh http://localhost:8080/actuator/health`.
+
+## Security Requirements
+
+- Never run API or worker as the migration login.
+- Keep `PEAK_ALLOW_HEADER_IDENTITY=false` in production.
+- Keep SpringDoc disabled in production.
+- Keep CORS origins explicit.
+- Import and verify the Keycloak realm before allowing tenant users to authenticate.
+- Store production secrets outside Git; `.env` is ignored and is only a local operator input file.
+
+## Database Roles
+
+- `peak_migrator`: Flyway migrations only.
+- `peak_app`: API runtime, member of `pms_app` and `pms_platform`.
+- `peak_worker`: outbox worker runtime, member of `pms_worker`.
+- `peak_platform_support`: optional readonly support login, member of `pms_readonly_support`.
+
+The schema grants are owned by Flyway migrations. Add privilege changes as migrations, not manual grants.
