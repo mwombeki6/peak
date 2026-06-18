@@ -1,0 +1,20 @@
+peak:
+  security:
+    http:
+      jwt:
+        enabled: false
+      cors:
+        allowed-origins:
+          - http://localhost
+    request-context:
+      allow-header-identity: true
+  reliability:
+    outbox:
+      worker:
+        enabled: false
+
+management:
+  defaults:
+    metrics:
+      export:
+        enabled: false

@@ -1,0 +1,11 @@
+spring:
+  main:
+    web-application-type: none
+
+peak:
+  runtime:
+    mode: worker
+  reliability:
+    outbox:
+      worker:
+        enabled: true
