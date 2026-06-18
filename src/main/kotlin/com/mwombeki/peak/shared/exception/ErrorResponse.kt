@@ -1,6 +1,5 @@
 package com.mwombeki.peak.shared.exception
 
-import org.springframework.http.HttpStatus
 import java.time.Instant
 
 /**
@@ -14,5 +13,5 @@ data class ErrorResponse(
     val message: String,
     val path: String,
     val traceId: String,
-    val timestamp: Instant = Instant.now()
+    val timestamp: Instant = Instant.now(),
 )

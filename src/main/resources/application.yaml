@@ -1,6 +1,9 @@
 spring:
   application:
     name: peak
+  docker:
+    compose:
+      enabled: ${PEAK_DOCKER_COMPOSE_ENABLED:false}
   threads:
     virtual:
       enabled: true
@@ -44,6 +47,18 @@ peak:
       allow-header-identity: ${PEAK_ALLOW_HEADER_IDENTITY:false}
 
 management:
+  otlp:
+    metrics:
+      export:
+        enabled: ${PEAK_OTLP_METRICS_EXPORT_ENABLED:false}
+  logging:
+    export:
+      otlp:
+        enabled: ${PEAK_OTLP_LOGGING_EXPORT_ENABLED:false}
+  tracing:
+    export:
+      otlp:
+        enabled: ${PEAK_OTLP_TRACING_EXPORT_ENABLED:false}
   endpoints:
     web:
       exposure:

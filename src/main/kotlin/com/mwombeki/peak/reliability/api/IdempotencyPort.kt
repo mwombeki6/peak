@@ -1,7 +1,9 @@
 package com.mwombeki.peak.reliability.api
 
 import java.util.UUID
+import org.springframework.modulith.NamedInterface
 
+@NamedInterface("api")
 interface IdempotencyPort {
     fun reserve(command: IdempotencyCommand): IdempotencyReservation
 

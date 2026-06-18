@@ -477,6 +477,7 @@ class TenantUserInvitationService(
         )
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private fun mapAcceptanceSnapshot(
         rs: ResultSet,
         rowNumber: Int,

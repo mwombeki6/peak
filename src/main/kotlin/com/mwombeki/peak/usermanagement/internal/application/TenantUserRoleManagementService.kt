@@ -445,6 +445,7 @@ class TenantUserRoleManagementService(
         ).copy(replayed = true)
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private fun mapTenantRole(rs: ResultSet, rowNumber: Int): TenantRoleSummary {
         return TenantRoleSummary(
             tenantRoleId = rs.getObject("id", UUID::class.java),
@@ -458,6 +459,7 @@ class TenantUserRoleManagementService(
         )
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private fun mapTenantPermission(rs: ResultSet, rowNumber: Int): TenantPermissionSummary {
         return TenantPermissionSummary(
             permissionId = rs.getObject("id", UUID::class.java),

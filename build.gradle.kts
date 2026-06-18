@@ -177,3 +177,33 @@ tasks.withType<Test>().configureEach {
 
     useJUnitPlatform()
 }
+
+tasks.register<Exec>("podmanComposeUp") {
+    group = "application"
+    description = "Starts Peak local infrastructure with Podman Compose."
+
+    commandLine("podman", "compose", "-f", "compose.yaml", "up", "-d", "postgres")
+}
+
+tasks.register<Exec>("podmanComposeObservabilityUp") {
+    group = "application"
+    description = "Starts Peak local infrastructure and observability with Podman Compose."
+
+    commandLine(
+        "podman",
+        "compose",
+        "-f",
+        "compose.yaml",
+        "--profile",
+        "observability",
+        "up",
+        "-d",
+    )
+}
+
+tasks.register<Exec>("podmanComposeDown") {
+    group = "application"
+    description = "Stops Peak local infrastructure started with Podman Compose."
+
+    commandLine("podman", "compose", "-f", "compose.yaml", "down")
+}

@@ -4,6 +4,8 @@ import com.mwombeki.peak.reliability.api.ClaimedOutboxEvent
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventHandler
 import java.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.toKotlinDuration
 import kotlinx.coroutines.withTimeout
 import org.springframework.stereotype.Component
 
@@ -23,7 +25,7 @@ class OutboxEventDispatcher(
         timeout: Duration,
     ) {
         val handler = handlerFor(event)
-        withTimeout(timeout.toMillis().coerceAtLeast(1)) {
+        withTimeout(timeout.toKotlinDuration().coerceAtLeast(1.milliseconds)) {
             handler.handle(event)
         }
     }

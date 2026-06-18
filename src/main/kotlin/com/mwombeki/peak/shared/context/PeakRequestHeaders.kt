@@ -1,5 +1,8 @@
 package com.mwombeki.peak.shared.context
 
+import org.springframework.modulith.NamedInterface
+
+@NamedInterface("context")
 object PeakRequestHeaders {
     const val CORRELATION_ID = "X-Correlation-Id"
     const val IDEMPOTENCY_KEY = "Idempotency-Key"

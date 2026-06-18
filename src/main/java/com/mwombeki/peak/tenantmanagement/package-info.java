@@ -1,7 +1,7 @@
 @ApplicationModule(
         id = "tenantmanagement",
         displayName = "Tenant Management",
-        allowedDependencies = {"shared", "audit", "reliability"}
+        allowedDependencies = {"shared::context"}
 )
 package com.mwombeki.peak.tenantmanagement;
 

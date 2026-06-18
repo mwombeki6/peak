@@ -6,11 +6,11 @@ import com.mwombeki.peak.shared.context.RequestContextException
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.shared.context.RequestContextResolver
+import com.mwombeki.peak.shared.security.SecurityProblemWriter
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.slf4j.MDC
 import org.springframework.http.HttpStatus
-import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Component
 import org.springframework.web.servlet.HandlerInterceptor
@@ -19,6 +19,7 @@ import org.springframework.web.servlet.HandlerInterceptor
 class RequestContextInterceptor(
     private val resolver: RequestContextResolver,
     private val holder: RequestContextHolder,
+    private val problemWriter: SecurityProblemWriter,
 ) : HandlerInterceptor {
 
     override fun preHandle(
@@ -89,27 +90,11 @@ class RequestContextInterceptor(
     }
 
     private fun writeProblem(response: HttpServletResponse, detail: String) {
-        response.status = HttpStatus.BAD_REQUEST.value()
-        response.contentType = MediaType.APPLICATION_PROBLEM_JSON_VALUE
-        response.writer.write(
-            """
-            {"type":"about:blank","title":"Invalid request context","status":400,"detail":"${detail.jsonEscaped()}"}
-            """.trimIndent(),
+        problemWriter.write(
+            response = response,
+            status = HttpStatus.BAD_REQUEST,
+            title = "Invalid request context",
+            detail = detail,
         )
-    }
-
-    private fun String.jsonEscaped(): String {
-        return buildString {
-            for (char in this@jsonEscaped) {
-                when (char) {
-                    '\\' -> append("\\\\")
-                    '"' -> append("\\\"")
-                    '\n' -> append("\\n")
-                    '\r' -> append("\\r")
-                    '\t' -> append("\\t")
-                    else -> append(char)
-                }
-            }
-        }
     }
 }

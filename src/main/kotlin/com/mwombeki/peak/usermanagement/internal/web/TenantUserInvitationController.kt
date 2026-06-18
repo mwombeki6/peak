@@ -147,7 +147,7 @@ class TenantUserInvitationController(
         val email = stringClaim("email")?.lowercase()
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "OIDC email is required")
 
-        if (!booleanClaim("email_verified")) {
+        if (!isEmailVerified()) {
             throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "OIDC email must be verified")
         }
 
@@ -162,8 +162,8 @@ class TenantUserInvitationController(
         return claims[name]?.toString()?.trim()?.takeIf { it.isNotEmpty() }
     }
 
-    private fun Jwt.booleanClaim(name: String): Boolean {
-        return when (val value = claims[name]) {
+    private fun Jwt.isEmailVerified(): Boolean {
+        return when (val value = claims["email_verified"]) {
             true -> true
             is String -> value.equals("true", ignoreCase = true)
             else -> false

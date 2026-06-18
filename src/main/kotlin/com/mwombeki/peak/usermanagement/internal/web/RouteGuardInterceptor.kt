@@ -1,12 +1,12 @@
 package com.mwombeki.peak.usermanagement.internal.web
 
 import com.mwombeki.peak.shared.context.RequestContextHolder
+import com.mwombeki.peak.shared.security.SecurityProblemWriter
 import com.mwombeki.peak.usermanagement.api.AuthorizationDecision
 import com.mwombeki.peak.usermanagement.api.AuthorizationPort
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.HttpStatus
-import org.springframework.http.MediaType
 import org.springframework.stereotype.Component
 import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.servlet.HandlerInterceptor
@@ -19,6 +19,7 @@ class RouteGuardInterceptor(
     private val authorizationPort: AuthorizationPort,
     private val requestContextHolder: RequestContextHolder,
     private val transactionTemplate: TransactionTemplate,
+    private val problemWriter: SecurityProblemWriter,
 ) : HandlerInterceptor {
 
     override fun preHandle(
@@ -31,12 +32,15 @@ class RouteGuardInterceptor(
         }
 
         val context = requestContextHolder.currentOrNull()
-            ?: return deny(
+        if (context == null) {
+            deny(
                 response = response,
                 status = HttpStatus.INTERNAL_SERVER_ERROR,
                 title = "Route guard misconfigured",
                 detail = "Request context is not bound",
             )
+            return false
+        }
 
         val decision = try {
             transactionTemplate.execute {
@@ -58,24 +62,26 @@ class RouteGuardInterceptor(
                 }
             }
         } catch (ex: IllegalArgumentException) {
-            return deny(
+            deny(
                 response = response,
                 status = HttpStatus.BAD_REQUEST,
                 title = "Invalid route parameters",
                 detail = ex.message ?: "Route parameters are invalid",
             )
+            return false
         }
 
         if (decision.allowed) {
             return true
         }
 
-        return deny(
+        deny(
             response = response,
             status = HttpStatus.FORBIDDEN,
             title = "Forbidden",
             detail = decision.reason ?: "Request is not authorized",
         )
+        return false
     }
 
     private fun deny(
@@ -83,29 +89,12 @@ class RouteGuardInterceptor(
         status: HttpStatus,
         title: String,
         detail: String,
-    ): Boolean {
-        response.status = status.value()
-        response.contentType = MediaType.APPLICATION_PROBLEM_JSON_VALUE
-        response.writer.write(
-            """
-            {"type":"about:blank","title":"${title.jsonEscaped()}","status":${status.value()},"detail":"${detail.jsonEscaped()}"}
-            """.trimIndent(),
+    ) {
+        problemWriter.write(
+            response = response,
+            status = status,
+            title = title,
+            detail = detail,
         )
-        return false
-    }
-
-    private fun String.jsonEscaped(): String {
-        return buildString {
-            for (char in this@jsonEscaped) {
-                when (char) {
-                    '\\' -> append("\\\\")
-                    '"' -> append("\\\"")
-                    '\n' -> append("\\n")
-                    '\r' -> append("\\r")
-                    '\t' -> append("\\t")
-                    else -> append(char)
-                }
-            }
-        }
     }
 }

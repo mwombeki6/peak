@@ -11,5 +11,6 @@ class DataMappingException(message: String, cause: Throwable? = null) :
     BusinessException(
         message = message,
         status = HttpStatus.INTERNAL_SERVER_ERROR,
-        errorCode = "DATABASE_MAPPING_FAILURE"
+        errorCode = "DATABASE_MAPPING_FAILURE",
+        cause = cause,
     )

@@ -1,65 +1,84 @@
 package com.mwombeki.peak.platformgovernance.web
 
 import com.mwombeki.peak.platformgovernance.api.TenantGovernancePort
-import com.mwombeki.peak.platformgovernance.api.GovernanceActionResponse
-// Using Coder A's official shared request tracking system
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
-import org.springframework.http.ResponseEntity
-import org.springframework.security.access.prepost.PreAuthorize
-import org.springframework.web.bind.annotation.*
 import java.util.UUID
+import org.springframework.http.HttpStatus
+import org.springframework.http.ProblemDetail
+import org.springframework.http.ResponseEntity
+import org.springframework.web.bind.annotation.ExceptionHandler
+import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RestController
 
 @RestController
-@RequestMapping("/api/v1/platform/governance/tenants")
+@RequestMapping("/api/v1/platform/tenants")
 class PlatformGovernanceController(
     private val governancePort: TenantGovernancePort,
-    private val requestContextHolder: RequestContextHolder // Injecting Coder A's thread context tool
+    private val requestContextHolder: RequestContextHolder,
 ) {
 
     @PostMapping("/{id}/approve")
-    @PreAuthorize("hasAnyRole('ROLE_PLATFORM_SUPER_ADMIN', 'ROLE_PLATFORM_OPERATOR')")
-    fun approveHotel(
+    fun approveTenant(
         @PathVariable id: UUID,
-        @RequestBody request: GovernanceActionRequest
+        @RequestBody request: GovernanceActionRequest,
     ): ResponseEntity<Any> {
-
-        // Extract Coder A's active request identity
-        val context = requestContextHolder.current()
-        val identity = context.identity
-
-        // Safely extract the platform admin's ID if it matches a Platform identity type
-        val activeOperatorId = when (identity) {
-            is RequestIdentity.Platform -> identity.platformUserId
-            is RequestIdentity.Support -> identity.platformUserId
-            else -> throw IllegalStateException("Security Violation: Only platform administrators can perform this governance action.")
-        }
-
-        val result = governancePort.approveTenant(id, activeOperatorId, request.reason)
+        val result = governancePort.approveTenant(
+            tenantId = id,
+            operatorId = activePlatformOperatorId(),
+            reason = request.reason,
+        )
         return ResponseEntity.ok(result)
     }
 
     @PostMapping("/{id}/suspend")
-    @PreAuthorize("hasAnyRole('ROLE_PLATFORM_SUPER_ADMIN', 'ROLE_PLATFORM_OPERATOR')")
-    fun suspendHotel(
+    fun suspendTenant(
         @PathVariable id: UUID,
-        @RequestBody request: GovernanceActionRequest
+        @RequestBody request: GovernanceActionRequest,
     ): ResponseEntity<Any> {
+        val result = governancePort.suspendTenant(
+            tenantId = id,
+            operatorId = activePlatformOperatorId(),
+            reason = request.reason,
+        )
+        return ResponseEntity.ok(result)
+    }
 
-        val context = requestContextHolder.current()
-        val identity = context.identity
+    @ExceptionHandler(IllegalArgumentException::class)
+    fun handleInvalidRequest(ex: IllegalArgumentException): ResponseEntity<ProblemDetail> {
+        return problem(HttpStatus.BAD_REQUEST, "Invalid governance request", ex.message)
+    }
 
-        val activeOperatorId = when (identity) {
+    @ExceptionHandler(IllegalStateException::class)
+    fun handleConflict(ex: IllegalStateException): ResponseEntity<ProblemDetail> {
+        return problem(HttpStatus.CONFLICT, "Governance conflict", ex.message)
+    }
+
+    private fun activePlatformOperatorId(): UUID {
+        return when (val identity = requestContextHolder.current().identity) {
             is RequestIdentity.Platform -> identity.platformUserId
             is RequestIdentity.Support -> identity.platformUserId
-            else -> throw IllegalStateException("Security Violation: Only platform administrators can perform this governance action.")
+            else -> throw IllegalStateException("Platform identity is required")
         }
+    }
 
-        val result = governancePort.suspendTenant(id, activeOperatorId, request.reason)
-        return ResponseEntity.ok(result)
+    private fun problem(
+        status: HttpStatus,
+        title: String,
+        detail: String?,
+    ): ResponseEntity<ProblemDetail> {
+        val problem = ProblemDetail.forStatusAndDetail(
+            status,
+            detail ?: "Governance request failed",
+        )
+        problem.title = title
+        return ResponseEntity.status(status).body(problem)
     }
 }
 
 data class GovernanceActionRequest(
-    val reason: String
+    val reason: String,
 )

@@ -1,9 +1,11 @@
 package com.mwombeki.peak.shared.context
 
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.modulith.NamedInterface
 import org.springframework.stereotype.Component
 import org.springframework.transaction.support.TransactionSynchronizationManager
 
+@NamedInterface("context")
 @Component
 class DatabaseSessionContext(
     private val jdbcTemplate: JdbcTemplate,
