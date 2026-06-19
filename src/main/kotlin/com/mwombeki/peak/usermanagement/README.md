@@ -15,6 +15,7 @@ User management owns authorization, external identity resolution, tenant user in
 - Platform permissions are checked through platform roles and tenant access helpers.
 - Tenant permissions are checked through tenant roles, role permissions, and active tenant user state.
 - Public property routes are resolved through `resolve_public_property_scope`; public headers are not trusted.
+- Staff and platform guards bind database session context before permission checks; public module guards stay unbound.
 - Route guard rules are cached briefly and refreshed from `module_access_matrix`.
 
 ## Production Rules
@@ -24,3 +25,4 @@ User management owns authorization, external identity resolution, tenant user in
 3. Do not place permission decisions in controllers; use the authorization port or route guard.
 4. Prefer database-backed role and permission data for business permissions, with code constants only for stable permission names.
 5. Deny unregistered API routes by default in production.
+6. Keep platform RLS policies scoped to platform runtime roles instead of granting platform helpers to tenant API roles.

@@ -18,7 +18,8 @@ Public routes derive tenant and property scope from the URL property id through 
 
 ## Persistence
 
-- Booking sessions and payment transactions are written inside transactions with request context bound to the resolved tenant and property.
+- Public module access is resolved first while the database session is still public/unbound.
+- Booking sessions and payment transactions are written inside transactions after `DatabaseSessionContext` binds the resolved tenant.
 - External payment calls should be isolated behind provider adapters and must not leak provider-specific models through the public API.
 - Provider callbacks must verify signatures, timestamps, and replay windows before mutating payment state.
 
@@ -29,3 +30,4 @@ Public routes derive tenant and property scope from the URL property id through 
 3. Treat every provider command as idempotent.
 4. Emit audit and outbox events for externally visible state changes.
 5. Keep provider calls timeout-bound and retry only through explicit, observable policies.
+6. Do not bind tenant DB context before calling public module-resolution functions.

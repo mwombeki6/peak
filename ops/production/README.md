@@ -21,6 +21,7 @@ This directory contains the Podman Compose deployment baseline for Peak phase 1.
 ## Security Requirements
 
 - Never run API or worker as the migration login.
+- Keep Flyway disabled for API and worker; only `peak-migration` runs migrations.
 - Keep `PEAK_ALLOW_HEADER_IDENTITY=false` in production.
 - Keep SpringDoc disabled in production.
 - Keep CORS origins explicit.
@@ -35,3 +36,4 @@ This directory contains the Podman Compose deployment baseline for Peak phase 1.
 - `peak_platform_support`: optional readonly support login, member of `pms_readonly_support`.
 
 The schema grants are owned by Flyway migrations. Add privilege changes as migrations, not manual grants.
+Runtime grants and role-scoped RLS policies are validated by `RuntimeDatabaseRoleIntegrationTests`.

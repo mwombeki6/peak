@@ -25,12 +25,17 @@ class JdbcAuthorizationPort(
         }
 
         val identity = requestContextHolder.current().identity
-        databaseSessionContext.bind(identity)
 
         return when (request.guardMode) {
-            GuardMode.STAFF_PERMISSION -> authorizeStaffPermission(identity, request)
+            GuardMode.STAFF_PERMISSION -> {
+                databaseSessionContext.bind(identity)
+                authorizeStaffPermission(identity, request)
+            }
             GuardMode.MODULE_ONLY -> authorizePublicModule(identity, request)
-            GuardMode.PLATFORM_PERMISSION -> authorizePlatformPermission(identity, request)
+            GuardMode.PLATFORM_PERMISSION -> {
+                databaseSessionContext.bind(identity)
+                authorizePlatformPermission(identity, request)
+            }
             GuardMode.PUBLIC_TOKEN -> authorizePublicToken(identity, request)
         }
     }
