@@ -62,19 +62,4 @@ class RawRequestIdentityTests {
         )
     }
 
-    @Test
-    fun rejectsPublicScopeCombinedWithStaffIdentity() {
-        val error = assertFailsWith<IllegalArgumentException> {
-            RawRequestIdentity(
-                tenantId = UUID.randomUUID(),
-                tenantUserId = UUID.randomUUID(),
-                publicTenantId = UUID.randomUUID(),
-            ).validate()
-        }
-
-        assertEquals(
-            "Public request scope cannot be combined with staff or platform identity",
-            error.message,
-        )
-    }
 }

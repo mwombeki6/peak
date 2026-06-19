@@ -15,6 +15,7 @@ Public routes derive tenant and property scope from the URL property id through 
 - Property access requires an active tenant, active property, and enabled public module access.
 - Payment initiation must use `Idempotency-Key` for duplicate-charge protection.
 - Provider credentials must come from environment or a secrets manager, never source files.
+- Production API startup fails unless at least one payment provider is configured with HTTPS and non-placeholder credentials.
 
 ## Persistence
 
@@ -31,3 +32,4 @@ Public routes derive tenant and property scope from the URL property id through 
 4. Emit audit and outbox events for externally visible state changes.
 5. Keep provider calls timeout-bound and retry only through explicit, observable policies.
 6. Do not bind tenant DB context before calling public module-resolution functions.
+7. Reject public booking or payment requests when tenant, property, tenant module, or property module access is disabled.

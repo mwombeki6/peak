@@ -15,7 +15,9 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.stereotype.Component
 
 @Component
@@ -25,6 +27,7 @@ class OutboxWorkerProcessor(
     private val properties: OutboxWorkerProperties,
     private val workerIdProvider: OutboxWorkerIdProvider,
     private val clock: Clock,
+    private val meterRegistry: ObjectProvider<MeterRegistry>,
 ) {
     suspend fun processBatch(
         destination: OutboxDestination? = null,
@@ -51,11 +54,13 @@ class OutboxWorkerProcessor(
             }.awaitAll()
         }
 
-        return OutboxWorkerBatchResult.from(
+        val result = OutboxWorkerBatchResult.from(
             destination = destination,
             claimed = claimed.size,
             eventResults = eventResults,
         )
+        recordBatchMetrics(result)
+        return result
     }
 
     fun processBatchBlocking(
@@ -71,10 +76,12 @@ class OutboxWorkerProcessor(
             return 0
         }
 
-        return outboxWorkerPort.reclaimStale(
+        val reclaimed = outboxWorkerPort.reclaimStale(
             lockedBefore = Instant.now(clock).minus(properties.staleLockTimeout),
             limit = properties.staleReclaimLimit,
         )
+        recordCounter(OUTBOX_RECLAIMED_METRIC, reclaimed, "all")
+        return reclaimed
     }
 
     private suspend fun processClaimedEvent(
@@ -187,9 +194,35 @@ class OutboxWorkerProcessor(
             .take(MAX_ERROR_MESSAGE_LENGTH)
     }
 
+    private fun recordBatchMetrics(result: OutboxWorkerBatchResult) {
+        val destination = result.destination?.databaseValue ?: "all"
+        recordCounter(OUTBOX_CLAIMED_METRIC, result.claimed, destination)
+        recordCounter(OUTBOX_DELIVERED_METRIC, result.delivered, destination)
+        recordCounter(OUTBOX_FAILED_METRIC, result.failed, destination)
+        recordCounter(OUTBOX_DEAD_LETTERED_METRIC, result.deadLettered, destination)
+    }
+
+    private fun recordCounter(
+        name: String,
+        amount: Int,
+        destination: String,
+    ) {
+        if (amount <= 0) {
+            return
+        }
+        meterRegistry.ifAvailable { registry ->
+            registry.counter(name, "destination", destination).increment(amount.toDouble())
+        }
+    }
+
     private companion object {
         private val logger = LoggerFactory.getLogger(OutboxWorkerProcessor::class.java)
         private const val MAX_ERROR_MESSAGE_LENGTH = 1000
+        private const val OUTBOX_CLAIMED_METRIC = "peak.outbox.worker.claimed"
+        private const val OUTBOX_DELIVERED_METRIC = "peak.outbox.worker.delivered"
+        private const val OUTBOX_FAILED_METRIC = "peak.outbox.worker.failed"
+        private const val OUTBOX_DEAD_LETTERED_METRIC = "peak.outbox.worker.dead_lettered"
+        private const val OUTBOX_RECLAIMED_METRIC = "peak.outbox.worker.reclaimed"
     }
 }
 

@@ -10,20 +10,14 @@ data class RawRequestIdentity(
     val platformUserId: UUID? = null,
     val supportSessionId: UUID? = null,
     val supportTenantId: UUID? = null,
-    val publicTenantId: UUID? = null,
-    val publicPropertyId: UUID? = null,
     val correlationId: String? = null,
 ) {
     fun validate(): RequestIdentity {
         val hasTenantIdentity = tenantId != null || tenantUserId != null
         val hasPlatformIdentity = platformUserId != null
-        val hasPublicScope = publicTenantId != null || publicPropertyId != null
 
         require(!(hasTenantIdentity && hasPlatformIdentity)) {
             "Mixed tenant and platform context is not allowed"
-        }
-        require(!(hasPublicScope && (hasTenantIdentity || hasPlatformIdentity))) {
-            "Public request scope cannot be combined with staff or platform identity"
         }
         require(!(tenantUserId != null && tenantId == null)) {
             "Tenant user context requires tenant context"
@@ -60,8 +54,6 @@ data class RawRequestIdentity(
             )
 
             else -> RequestIdentity.Public(
-                tenantId = publicTenantId,
-                propertyId = publicPropertyId,
                 correlationId = correlationId,
             )
         }

@@ -15,6 +15,8 @@ User management owns authorization, external identity resolution, tenant user in
 - Normal Keycloak/OIDC tokens resolve through `identity_links` by issuer and subject; direct `peak_identity_mode` claims are disabled unless a trusted runtime explicitly enables them.
 - Platform permissions are checked through platform roles and tenant access helpers.
 - Tenant permissions are checked through tenant roles, role permissions, and active tenant user state.
+- Tenant-created roles are dynamic but tenant-scoped; a tenant route cannot assign a role from another tenant.
+- System tenant roles are immutable through tenant self-service. Assignment, revocation, and invitation flows must reject `tenant_roles.is_system=true`.
 - Public property routes are resolved through `resolve_public_property_scope`; public headers are not trusted.
 - Staff and platform guards bind database session context before permission checks; public module guards stay unbound.
 - Route guard rules are cached briefly and refreshed from `module_access_matrix`.
@@ -28,3 +30,4 @@ User management owns authorization, external identity resolution, tenant user in
 5. Prefer database-backed role and permission data for business permissions, with code constants only for stable permission names.
 6. Deny unregistered API routes by default in production.
 7. Keep platform RLS policies scoped to platform runtime roles instead of granting platform helpers to tenant API roles.
+8. Treat disabled, locked, deleted, or revoked OIDC identities as immediately unauthorized; do not cache positive identity resolution outside request scope.

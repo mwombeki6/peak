@@ -159,8 +159,6 @@ class RequestContextResolver(
             platformUserId = request.uuidHeader(PeakRequestHeaders.PLATFORM_USER_ID),
             supportSessionId = request.uuidHeader(PeakRequestHeaders.SUPPORT_SESSION_ID),
             supportTenantId = request.uuidHeader(PeakRequestHeaders.SUPPORT_TENANT_ID),
-            publicTenantId = request.uuidHeader(PeakRequestHeaders.PUBLIC_TENANT_ID),
-            publicPropertyId = request.uuidHeader(PeakRequestHeaders.PUBLIC_PROPERTY_ID),
             correlationId = correlationId,
         )
 
@@ -170,8 +168,6 @@ class RequestContextResolver(
             raw.platformUserId,
             raw.supportSessionId,
             raw.supportTenantId,
-            raw.publicTenantId,
-            raw.publicPropertyId,
         ).any { it != null }
 
         return if (hasIdentity) raw.validateContext() else null

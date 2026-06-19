@@ -31,6 +31,9 @@ Production JWTs are resolved by issuer and subject through `identity_links`. Dir
 - SpringDoc API docs or Swagger UI are enabled.
 - the API or worker uses the migration database login.
 - Flyway is enabled outside the dedicated migration runtime, or disabled in the migration runtime.
+- the API runtime starts outbox workers.
+- the worker or migration runtime exposes HTTP.
+- the migration runtime starts outbox workers.
 
 ### Utilities And Errors
 
@@ -54,3 +57,4 @@ Audit primitives are not in `shared`. Use the published ports from `audit::api`.
 4. Do not add idempotency, outbox, audit, or tenant workflow implementations to `shared`.
 5. Keep production validation strict; unsafe local defaults belong only in `dev` and `test`.
 6. Keep Flyway execution separated from API and worker runtimes.
+7. Tune datasource pools per runtime profile; API, worker, and migration have different concurrency budgets.

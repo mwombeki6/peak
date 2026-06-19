@@ -12,8 +12,6 @@ object PeakRequestHeaders {
     const val PLATFORM_USER_ID = "X-Peak-Platform-User-Id"
     const val SUPPORT_SESSION_ID = "X-Peak-Support-Session-Id"
     const val SUPPORT_TENANT_ID = "X-Peak-Support-Tenant-Id"
-    const val PUBLIC_TENANT_ID = "X-Peak-Public-Tenant-Id"
-    const val PUBLIC_PROPERTY_ID = "X-Peak-Public-Property-Id"
 
     val IDENTITY_HEADERS = setOf(
         TENANT_ID,
@@ -21,7 +19,5 @@ object PeakRequestHeaders {
         PLATFORM_USER_ID,
         SUPPORT_SESSION_ID,
         SUPPORT_TENANT_ID,
-        PUBLIC_TENANT_ID,
-        PUBLIC_PROPERTY_ID,
     )
 }

@@ -10,6 +10,9 @@ import com.mwombeki.peak.shared.context.RequestContextException
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -119,6 +122,40 @@ class JdbcIdempotencyPortIntegrationTests {
     }
 
     @Test
+    fun concurrentReservationsForSameKeyProduceSingleStartedRecord() {
+        val platformUserId = UUID.randomUUID()
+        val idempotencyKey = "idem-${UUID.randomUUID()}"
+        val executor = Executors.newFixedThreadPool(2)
+        val ready = CountDownLatch(2)
+        val start = CountDownLatch(1)
+
+        try {
+            val futures = (1..2).map {
+                executor.submit<IdempotencyReservation> {
+                    ready.countDown()
+                    assertTrue(start.await(5, TimeUnit.SECONDS))
+                    requireNotNull(
+                        transactionTemplate.execute {
+                            requestContextHolder.set(platformContext(platformUserId, idempotencyKey))
+                            idempotencyPort.reserve(command("parallel"))
+                        },
+                    )
+                }
+            }
+
+            assertTrue(ready.await(5, TimeUnit.SECONDS))
+            start.countDown()
+            val results = futures.map { it.get(10, TimeUnit.SECONDS) }
+
+            assertEquals(1, results.count { it is IdempotencyReservation.Started })
+            assertEquals(1, results.count { it is IdempotencyReservation.InProgress })
+            assertEquals(1, results.map(::reservationRecordId).toSet().size)
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
     fun requiresIdempotencyKeyHeader() {
         val platformUserId = UUID.randomUUID()
 
@@ -210,6 +247,15 @@ class JdbcIdempotencyPortIntegrationTests {
             requestPayload = mapOf("slug" to slug),
             resourceType = "tenants",
         )
+    }
+
+    private fun reservationRecordId(reservation: IdempotencyReservation): UUID {
+        return when (reservation) {
+            is IdempotencyReservation.Started -> reservation.recordId
+            is IdempotencyReservation.InProgress -> reservation.recordId
+            is IdempotencyReservation.Replay -> reservation.recordId
+            is IdempotencyReservation.Conflict -> reservation.recordId
+        }
     }
 
     private fun insertPlan(id: UUID) {

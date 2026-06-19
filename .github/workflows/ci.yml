@@ -38,6 +38,24 @@ jobs:
       - name: Validate production compose
         run: podman compose --env-file ops/production/.env.example -f ops/production/compose.yaml config >/tmp/peak-production-compose.yaml
 
+      - name: Validate production environment contract
+        run: |
+          tmp="$RUNNER_TEMP/peak-production.env"
+          cp ops/production/.env.example "$tmp"
+          cat >>"$tmp" <<'EOF'
+          PEAK_IMAGE=ghcr.io/mwombeki6/peak/peak:ci
+          POSTGRES_MIGRATOR_PASSWORD=ci-migrator-password-1234
+          POSTGRES_APP_PASSWORD=ci-application-password-1234
+          POSTGRES_WORKER_PASSWORD=ci-worker-password-1234
+          POSTGRES_PLATFORM_SUPPORT_PASSWORD=ci-platform-support-password-1234
+          KEYCLOAK_ADMIN_PASSWORD=ci-keycloak-admin-password-1234
+          KEYCLOAK_DB_PASSWORD=ci-keycloak-db-password-1234
+          PEAK_PAYMENT_VODACOM_MPESA_API_KEY=ci-vodacom-api-key-1234
+          PEAK_PAYMENT_VODACOM_MPESA_API_SECRET=ci-vodacom-api-secret-1234
+          EOF
+          sed -i 's/^          //' "$tmp"
+          ops/scripts/validate-production-env.sh "$tmp"
+
       - name: Validate Keycloak realm JSON
         run: python3 -m json.tool ops/keycloak/peak-realm.json >/dev/null
 

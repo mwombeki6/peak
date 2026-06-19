@@ -18,6 +18,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
+import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
@@ -64,6 +65,9 @@ class OutboxWorkerProcessorIntegrationTests {
     @Autowired
     private lateinit var jdbcTemplate: JdbcTemplate
 
+    @Autowired
+    private lateinit var meterRegistry: MeterRegistry
+
     @AfterTest
     fun cleanUp() {
         jdbcTemplate.update("DELETE FROM outbox_events")
@@ -78,6 +82,7 @@ class OutboxWorkerProcessorIntegrationTests {
                 destination = OutboxDestination.PLATFORM,
                 correlationId = "corr-worker-deliver",
             )
+            val deliveredBefore = counterValue("peak.outbox.worker.delivered", "platform")
 
             val result = processor.processBatch(OutboxDestination.PLATFORM)
 
@@ -91,6 +96,7 @@ class OutboxWorkerProcessorIntegrationTests {
             assertEquals("delivered", row["status"])
             assertEquals(null, row["locked_by"])
             assertNotNull(row["delivered_at"])
+            assertEquals(deliveredBefore + 1.0, counterValue("peak.outbox.worker.delivered", "platform"))
         }
     }
 
@@ -102,6 +108,7 @@ class OutboxWorkerProcessorIntegrationTests {
                 destination = OutboxDestination.PLATFORM,
                 correlationId = "corr-worker-fail",
             )
+            val failedBefore = counterValue("peak.outbox.worker.failed", "platform")
 
             val result = processor.processBatch(OutboxDestination.PLATFORM)
 
@@ -116,6 +123,7 @@ class OutboxWorkerProcessorIntegrationTests {
             assertEquals(1, row["attempt_count"])
             assertTrue(row["error_message"].toString().contains("provider unavailable"))
             assertNotNull(row["failed_at"])
+            assertEquals(failedBefore + 1.0, counterValue("peak.outbox.worker.failed", "platform"))
         }
     }
 
@@ -126,6 +134,7 @@ class OutboxWorkerProcessorIntegrationTests {
                 destination = OutboxDestination.EMAIL,
                 correlationId = "corr-worker-no-handler",
             )
+            val deadLetteredBefore = counterValue("peak.outbox.worker.dead_lettered", "email")
 
             val result = processor.processBatch(OutboxDestination.EMAIL)
 
@@ -138,6 +147,10 @@ class OutboxWorkerProcessorIntegrationTests {
             assertEquals("dead_letter", row["status"])
             assertEquals(null, row["locked_by"])
             assertTrue(row["error_message"].toString().contains("No outbox handler"))
+            assertEquals(
+                deadLetteredBefore + 1.0,
+                counterValue("peak.outbox.worker.dead_lettered", "email"),
+            )
         }
     }
 
@@ -156,6 +169,7 @@ class OutboxWorkerProcessorIntegrationTests {
             """.trimIndent(),
             eventId,
         )
+        val reclaimedBefore = counterValue("peak.outbox.worker.reclaimed", "all")
 
         val reclaimed = processor.reclaimStaleLocks()
 
@@ -164,6 +178,7 @@ class OutboxWorkerProcessorIntegrationTests {
         assertEquals("failed", row["status"])
         assertEquals(null, row["locked_by"])
         assertEquals("Reclaimed after stale worker lock", row["error_message"])
+        assertEquals(reclaimedBefore + 1.0, counterValue("peak.outbox.worker.reclaimed", "all"))
     }
 
     private fun enqueueEvent(
@@ -211,6 +226,14 @@ class OutboxWorkerProcessorIntegrationTests {
             httpMethod = "POST",
             requestPath = "/api/v1/platform/tenants",
         )
+    }
+
+    private fun counterValue(name: String, destination: String): Double {
+        return meterRegistry.find(name)
+            .tag("destination", destination)
+            .counter()
+            ?.count()
+            ?: 0.0
     }
 
     @TestConfiguration

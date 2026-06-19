@@ -4,6 +4,14 @@ spring:
       enabled: false
   flyway:
     enabled: false
+  datasource:
+    hikari:
+      maximum-pool-size: ${PEAK_DB_POOL_MAX_SIZE:20}
+      minimum-idle: ${PEAK_DB_POOL_MIN_IDLE:5}
+      connection-timeout: ${PEAK_DB_CONNECTION_TIMEOUT:5s}
+      validation-timeout: ${PEAK_DB_VALIDATION_TIMEOUT:2s}
+      idle-timeout: ${PEAK_DB_IDLE_TIMEOUT:10m}
+      max-lifetime: ${PEAK_DB_MAX_LIFETIME:30m}
   devtools:
     add-properties: false
 
@@ -17,6 +25,13 @@ peak:
     request-context:
       allow-header-identity: false
       allow-trusted-jwt-identity-claims: false
+  integrations:
+    payment:
+      providers:
+        vodacom-mpesa:
+          base-url: ${PEAK_PAYMENT_VODACOM_MPESA_URL:}
+          api-key: ${PEAK_PAYMENT_VODACOM_MPESA_API_KEY:}
+          api-secret: ${PEAK_PAYMENT_VODACOM_MPESA_API_SECRET:}
 
 springdoc:
   api-docs:

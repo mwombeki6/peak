@@ -232,6 +232,39 @@ class TenantUserInvitationServiceIntegrationTests {
     }
 
     @Test
+    fun rejectsInvitationIntoSystemTenantRole() {
+        val fixture = tenantFixture()
+        insertTenantFixture(fixture)
+        jdbcTemplate.update(
+            "UPDATE tenant_roles SET is_system = true WHERE id = ?",
+            fixture.roleId,
+        )
+        requestContextHolder.set(tenantContext(fixture, "idem-invite-system-role"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            invitationPort.inviteTenantUser(
+                InviteTenantUserCommand(
+                    tenantId = fixture.tenantId,
+                    email = "system-role-${fixture.tenantId}@example.com",
+                    tenantRoleId = fixture.roleId,
+                ),
+            )
+        }
+
+        assertEquals("System tenant roles cannot be assigned through invitations", error.message)
+        val invitationCount = jdbcTemplate.queryForObject(
+            """
+            SELECT count(*)
+            FROM tenant_user_invitations
+            WHERE tenant_id = ?
+            """.trimIndent(),
+            Int::class.java,
+            fixture.tenantId,
+        )
+        assertEquals(0, invitationCount)
+    }
+
+    @Test
     fun acceptsInvitationAndLinksOidcIdentity() {
         val fixture = tenantFixture()
         insertTenantFixture(fixture)

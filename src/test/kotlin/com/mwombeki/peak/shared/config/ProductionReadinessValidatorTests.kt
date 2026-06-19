@@ -35,13 +35,70 @@ class ProductionReadinessValidatorTests {
                 .withProperty("spring.datasource.password", "not-local-secret")
                 .withProperty("springdoc.api-docs.enabled", "false")
                 .withProperty("springdoc.swagger-ui.enabled", "false")
-                .withProperty("spring.flyway.enabled", "true"),
+                .withProperty("spring.flyway.enabled", "true")
+                .withProperty("spring.main.web-application-type", "none"),
             runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.MIGRATION),
             httpSecurityProperties = secureHttpProperties(),
             requestContextProperties = RequestContextProperties(
                 allowHeaderIdentity = false,
                 allowTrustedJwtIdentityClaims = false,
             ),
+        ).afterSingletonsInstantiated()
+    }
+
+    @Test
+    fun rejectsWorkerRuntimeWithHttpEnabledOrWorkerDisabled() {
+        val error = assertFailsWith<IllegalStateException> {
+            validator(
+                environment = secureProdEnvironment()
+                    .withProperty("spring.datasource.username", "peak_worker")
+                    .withProperty("spring.datasource.password", "not-local-secret")
+                    .withProperty("spring.flyway.enabled", "false"),
+                runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.WORKER),
+                httpSecurityProperties = secureHttpProperties(),
+                requestContextProperties = secureRequestContextProperties(),
+            ).afterSingletonsInstantiated()
+        }
+
+        val message = requireNotNull(error.message)
+        assertTrue(message.contains("outbox.worker.enabled must be true for worker runtime"))
+        assertTrue(message.contains("web-application-type must be none for worker runtime"))
+    }
+
+    @Test
+    fun rejectsMigrationRuntimeWithWorkerEnabled() {
+        val error = assertFailsWith<IllegalStateException> {
+            validator(
+                environment = secureProdEnvironment()
+                    .withProperty("spring.datasource.username", "peak_migrator")
+                    .withProperty("spring.datasource.password", "not-local-secret")
+                    .withProperty("spring.flyway.enabled", "true")
+                    .withProperty("spring.main.web-application-type", "none")
+                    .withProperty("peak.reliability.outbox.worker.enabled", "true"),
+                runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.MIGRATION),
+                httpSecurityProperties = secureHttpProperties(),
+                requestContextProperties = secureRequestContextProperties(),
+            ).afterSingletonsInstantiated()
+        }
+
+        assertTrue(
+            requireNotNull(error.message)
+                .contains("outbox.worker.enabled must be false for migration runtime"),
+        )
+    }
+
+    @Test
+    fun allowsProductionWorkerRuntimeOnlyWhenHttpIsDisabledAndWorkerIsEnabled() {
+        validator(
+            environment = secureProdEnvironment()
+                .withProperty("spring.datasource.username", "peak_worker")
+                .withProperty("spring.datasource.password", "not-local-secret")
+                .withProperty("spring.flyway.enabled", "false")
+                .withProperty("spring.main.web-application-type", "none")
+                .withProperty("peak.reliability.outbox.worker.enabled", "true"),
+            runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.WORKER),
+            httpSecurityProperties = secureHttpProperties(),
+            requestContextProperties = secureRequestContextProperties(),
         ).afterSingletonsInstantiated()
     }
 
@@ -97,5 +154,18 @@ class ProductionReadinessValidatorTests {
                 allowedOrigins = listOf("https://app.peak.example.com"),
             ),
         )
+    }
+
+    private fun secureRequestContextProperties(): RequestContextProperties {
+        return RequestContextProperties(
+            allowHeaderIdentity = false,
+            allowTrustedJwtIdentityClaims = false,
+        )
+    }
+
+    private fun secureProdEnvironment(): MockEnvironment {
+        return prodEnvironment()
+            .withProperty("springdoc.api-docs.enabled", "false")
+            .withProperty("springdoc.swagger-ui.enabled", "false")
     }
 }

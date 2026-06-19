@@ -17,8 +17,10 @@ Reliability owns idempotency, transactional outbox persistence, and worker dispa
 ## Concurrency Rules
 
 - Claiming is database-coordinated; workers must not process the same event concurrently.
+- `OutboxWorkerProcessor` uses bounded coroutine parallelism through `peak.reliability.outbox.worker.max-parallelism`.
 - Handlers must be idempotent because retries and recovery are expected.
 - Retry delay, batch size, worker id, and stale-lock recovery must stay observable and configurable.
+- Worker counters are emitted for claimed, delivered, failed, dead-lettered, and reclaimed events.
 
 ## Production Rules
 
@@ -26,3 +28,4 @@ Reliability owns idempotency, transactional outbox persistence, and worker dispa
 2. Keep idempotency reservation, business mutation, audit, and outbox enqueue in one transaction.
 3. Dispatch side effects from the worker, not the request thread, unless the provider contract requires synchronous behavior.
 4. Dead-letter events only after recording enough error context to diagnose the failure.
+5. Keep API runtime worker-disabled, worker runtime web-disabled, and migration runtime both web-disabled and worker-disabled.
