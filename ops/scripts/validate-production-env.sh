@@ -62,6 +62,34 @@ require_boolean() {
   esac
 }
 
+require_non_negative_int() {
+  name="$1"
+  value="$(value_of "$name")"
+  require_var "$name"
+  case "$value" in
+    ''|*[!0-9]*) fail "$name must be a non-negative integer" ;;
+  esac
+}
+
+require_positive_int() {
+  name="$1"
+  value="$(value_of "$name")"
+  require_non_negative_int "$name"
+  if [ -n "$value" ] && [ "$value" -lt 1 ]; then
+    fail "$name must be greater than zero"
+  fi
+}
+
+require_int_gte() {
+  left="$1"
+  right="$2"
+  left_value="$(value_of "$left")"
+  right_value="$(value_of "$right")"
+  if [ -n "$left_value" ] && [ -n "$right_value" ] && [ "$left_value" -lt "$right_value" ]; then
+    fail "$left must be greater than or equal to $right"
+  fi
+}
+
 require_distinct() {
   left="$1"
   right="$2"
@@ -87,11 +115,42 @@ for name in \
   KEYCLOAK_HOSTNAME \
   PEAK_SECURITY_JWT_ISSUER_URI \
   PEAK_SECURITY_JWT_AUDIENCE \
-  PEAK_CORS_ALLOWED_ORIGINS
+  PEAK_CORS_ALLOWED_ORIGINS \
+  PEAK_DB_POOL_MAX_SIZE \
+  PEAK_DB_POOL_MIN_IDLE \
+  PEAK_WORKER_DB_POOL_MAX_SIZE \
+  PEAK_WORKER_DB_POOL_MIN_IDLE \
+  PEAK_MIGRATION_DB_POOL_MAX_SIZE \
+  PEAK_MIGRATION_DB_POOL_MIN_IDLE \
+  PEAK_OUTBOX_WORKER_BATCH_SIZE \
+  PEAK_OUTBOX_WORKER_MAX_PARALLELISM \
+  PEAK_PAYMENT_VODACOM_MPESA_URL
 do
   require_var "$name"
   reject_placeholder "$name"
 done
+
+for name in \
+  PEAK_DB_POOL_MAX_SIZE \
+  PEAK_WORKER_DB_POOL_MAX_SIZE \
+  PEAK_MIGRATION_DB_POOL_MAX_SIZE \
+  PEAK_OUTBOX_WORKER_BATCH_SIZE \
+  PEAK_OUTBOX_WORKER_MAX_PARALLELISM
+do
+  require_positive_int "$name"
+done
+
+for name in \
+  PEAK_DB_POOL_MIN_IDLE \
+  PEAK_WORKER_DB_POOL_MIN_IDLE \
+  PEAK_MIGRATION_DB_POOL_MIN_IDLE
+do
+  require_non_negative_int "$name"
+done
+
+require_int_gte PEAK_DB_POOL_MAX_SIZE PEAK_DB_POOL_MIN_IDLE
+require_int_gte PEAK_WORKER_DB_POOL_MAX_SIZE PEAK_WORKER_DB_POOL_MIN_IDLE
+require_int_gte PEAK_MIGRATION_DB_POOL_MAX_SIZE PEAK_MIGRATION_DB_POOL_MIN_IDLE
 
 for name in \
   POSTGRES_MIGRATOR_PASSWORD \
@@ -99,7 +158,9 @@ for name in \
   POSTGRES_WORKER_PASSWORD \
   POSTGRES_PLATFORM_SUPPORT_PASSWORD \
   KEYCLOAK_ADMIN_PASSWORD \
-  KEYCLOAK_DB_PASSWORD
+  KEYCLOAK_DB_PASSWORD \
+  PEAK_PAYMENT_VODACOM_MPESA_API_KEY \
+  PEAK_PAYMENT_VODACOM_MPESA_API_SECRET
 do
   require_secret "$name"
 done
@@ -129,6 +190,11 @@ fi
 case "$(value_of PEAK_SECURITY_JWT_ISSUER_URI)" in
   http://*|https://*) ;;
   *) fail "PEAK_SECURITY_JWT_ISSUER_URI must be an absolute http(s) URL" ;;
+esac
+
+case "$(value_of PEAK_PAYMENT_VODACOM_MPESA_URL)" in
+  https://*) ;;
+  *) fail "PEAK_PAYMENT_VODACOM_MPESA_URL must use https" ;;
 esac
 
 case "$(value_of PEAK_APP_ORIGIN)" in

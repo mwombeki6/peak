@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - master
+    tags:
+      - "v*"
   workflow_dispatch:
 
 permissions:
@@ -52,8 +54,30 @@ jobs:
         run: |
           IMAGE=ghcr.io/${{ github.repository }}/peak:${{ github.sha }}
           podman build -f Containerfile -t "$IMAGE" .
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            podman push "$IMAGE"
+          podman save "$IMAGE" -o peak-image.tar
+
+      - name: Scan image vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: image
+          input: peak-image.tar
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+      - name: Push image
+        if: github.event_name != 'pull_request'
+        run: |
+          IMAGE=ghcr.io/${{ github.repository }}/peak:${{ github.sha }}
+          podman push "$IMAGE"
+          if [ "${{ github.ref }}" = "refs/heads/master" ]; then
             podman tag "$IMAGE" ghcr.io/${{ github.repository }}/peak:latest
             podman push ghcr.io/${{ github.repository }}/peak:latest
           fi
+          case "${{ github.ref }}" in
+            refs/tags/v*)
+              podman tag "$IMAGE" ghcr.io/${{ github.repository }}/peak:${{ github.ref_name }}
+              podman push ghcr.io/${{ github.repository }}/peak:${{ github.ref_name }}
+              ;;
+          esac

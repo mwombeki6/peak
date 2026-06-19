@@ -384,23 +384,24 @@ class TenantUserInvitationService(
         tenantId: UUID,
         tenantRoleId: UUID,
     ) {
-        val exists = jdbcTemplate.queryForObject(
+        val role = jdbcTemplate.query(
             """
-            SELECT EXISTS (
-                SELECT 1
-                FROM tenant_roles
-                WHERE tenant_id = ?
-                  AND id = ?
-                  AND is_active = true
-            )
+            SELECT is_system
+            FROM tenant_roles
+            WHERE tenant_id = ?
+              AND id = ?
+              AND is_active = true
             """.trimIndent(),
-            Boolean::class.java,
+            { rs, _ -> rs.getBoolean("is_system") },
             tenantId,
             tenantRoleId,
-        ) == true
+        ).singleOrNull()
 
-        require(exists) {
+        require(role != null) {
             "Active tenant role is required for invitation"
+        }
+        require(!role) {
+            "System tenant roles cannot be assigned through invitations"
         }
     }
 

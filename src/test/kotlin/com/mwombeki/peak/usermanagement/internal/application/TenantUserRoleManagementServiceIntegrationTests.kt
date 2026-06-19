@@ -8,6 +8,7 @@ import com.mwombeki.peak.usermanagement.api.AssignTenantUserRoleCommand
 import com.mwombeki.peak.usermanagement.api.ListTenantPermissionsQuery
 import com.mwombeki.peak.usermanagement.api.ListTenantRolesQuery
 import com.mwombeki.peak.usermanagement.api.RevokeTenantUserRoleCommand
+import com.mwombeki.peak.usermanagement.api.TenantUserRoleManagementNotFoundException
 import com.mwombeki.peak.usermanagement.api.TenantUserRoleManagementPort
 import java.util.UUID
 import kotlin.test.AfterTest
@@ -180,6 +181,82 @@ class TenantUserRoleManagementServiceIntegrationTests {
         assertEquals("Tenant user cannot assign own tenant roles", error.message)
     }
 
+    @Test
+    fun rejectsSystemRoleAssignmentAndRevocationThroughTenantSelfService() {
+        val fixture = roleManagementFixture()
+        insertRoleManagementFixture(fixture)
+        jdbcTemplate.update(
+            "UPDATE tenant_roles SET is_system = true WHERE id = ?",
+            fixture.targetRoleId,
+        )
+
+        requestContextHolder.set(tenantContext(fixture, "idem-role-system-assign"))
+        val assignError = assertFailsWith<IllegalArgumentException> {
+            roleManagementPort.assignTenantUserRole(
+                AssignTenantUserRoleCommand(
+                    tenantId = fixture.tenantId,
+                    userId = fixture.targetUserId,
+                    tenantRoleId = fixture.targetRoleId,
+                ),
+            )
+        }
+
+        assertEquals(
+            "System tenant roles cannot be assigned or revoked through tenant role management",
+            assignError.message,
+        )
+        assertEquals(0, roleAssignmentCount(fixture))
+
+        insertTargetRoleAssignment(fixture)
+        requestContextHolder.set(tenantContext(fixture, "idem-role-system-revoke"))
+        val revokeError = assertFailsWith<IllegalArgumentException> {
+            roleManagementPort.revokeTenantUserRole(
+                RevokeTenantUserRoleCommand(
+                    tenantId = fixture.tenantId,
+                    userId = fixture.targetUserId,
+                    tenantRoleId = fixture.targetRoleId,
+                ),
+            )
+        }
+
+        assertEquals(
+            "System tenant roles cannot be assigned or revoked through tenant role management",
+            revokeError.message,
+        )
+        assertEquals(1, roleAssignmentCount(fixture))
+    }
+
+    @Test
+    fun rejectsRoleFromAnotherTenant() {
+        val fixture = roleManagementFixture()
+        insertRoleManagementFixture(fixture)
+        val otherPlanId = UUID.randomUUID()
+        val otherTenantId = UUID.randomUUID()
+        val otherRoleId = UUID.randomUUID()
+        insertPlan(otherPlanId)
+        insertTenant(otherTenantId, otherPlanId)
+        insertTenantRole(
+            tenantId = otherTenantId,
+            roleId = otherRoleId,
+            name = "Other Tenant Role $otherRoleId",
+            code = "other-tenant-role-$otherRoleId",
+        )
+
+        requestContextHolder.set(tenantContext(fixture, "idem-role-cross-tenant"))
+        val error = assertFailsWith<TenantUserRoleManagementNotFoundException> {
+            roleManagementPort.assignTenantUserRole(
+                AssignTenantUserRoleCommand(
+                    tenantId = fixture.tenantId,
+                    userId = fixture.targetUserId,
+                    tenantRoleId = otherRoleId,
+                ),
+            )
+        }
+
+        assertEquals("Active tenant role was not found", error.message)
+        assertEquals(0, roleAssignmentCount(fixture))
+    }
+
     private fun roleManagementFixture(): RoleManagementFixture {
         val actorRoleId = UUID.randomUUID()
         val targetRoleId = UUID.randomUUID()
@@ -200,26 +277,8 @@ class TenantUserRoleManagementServiceIntegrationTests {
     }
 
     private fun insertRoleManagementFixture(fixture: RoleManagementFixture) {
-        jdbcTemplate.update(
-            """
-            INSERT INTO plans (id, name, code)
-            VALUES (?, ?, ?)
-            """.trimIndent(),
-            fixture.planId,
-            "Plan ${fixture.planId}",
-            "plan-${fixture.planId}",
-        )
-        jdbcTemplate.update(
-            """
-            INSERT INTO tenants (id, name, slug, schema_name, plan_id)
-            VALUES (?, ?, ?, ?, ?)
-            """.trimIndent(),
-            fixture.tenantId,
-            "Tenant ${fixture.tenantId}",
-            "tenant-${fixture.tenantId}",
-            "tenant_${fixture.tenantId}".replace("-", "_"),
-            fixture.planId,
-        )
+        insertPlan(fixture.planId)
+        insertTenant(fixture.tenantId, fixture.planId)
         jdbcTemplate.update(
             """
             INSERT INTO tenant_modules (tenant_id, module_id, is_enabled, is_configured)
@@ -288,6 +347,32 @@ class TenantUserRoleManagementServiceIntegrationTests {
             tenantId,
             "User $userId",
             email,
+        )
+    }
+
+    private fun insertPlan(planId: UUID) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO plans (id, name, code)
+            VALUES (?, ?, ?)
+            """.trimIndent(),
+            planId,
+            "Plan $planId",
+            "plan-$planId",
+        )
+    }
+
+    private fun insertTenant(tenantId: UUID, planId: UUID) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenants (id, name, slug, schema_name, plan_id)
+            VALUES (?, ?, ?, ?, ?)
+            """.trimIndent(),
+            tenantId,
+            "Tenant $tenantId",
+            "tenant-$tenantId",
+            "tenant_$tenantId".replace("-", "_"),
+            planId,
         )
     }
 

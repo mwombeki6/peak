@@ -88,6 +88,32 @@ class GlobalExceptionHandler {
         return ResponseEntity.status(ex.statusCode).body(problem)
     }
 
+    @ExceptionHandler(IllegalArgumentException::class)
+    fun handleIllegalArgumentException(
+        ex: IllegalArgumentException,
+        request: HttpServletRequest,
+    ): ResponseEntity<ProblemDetail> {
+        return problem(
+            status = HttpStatus.BAD_REQUEST,
+            title = "Invalid request",
+            detail = ex.message ?: "Request is invalid",
+            request = request,
+        )
+    }
+
+    @ExceptionHandler(IllegalStateException::class)
+    fun handleIllegalStateException(
+        ex: IllegalStateException,
+        request: HttpServletRequest,
+    ): ResponseEntity<ProblemDetail> {
+        return problem(
+            status = HttpStatus.CONFLICT,
+            title = "Request conflict",
+            detail = ex.message ?: "Request cannot be completed in the current state",
+            request = request,
+        )
+    }
+
     /**
      * Catch-all fallback guard for unexpected low-level errors (NullPointerExceptions, DB drops, etc.).
      */
@@ -118,5 +144,19 @@ class GlobalExceptionHandler {
                 ?.trim()
                 ?.takeIf { it.isNotEmpty() }
             ?: UUID.randomUUID().toString()
+    }
+
+    private fun problem(
+        status: HttpStatus,
+        title: String,
+        detail: String,
+        request: HttpServletRequest,
+    ): ResponseEntity<ProblemDetail> {
+        val traceId = traceId(request)
+        val problem = ProblemDetail.forStatusAndDetail(status, detail)
+        problem.title = title
+        problem.setProperty("traceId", traceId)
+        problem.setProperty("path", request.requestURI)
+        return ResponseEntity.status(status).body(problem)
     }
 }

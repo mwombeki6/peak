@@ -65,7 +65,7 @@ class PaymentIntegrationService(
                     idempotencyPort.markSucceeded(
                         recordId = reservation.recordId,
                         responseCode = 200,
-                        responseBody = objectMapper.writeValueAsString(response)
+                        responseBody = response
                     )
                     response
                 } catch (ex: Exception) {
@@ -124,6 +124,7 @@ class PaymentIntegrationService(
         val providerKey = request.provider.name.lowercase().replace("_", "-")
         val providerConfig = properties.providers[providerKey]
             ?: throw IllegalArgumentException("Configuration not found for provider: ${request.provider}")
+        providerConfig.requireUsableFor(request.provider.name)
 
         logger.info(
             "Initiating {} payment via {} for amount {} using {}",
@@ -187,6 +188,18 @@ class PaymentIntegrationService(
                     "Account number is required for bank transfer payments"
                 }
             }
+        }
+    }
+
+    private fun ProviderConfig.requireUsableFor(provider: String) {
+        require(baseUrl.isNotBlank()) {
+            "Payment provider $provider base URL is required"
+        }
+        require(!apiKey.isNullOrBlank()) {
+            "Payment provider $provider API key is required"
+        }
+        require(!apiSecret.isNullOrBlank()) {
+            "Payment provider $provider API secret is required"
         }
     }
 

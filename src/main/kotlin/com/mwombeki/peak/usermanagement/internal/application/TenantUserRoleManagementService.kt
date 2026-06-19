@@ -360,38 +360,48 @@ class TenantUserRoleManagementService(
     }
 
     private fun requireActiveTenantRole(tenantId: UUID, tenantRoleId: UUID) {
-        val exists = tenantRoleExists(tenantId, tenantRoleId, activeOnly = true)
-        if (!exists) {
+        val role = findTenantRole(tenantId, tenantRoleId, activeOnly = true)
+        if (role == null) {
             throw TenantUserRoleManagementNotFoundException("Active tenant role was not found")
+        }
+        require(!role.isSystem) {
+            "System tenant roles cannot be assigned or revoked through tenant role management"
         }
     }
 
     private fun requireTenantRole(tenantId: UUID, tenantRoleId: UUID) {
-        val exists = tenantRoleExists(tenantId, tenantRoleId, activeOnly = false)
-        if (!exists) {
+        val role = findTenantRole(tenantId, tenantRoleId, activeOnly = false)
+        if (role == null) {
             throw TenantUserRoleManagementNotFoundException("Tenant role was not found")
+        }
+        require(!role.isSystem) {
+            "System tenant roles cannot be assigned or revoked through tenant role management"
         }
     }
 
-    private fun tenantRoleExists(
+    private fun findTenantRole(
         tenantId: UUID,
         tenantRoleId: UUID,
         activeOnly: Boolean,
-    ): Boolean {
+    ): TenantRolePolicy? {
         val activeClause = if (activeOnly) "AND is_active = true" else ""
-        return jdbcTemplate.queryForList(
+        return jdbcTemplate.query(
             """
-            SELECT id
+            SELECT is_system
             FROM tenant_roles
             WHERE tenant_id = ?
               AND id = ?
               $activeClause
             FOR UPDATE
             """.trimIndent(),
-            UUID::class.java,
+            { rs, _ ->
+                TenantRolePolicy(
+                    isSystem = rs.getBoolean("is_system"),
+                )
+            },
             tenantId,
             tenantRoleId,
-        ).isNotEmpty()
+        ).singleOrNull()
     }
 
     private fun recordSideEffects(
@@ -482,5 +492,9 @@ class TenantUserRoleManagementService(
         val tenantRoleId: UUID,
         val action: String,
         val eventType: String,
+    )
+
+    private data class TenantRolePolicy(
+        val isSystem: Boolean,
     )
 }

@@ -65,6 +65,38 @@ class OidcJwtRouteAuthorizationIntegrationTests {
     }
 
     @Test
+    fun deniesTenantRouteWhenOidcTenantUserIsDisabled() {
+        val fixture = tenantOidcFixture(userStatus = "disabled", userActive = false)
+        insertAuthorizedTenantFixture(fixture)
+
+        mockMvc.perform(
+            get("/api/v1/tenants/${fixture.tenantId}/roles")
+                .secure(true)
+                .with(oidcJwt(fixture.issuer, fixture.subject, fixture.email))
+                .header(PeakRequestHeaders.CORRELATION_ID, "corr-oidc-route-disabled-user"),
+        )
+            .andExpect(status().isForbidden)
+            .andExpect(content().contentType("application/problem+json"))
+            .andExpect(content().string(containsString("Tenant identity is required")))
+    }
+
+    @Test
+    fun deniesTenantRouteWhenOidcTenantUserIsLocked() {
+        val fixture = tenantOidcFixture(locked = true)
+        insertAuthorizedTenantFixture(fixture)
+
+        mockMvc.perform(
+            get("/api/v1/tenants/${fixture.tenantId}/roles")
+                .secure(true)
+                .with(oidcJwt(fixture.issuer, fixture.subject, fixture.email))
+                .header(PeakRequestHeaders.CORRELATION_ID, "corr-oidc-route-locked-user"),
+        )
+            .andExpect(status().isForbidden)
+            .andExpect(content().contentType("application/problem+json"))
+            .andExpect(content().string(containsString("Tenant identity is required")))
+    }
+
+    @Test
     fun authorizesPlatformRouteUsingOidcIdentityLinkWithoutIdentityHeaders() {
         val fixture = platformOidcFixture()
         insertAuthorizedPlatformFixture(fixture)
@@ -98,6 +130,9 @@ class OidcJwtRouteAuthorizationIntegrationTests {
 
     private fun tenantOidcFixture(
         revoked: Boolean = false,
+        userStatus: String = "active",
+        userActive: Boolean = true,
+        locked: Boolean = false,
     ): TenantOidcFixture {
         val tenantId = UUID.randomUUID()
         val userId = UUID.randomUUID()
@@ -115,6 +150,9 @@ class OidcJwtRouteAuthorizationIntegrationTests {
             subject = subject,
             email = "$subject@example.com",
             revoked = revoked,
+            userStatus = userStatus,
+            userActive = userActive,
+            locked = locked,
         )
     }
 
@@ -147,13 +185,24 @@ class OidcJwtRouteAuthorizationIntegrationTests {
         )
         jdbcTemplate.update(
             """
-            INSERT INTO users (id, tenant_id, full_name, email, status, is_active)
-            VALUES (?, ?, ?, ?, 'active', true)
+            INSERT INTO users (
+                id,
+                tenant_id,
+                full_name,
+                email,
+                status,
+                is_active,
+                locked_until
+            )
+            VALUES (?, ?, ?, ?, ?, ?, CASE WHEN ? THEN now() + interval '1 hour' ELSE NULL END)
             """.trimIndent(),
             fixture.userId,
             fixture.tenantId,
             "Tenant OIDC User ${fixture.userId}",
             fixture.email,
+            fixture.userStatus,
+            fixture.userActive,
+            fixture.locked,
         )
         jdbcTemplate.update(
             """
@@ -354,6 +403,9 @@ class OidcJwtRouteAuthorizationIntegrationTests {
         val subject: String,
         val email: String,
         val revoked: Boolean,
+        val userStatus: String,
+        val userActive: Boolean,
+        val locked: Boolean,
     )
 
     private data class PlatformOidcFixture(

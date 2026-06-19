@@ -12,6 +12,9 @@ import com.mwombeki.peak.shared.context.RequestIdentity
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -122,6 +125,41 @@ class JdbcOutboxPortIntegrationTests {
         assertEquals("delivered", row["status"])
         assertEquals(null, row["locked_by"])
         assertNotNull(row["delivered_at"])
+    }
+
+    @Test
+    fun parallelWorkersDoNotClaimSameEvent() {
+        jdbcTemplate.update("DELETE FROM outbox_events")
+        val eventIds = (1..10).map { index ->
+            enqueueEvent("corr-outbox-parallel-$index")
+        }.toSet()
+        val executor = Executors.newFixedThreadPool(2)
+        val ready = CountDownLatch(2)
+        val start = CountDownLatch(1)
+
+        try {
+            val futures = listOf("worker-a", "worker-b").map { workerId ->
+                executor.submit<List<UUID>> {
+                    ready.countDown()
+                    assertTrue(start.await(5, TimeUnit.SECONDS))
+                    outboxWorkerPort.claim(
+                        workerId = workerId,
+                        destination = OutboxDestination.PLATFORM,
+                        limit = 7,
+                    ).map { it.id }
+                }
+            }
+
+            assertTrue(ready.await(5, TimeUnit.SECONDS))
+            start.countDown()
+            val claimedByWorkers = futures.map { it.get(10, TimeUnit.SECONDS) }
+            val claimedIds = claimedByWorkers.flatten()
+
+            assertEquals(eventIds, claimedIds.toSet())
+            assertEquals(claimedIds.size, claimedIds.toSet().size)
+        } finally {
+            executor.shutdownNow()
+        }
     }
 
     @Test

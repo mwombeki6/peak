@@ -16,4 +16,4 @@ fi
 podman compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull
 podman compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --profile migration up --abort-on-container-exit peak-migration
 podman compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d peak-api peak-worker
-"$ROOT_DIR/ops/scripts/healthcheck.sh"
+"$ROOT_DIR/ops/scripts/smoke-test.sh"

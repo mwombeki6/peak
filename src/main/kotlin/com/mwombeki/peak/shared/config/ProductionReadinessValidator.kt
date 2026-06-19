@@ -46,6 +46,7 @@ class ProductionReadinessValidator(
             }
             validateDatasource()
             validateFlyway()
+            validateRuntimeTopology()
         }
 
         if (violations.isNotEmpty()) {
@@ -90,6 +91,46 @@ class ProductionReadinessValidator(
         }
     }
 
+    private fun MutableList<String>.validateRuntimeTopology() {
+        val webApplicationType = environment.getProperty("spring.main.web-application-type")
+            ?.trim()
+            ?.lowercase()
+        val outboxWorkerEnabled = environment.getProperty(
+            "peak.reliability.outbox.worker.enabled",
+            Boolean::class.java,
+            false,
+        )
+
+        when (runtimeProperties.mode) {
+            PeakRuntimeMode.API -> {
+                requireTrue(!outboxWorkerEnabled) {
+                    "peak.reliability.outbox.worker.enabled must be false for API runtime in prod"
+                }
+                requireTrue(webApplicationType != WEB_APPLICATION_TYPE_NONE) {
+                    "spring.main.web-application-type must not be none for API runtime in prod"
+                }
+            }
+
+            PeakRuntimeMode.WORKER -> {
+                requireTrue(outboxWorkerEnabled) {
+                    "peak.reliability.outbox.worker.enabled must be true for worker runtime in prod"
+                }
+                requireTrue(webApplicationType == WEB_APPLICATION_TYPE_NONE) {
+                    "spring.main.web-application-type must be none for worker runtime in prod"
+                }
+            }
+
+            PeakRuntimeMode.MIGRATION -> {
+                requireTrue(!outboxWorkerEnabled) {
+                    "peak.reliability.outbox.worker.enabled must be false for migration runtime in prod"
+                }
+                requireTrue(webApplicationType == WEB_APPLICATION_TYPE_NONE) {
+                    "spring.main.web-application-type must be none for migration runtime in prod"
+                }
+            }
+        }
+    }
+
     private fun String?.isDefaultLocalSecret(): Boolean {
         return this == LOCAL_MIGRATOR_USER || this == "peak_app" || this == "peak_worker"
     }
@@ -117,5 +158,6 @@ class ProductionReadinessValidator(
     private companion object {
         const val PROD_PROFILE = "prod"
         const val LOCAL_MIGRATOR_USER = "peak_migrator"
+        const val WEB_APPLICATION_TYPE_NONE = "none"
     }
 }
