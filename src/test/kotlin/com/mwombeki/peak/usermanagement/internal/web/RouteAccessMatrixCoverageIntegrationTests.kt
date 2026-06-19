@@ -1,0 +1,158 @@
+package com.mwombeki.peak.usermanagement.internal.web
+
+import com.mwombeki.peak.TestcontainersConfiguration
+import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.usermanagement.api.GuardMode
+import com.mwombeki.peak.usermanagement.api.RouteScope
+import java.util.UUID
+import kotlin.test.Test
+import kotlin.test.assertTrue
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.context.annotation.Import
+import org.springframework.web.bind.annotation.RequestMethod
+import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
+import org.testcontainers.junit.jupiter.Testcontainers
+
+@Import(TestcontainersConfiguration::class)
+@SpringBootTest
+@Testcontainers(disabledWithoutDocker = true)
+class RouteAccessMatrixCoverageIntegrationTests {
+
+    @Autowired
+    @Qualifier("requestMappingHandlerMapping")
+    private lateinit var handlerMapping: RequestMappingHandlerMapping
+
+    @Autowired
+    private lateinit var ruleRepository: RouteAccessRuleRepository
+
+    @Autowired
+    private lateinit var routeAccessMatcher: RouteAccessMatcher
+
+    @Test
+    fun everyApplicationApiRouteHasAnExplicitAccessMatrixContract() {
+        val rules = ruleRepository.findEnabledRules()
+        val violations = applicationApiRouteSamples().mapNotNull { sample ->
+            val authorizationRequest = routeAccessMatcher.match(
+                httpMethod = sample.httpMethod.name,
+                requestPath = sample.samplePath,
+                identity = RequestIdentity.Public(),
+                rules = rules,
+            )
+
+            when {
+                authorizationRequest == null -> {
+                    "${sample.httpMethod} ${sample.pattern} is not registered in module_access_matrix"
+                }
+
+                authorizationRequest.guardMode != sample.expectedGuardMode -> {
+                    "${sample.httpMethod} ${sample.pattern} resolved to guard " +
+                            "${authorizationRequest.guardMode}, expected ${sample.expectedGuardMode}"
+                }
+
+                authorizationRequest.routeScope != sample.expectedRouteScope -> {
+                    "${sample.httpMethod} ${sample.pattern} resolved to scope " +
+                            "${authorizationRequest.routeScope}, expected ${sample.expectedRouteScope}"
+                }
+
+                else -> null
+            }
+        }
+
+        assertTrue(
+            violations.isEmpty(),
+            violations.joinToString(
+                separator = "\n",
+                prefix = "API routes without correct access contracts:\n",
+            ),
+        )
+    }
+
+    private fun applicationApiRouteSamples(): List<RouteSample> {
+        return handlerMapping.handlerMethods.flatMap { (mappingInfo, handlerMethod) ->
+            if (!handlerMethod.beanType.name.startsWith("com.mwombeki.peak.")) {
+                return@flatMap emptyList()
+            }
+
+            val patterns = mappingInfo.pathPatternsCondition
+                ?.patterns
+                ?.map { it.patternString }
+                ?: emptyList()
+
+            patterns
+                .filter { it.startsWith("/api/") }
+                .flatMap { pattern ->
+                    val methods = mappingInfo.methodsCondition.methods
+                        .takeIf { it.isNotEmpty() }
+                        ?: API_METHODS
+
+                    methods.map { method ->
+                        RouteSample(
+                            httpMethod = method,
+                            pattern = pattern,
+                            samplePath = pattern.toSamplePath(),
+                            expectedGuardMode = pattern.expectedGuardMode(),
+                            expectedRouteScope = pattern.expectedRouteScope(),
+                        )
+                    }
+                }
+        }
+    }
+
+    private fun String.toSamplePath(): String {
+        return PATH_VARIABLE_PATTERN.replace(this) { match ->
+            val variableName = match.groupValues[1].substringBefore(":")
+            SAMPLE_UUIDS.getValue(variableName)
+        }
+    }
+
+    private fun String.expectedGuardMode(): GuardMode {
+        return when {
+            startsWith("/api/v1/platform/") -> GuardMode.PLATFORM_PERMISSION
+            startsWith("/api/v1/public/properties/") -> GuardMode.MODULE_ONLY
+            this == "/api/v1/invitations/accept" -> GuardMode.PUBLIC_TOKEN
+            startsWith("/api/v1/tenants/") -> GuardMode.STAFF_PERMISSION
+            else -> error("No expected guard mode for API route pattern $this")
+        }
+    }
+
+    private fun String.expectedRouteScope(): RouteScope {
+        return when {
+            startsWith("/api/v1/platform/") -> RouteScope.PLATFORM
+            startsWith("/api/v1/public/properties/") -> RouteScope.PUBLIC_PROPERTY
+            this == "/api/v1/invitations/accept" -> RouteScope.PUBLIC
+            startsWith("/api/v1/tenants/") -> RouteScope.TENANT
+            else -> error("No expected route scope for API route pattern $this")
+        }
+    }
+
+    private data class RouteSample(
+        val httpMethod: RequestMethod,
+        val pattern: String,
+        val samplePath: String,
+        val expectedGuardMode: GuardMode,
+        val expectedRouteScope: RouteScope,
+    )
+
+    private companion object {
+        val API_METHODS = setOf(
+            RequestMethod.GET,
+            RequestMethod.POST,
+            RequestMethod.PUT,
+            RequestMethod.PATCH,
+            RequestMethod.DELETE,
+        )
+
+        val PATH_VARIABLE_PATTERN = Regex("\\{([^}]+)}")
+
+        val SAMPLE_UUIDS = mapOf(
+            "id" to UUID.fromString("11111111-1111-1111-1111-111111111111").toString(),
+            "tenantId" to UUID.fromString("22222222-2222-2222-2222-222222222222").toString(),
+            "propertyId" to UUID.fromString("33333333-3333-3333-3333-333333333333").toString(),
+            "userId" to UUID.fromString("44444444-4444-4444-4444-444444444444").toString(),
+            "identityLinkId" to UUID.fromString("55555555-5555-5555-5555-555555555555").toString(),
+            "tenantRoleId" to UUID.fromString("66666666-6666-6666-6666-666666666666").toString(),
+        )
+    }
+}
