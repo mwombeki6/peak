@@ -12,6 +12,7 @@ User management owns authorization, external identity resolution, tenant user in
 ## Access Control Model
 
 - JWT claims identify the external subject; database state decides whether the subject is allowed.
+- Normal Keycloak/OIDC tokens resolve through `identity_links` by issuer and subject; direct `peak_identity_mode` claims are disabled unless a trusted runtime explicitly enables them.
 - Platform permissions are checked through platform roles and tenant access helpers.
 - Tenant permissions are checked through tenant roles, role permissions, and active tenant user state.
 - Public property routes are resolved through `resolve_public_property_scope`; public headers are not trusted.
@@ -21,8 +22,9 @@ User management owns authorization, external identity resolution, tenant user in
 ## Production Rules
 
 1. Keep JWT validation enabled in production and require issuer plus audience.
-2. Require verified OIDC email before accepting invitation flows that bind an email.
-3. Do not place permission decisions in controllers; use the authorization port or route guard.
-4. Prefer database-backed role and permission data for business permissions, with code constants only for stable permission names.
-5. Deny unregistered API routes by default in production.
-6. Keep platform RLS policies scoped to platform runtime roles instead of granting platform helpers to tenant API roles.
+2. Keep trusted direct JWT identity claims disabled in production; use database-backed OIDC identity links.
+3. Require verified OIDC email before accepting invitation flows that bind an email.
+4. Do not place permission decisions in controllers; use the authorization port or route guard.
+5. Prefer database-backed role and permission data for business permissions, with code constants only for stable permission names.
+6. Deny unregistered API routes by default in production.
+7. Keep platform RLS policies scoped to platform runtime roles instead of granting platform helpers to tenant API roles.

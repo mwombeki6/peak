@@ -7,4 +7,5 @@ import org.springframework.modulith.NamedInterface
 @ConfigurationProperties(prefix = "peak.security.request-context")
 data class RequestContextProperties(
     val allowHeaderIdentity: Boolean = false,
+    val allowTrustedJwtIdentityClaims: Boolean = false,
 )

@@ -35,6 +35,9 @@ class ProductionReadinessValidator(
             requireTrue(!requestContextProperties.allowHeaderIdentity) {
                 "peak.security.request-context.allow-header-identity must be false in prod"
             }
+            requireTrue(!requestContextProperties.allowTrustedJwtIdentityClaims) {
+                "peak.security.request-context.allow-trusted-jwt-identity-claims must be false in prod"
+            }
             requireTrue(!springDocEnabled("springdoc.api-docs.enabled")) {
                 "springdoc.api-docs.enabled must be false in prod"
             }

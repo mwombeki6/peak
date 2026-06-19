@@ -8,12 +8,12 @@ The shared module contains platform primitives that are safe for every module to
 
 `shared.context` owns request identity resolution and request-local metadata:
 
-- `RequestContextResolver` converts trusted headers or JWT claims into a typed `RequestIdentity`.
+- `RequestContextResolver` converts authenticated JWT subjects, explicitly enabled trusted identity claims, or test-only trusted headers into a typed `RequestIdentity`.
 - `RequestContextInterceptor` binds the context for the request lifecycle and attaches logging metadata.
 - `DatabaseSessionContext` binds PostgreSQL `app.current_*` settings inside transactions for RLS-aware database access.
 - Public identities may bind a tenant only after the tenant/property has been resolved from trusted database state.
 
-There must be only one request identity path. Do not add tenant-specific thread locals or servlet filters beside this system.
+Production JWTs are resolved by issuer and subject through `identity_links`. Direct `peak_identity_mode` JWT claims are disabled by default and must stay disabled in production. There must be only one request identity path. Do not add tenant-specific thread locals or servlet filters beside this system.
 
 ### Security
 
@@ -27,6 +27,7 @@ There must be only one request identity path. Do not add tenant-specific thread 
 - JWT issuer or audience is missing.
 - CORS origins are not explicit.
 - trusted header identity is enabled.
+- trusted direct JWT identity claims are enabled.
 - SpringDoc API docs or Swagger UI are enabled.
 - the API or worker uses the migration database login.
 - Flyway is enabled outside the dedicated migration runtime, or disabled in the migration runtime.

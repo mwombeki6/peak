@@ -22,6 +22,7 @@ class ProductionReadinessValidatorTests {
         val message = requireNotNull(error.message)
         assertTrue(message.contains("jwt.enabled must be true"))
         assertTrue(message.contains("allow-header-identity must be false"))
+        assertTrue(message.contains("allow-trusted-jwt-identity-claims must be false"))
         assertTrue(message.contains("API/worker runtime must not use the migrator"))
         assertTrue(message.contains("spring.flyway.enabled must be false"))
     }
@@ -39,6 +40,7 @@ class ProductionReadinessValidatorTests {
             httpSecurityProperties = secureHttpProperties(),
             requestContextProperties = RequestContextProperties(
                 allowHeaderIdentity = false,
+                allowTrustedJwtIdentityClaims = false,
             ),
         ).afterSingletonsInstantiated()
     }
@@ -56,6 +58,7 @@ class ProductionReadinessValidatorTests {
             httpSecurityProperties = secureHttpProperties(),
             requestContextProperties = RequestContextProperties(
                 allowHeaderIdentity = false,
+                allowTrustedJwtIdentityClaims = false,
             ),
         ).afterSingletonsInstantiated()
     }
@@ -66,6 +69,7 @@ class ProductionReadinessValidatorTests {
         httpSecurityProperties: HttpSecurityProperties = HttpSecurityProperties(),
         requestContextProperties: RequestContextProperties = RequestContextProperties(
             allowHeaderIdentity = true,
+            allowTrustedJwtIdentityClaims = true,
         ),
     ): ProductionReadinessValidator {
         return ProductionReadinessValidator(
