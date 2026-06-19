@@ -112,6 +112,40 @@ class JdbcAuthorizationPortIntegrationTests {
     }
 
     @Test
+    fun deniesPlatformIdentityOnTenantStaffGuard() {
+        val fixture = tenantFixture("tenant.profile.manage")
+        val platformUserId = UUID.randomUUID()
+
+        val decision = requireNotNull(
+            transactionTemplate.execute {
+                insertTenantFixture(fixture)
+                insertPlatformUser(platformUserId)
+                requestContextHolder.set(
+                    requestContext(
+                        RequestIdentity.Platform(
+                            platformUserId = platformUserId,
+                            correlationId = "corr-auth-platform-on-tenant",
+                        ),
+                    ),
+                )
+
+                authorizationPort.authorize(
+                    RouteAuthorizationRequest(
+                        moduleId = "tenant_admin",
+                        guardMode = GuardMode.STAFF_PERMISSION,
+                        routeScope = RouteScope.TENANT,
+                        permissionCode = "tenant.profile.manage",
+                        tenantId = fixture.tenantId,
+                    ),
+                )
+            },
+        )
+
+        assertFalse(decision.allowed)
+        assertEquals("Tenant identity is required", decision.reason)
+    }
+
+    @Test
     fun allowsPublicAccessWhenTenantAndPropertyModuleAreEnabled() {
         val fixture = publicModuleFixture()
 
@@ -174,6 +208,38 @@ class JdbcAuthorizationPortIntegrationTests {
     }
 
     @Test
+    fun deniesPublicAccessWhenIdentityPropertyDoesNotMatchRoute() {
+        val fixture = publicModuleFixture()
+        val otherPropertyId = UUID.randomUUID()
+
+        val decision = requireNotNull(
+            transactionTemplate.execute {
+                insertPublicModuleFixture(fixture)
+                requestContextHolder.set(
+                    requestContext(
+                        RequestIdentity.Public(
+                            propertyId = otherPropertyId,
+                            correlationId = "corr-auth-public-property-mismatch",
+                        ),
+                    ),
+                )
+
+                authorizationPort.authorize(
+                    RouteAuthorizationRequest(
+                        moduleId = "booking_engine",
+                        guardMode = GuardMode.MODULE_ONLY,
+                        routeScope = RouteScope.PUBLIC_PROPERTY,
+                        propertyId = fixture.propertyId,
+                    ),
+                )
+            },
+        )
+
+        assertFalse(decision.allowed)
+        assertEquals("Requested property does not match public identity", decision.reason)
+    }
+
+    @Test
     fun allowsPlatformUserWithPlatformPermission() {
         val fixture = platformFixture()
 
@@ -232,6 +298,90 @@ class JdbcAuthorizationPortIntegrationTests {
 
         assertFalse(decision.allowed)
         assertEquals("Platform user lacks required permission", decision.reason)
+    }
+
+    @Test
+    fun deniesTenantIdentityOnPlatformGuard() {
+        val fixture = tenantFixture("tenant.profile.manage")
+
+        val decision = requireNotNull(
+            transactionTemplate.execute {
+                insertTenantFixture(fixture)
+                requestContextHolder.set(
+                    requestContext(
+                        RequestIdentity.Tenant(
+                            tenantId = fixture.tenantId,
+                            tenantUserId = fixture.userId,
+                            correlationId = "corr-auth-tenant-on-platform",
+                        ),
+                    ),
+                )
+
+                authorizationPort.authorize(
+                    RouteAuthorizationRequest(
+                        moduleId = "platform_admin",
+                        guardMode = GuardMode.PLATFORM_PERMISSION,
+                        routeScope = RouteScope.PLATFORM,
+                        permissionCode = "platform.tenants.manage",
+                    ),
+                )
+            },
+        )
+
+        assertFalse(decision.allowed)
+        assertEquals("Platform identity is required", decision.reason)
+    }
+
+    @Test
+    fun allowsPublicTokenGuardOnlyForPublicIdentity() {
+        val tenantFixture = tenantFixture("tenant.profile.manage")
+
+        val allowed = requireNotNull(
+            transactionTemplate.execute {
+                requestContextHolder.set(
+                    requestContext(
+                        RequestIdentity.Public(
+                            correlationId = "corr-auth-public-token",
+                        ),
+                    ),
+                )
+
+                authorizationPort.authorize(
+                    RouteAuthorizationRequest(
+                        moduleId = "tenant_admin",
+                        guardMode = GuardMode.PUBLIC_TOKEN,
+                        routeScope = RouteScope.PUBLIC,
+                    ),
+                )
+            },
+        )
+
+        val denied = requireNotNull(
+            transactionTemplate.execute {
+                insertTenantFixture(tenantFixture)
+                requestContextHolder.set(
+                    requestContext(
+                        RequestIdentity.Tenant(
+                            tenantId = tenantFixture.tenantId,
+                            tenantUserId = tenantFixture.userId,
+                            correlationId = "corr-auth-tenant-public-token",
+                        ),
+                    ),
+                )
+
+                authorizationPort.authorize(
+                    RouteAuthorizationRequest(
+                        moduleId = "tenant_admin",
+                        guardMode = GuardMode.PUBLIC_TOKEN,
+                        routeScope = RouteScope.PUBLIC,
+                    ),
+                )
+            },
+        )
+
+        assertTrue(allowed.allowed)
+        assertFalse(denied.allowed)
+        assertEquals("Public identity is required", denied.reason)
     }
 
     @Test
