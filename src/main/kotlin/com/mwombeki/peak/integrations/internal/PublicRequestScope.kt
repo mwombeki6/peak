@@ -11,6 +11,18 @@ data class PublicRequestScope(
     val propertyId: UUID,
 )
 
+internal fun RequestContext.withPublicScope(scope: PublicRequestScope): RequestContext {
+    val publicIdentity = identity as? RequestIdentity.Public
+        ?: error("Public request identity is required")
+
+    return copy(
+        identity = publicIdentity.copy(
+            tenantId = scope.tenantId,
+            propertyId = scope.propertyId,
+        ),
+    )
+}
+
 @Component
 class PublicRequestScopeResolver(
     private val jdbcTemplate: JdbcTemplate,

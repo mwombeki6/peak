@@ -1,6 +1,7 @@
 name: Container
 
 on:
+  pull_request:
   push:
     branches:
       - master
@@ -9,6 +10,10 @@ on:
 permissions:
   contents: read
   packages: write
+
+concurrency:
+  group: container-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -27,10 +32,16 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Install Podman
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
+
       - name: Build jar
         run: ./gradlew bootJar
 
       - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
         uses: redhat-actions/podman-login@v1
         with:
           registry: ghcr.io
@@ -41,4 +52,8 @@ jobs:
         run: |
           IMAGE=ghcr.io/${{ github.repository }}/peak:${{ github.sha }}
           podman build -f Containerfile -t "$IMAGE" .
-          podman push "$IMAGE"
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            podman push "$IMAGE"
+            podman tag "$IMAGE" ghcr.io/${{ github.repository }}/peak:latest
+            podman push ghcr.io/${{ github.repository }}/peak:latest
+          fi

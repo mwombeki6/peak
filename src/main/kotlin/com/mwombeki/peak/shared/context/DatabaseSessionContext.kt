@@ -4,6 +4,7 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.modulith.NamedInterface
 import org.springframework.stereotype.Component
 import org.springframework.transaction.support.TransactionSynchronizationManager
+import java.util.UUID
 
 @NamedInterface("context")
 @Component
@@ -31,7 +32,9 @@ class DatabaseSessionContext(
                 setLocal(CURRENT_PLATFORM_USER_ID, identity.platformUserId.toString())
             }
 
-            is RequestIdentity.Public -> Unit
+            is RequestIdentity.Public -> {
+                identity.tenantId?.let { setTenantContext(it) }
+            }
         }
 
         jdbcTemplate.execute("select assert_no_mixed_context()")
@@ -50,6 +53,10 @@ class DatabaseSessionContext(
             name,
             value,
         )
+    }
+
+    private fun setTenantContext(tenantId: UUID) {
+        setLocal(CURRENT_TENANT_ID, tenantId.toString())
     }
 
     private companion object {

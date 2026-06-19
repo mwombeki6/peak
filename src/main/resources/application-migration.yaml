@@ -1,6 +1,8 @@
 spring:
   main:
     web-application-type: none
+  flyway:
+    enabled: true
 
 peak:
   runtime:

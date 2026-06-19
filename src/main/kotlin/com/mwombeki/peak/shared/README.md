@@ -11,6 +11,7 @@ The shared module contains platform primitives that are safe for every module to
 - `RequestContextResolver` converts trusted headers or JWT claims into a typed `RequestIdentity`.
 - `RequestContextInterceptor` binds the context for the request lifecycle and attaches logging metadata.
 - `DatabaseSessionContext` binds PostgreSQL `app.current_*` settings inside transactions for RLS-aware database access.
+- Public identities may bind a tenant only after the tenant/property has been resolved from trusted database state.
 
 There must be only one request identity path. Do not add tenant-specific thread locals or servlet filters beside this system.
 
@@ -28,6 +29,7 @@ There must be only one request identity path. Do not add tenant-specific thread 
 - trusted header identity is enabled.
 - SpringDoc API docs or Swagger UI are enabled.
 - the API or worker uses the migration database login.
+- Flyway is enabled outside the dedicated migration runtime, or disabled in the migration runtime.
 
 ### Utilities And Errors
 
@@ -50,3 +52,4 @@ Audit primitives are not in `shared`. Use the published ports from `audit::api`.
 3. Bind database session settings only through `DatabaseSessionContext`.
 4. Do not add idempotency, outbox, audit, or tenant workflow implementations to `shared`.
 5. Keep production validation strict; unsafe local defaults belong only in `dev` and `test`.
+6. Keep Flyway execution separated from API and worker runtimes.

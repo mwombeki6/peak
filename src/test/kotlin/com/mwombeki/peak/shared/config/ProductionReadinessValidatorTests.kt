@@ -23,6 +23,7 @@ class ProductionReadinessValidatorTests {
         assertTrue(message.contains("jwt.enabled must be true"))
         assertTrue(message.contains("allow-header-identity must be false"))
         assertTrue(message.contains("API/worker runtime must not use the migrator"))
+        assertTrue(message.contains("spring.flyway.enabled must be false"))
     }
 
     @Test
@@ -32,8 +33,26 @@ class ProductionReadinessValidatorTests {
                 .withProperty("spring.datasource.username", "peak_migrator")
                 .withProperty("spring.datasource.password", "not-local-secret")
                 .withProperty("springdoc.api-docs.enabled", "false")
-                .withProperty("springdoc.swagger-ui.enabled", "false"),
+                .withProperty("springdoc.swagger-ui.enabled", "false")
+                .withProperty("spring.flyway.enabled", "true"),
             runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.MIGRATION),
+            httpSecurityProperties = secureHttpProperties(),
+            requestContextProperties = RequestContextProperties(
+                allowHeaderIdentity = false,
+            ),
+        ).afterSingletonsInstantiated()
+    }
+
+    @Test
+    fun allowsProductionApiRuntimeOnlyWhenFlywayIsDisabled() {
+        validator(
+            environment = prodEnvironment()
+                .withProperty("spring.datasource.username", "peak_app")
+                .withProperty("spring.datasource.password", "not-local-secret")
+                .withProperty("springdoc.api-docs.enabled", "false")
+                .withProperty("springdoc.swagger-ui.enabled", "false")
+                .withProperty("spring.flyway.enabled", "false"),
+            runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.API),
             httpSecurityProperties = secureHttpProperties(),
             requestContextProperties = RequestContextProperties(
                 allowHeaderIdentity = false,

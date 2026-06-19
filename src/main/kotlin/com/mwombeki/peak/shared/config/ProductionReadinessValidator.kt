@@ -42,6 +42,7 @@ class ProductionReadinessValidator(
                 "springdoc.swagger-ui.enabled must be false in prod"
             }
             validateDatasource()
+            validateFlyway()
         }
 
         if (violations.isNotEmpty()) {
@@ -69,6 +70,19 @@ class ProductionReadinessValidator(
         if (runtimeProperties.mode != PeakRuntimeMode.MIGRATION) {
             requireTrue(username != LOCAL_MIGRATOR_USER) {
                 "API/worker runtime must not use the migrator database role in prod"
+            }
+        }
+    }
+
+    private fun MutableList<String>.validateFlyway() {
+        val flywayEnabled = environment.getProperty("spring.flyway.enabled", Boolean::class.java, true)
+        if (runtimeProperties.mode == PeakRuntimeMode.MIGRATION) {
+            requireTrue(flywayEnabled) {
+                "spring.flyway.enabled must be true for migration runtime in prod"
+            }
+        } else {
+            requireTrue(!flywayEnabled) {
+                "spring.flyway.enabled must be false for API/worker runtime in prod"
             }
         }
     }

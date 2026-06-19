@@ -3,6 +3,7 @@ package com.mwombeki.peak.integrations.internal
 import com.mwombeki.peak.integrations.api.PublicBookingPort
 import com.mwombeki.peak.integrations.api.PublicBookingSessionRequest
 import com.mwombeki.peak.integrations.api.PublicBookingSessionResponse
+import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
@@ -16,6 +17,7 @@ class BookingEngineService(
     private val jdbcTemplate: JdbcTemplate,
     private val requestContextHolder: RequestContextHolder,
     private val publicRequestScopeResolver: PublicRequestScopeResolver,
+    private val databaseSessionContext: DatabaseSessionContext,
 ) : PublicBookingPort {
 
     @Transactional
@@ -29,6 +31,7 @@ class BookingEngineService(
             propertyId = propertyId,
             moduleId = BOOKING_ENGINE_MODULE,
         )
+        requestContextHolder.set(context.withPublicScope(scope))
 
         val nights = ChronoUnit.DAYS.between(request.checkInDate, request.checkOutDate)
         require(nights > 0) {
@@ -45,6 +48,8 @@ class BookingEngineService(
         if (!moduleActive) {
             throw IllegalStateException("Public Booking Engine is disabled for this property.")
         }
+
+        databaseSessionContext.bind(requestContextHolder.current().identity)
 
         val newSessionId = UUID.randomUUID()
         val expirationTime = Instant.now().plusSeconds(900)

@@ -1,7 +1,9 @@
 package com.mwombeki.peak.shared.exception
 
+import com.mwombeki.peak.shared.context.PeakRequestHeaders
 import jakarta.servlet.http.HttpServletRequest
 import org.slf4j.LoggerFactory
+import org.slf4j.MDC
 import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
 import org.springframework.http.ResponseEntity
@@ -29,7 +31,7 @@ class GlobalExceptionHandler {
         ex: BusinessException,
         request: HttpServletRequest
     ): ResponseEntity<ErrorResponse> {
-        val traceId = UUID.randomUUID().toString() // In production, pull from your logging MDC trace
+        val traceId = traceId(request)
         log.warn("Business exception occurred [Trace: {}]: {} - Code: {}", traceId, ex.message, ex.errorCode)
 
         val errorResponse = ErrorResponse(
@@ -51,7 +53,7 @@ class GlobalExceptionHandler {
         ex: MethodArgumentNotValidException,
         request: HttpServletRequest
     ): ResponseEntity<ErrorResponse> {
-        val traceId = UUID.randomUUID().toString()
+        val traceId = traceId(request)
         val firstFieldError = ex.bindingResult.fieldError
         val customizedMessage = firstFieldError?.let { "[${it.field}] ${it.defaultMessage}" } ?: "Input request validation failed."
 
@@ -71,13 +73,17 @@ class GlobalExceptionHandler {
     @ExceptionHandler(ResponseStatusException::class)
     fun handleResponseStatusException(
         ex: ResponseStatusException,
+        request: HttpServletRequest,
     ): ResponseEntity<ProblemDetail> {
+        val traceId = traceId(request)
         val problem = ProblemDetail.forStatusAndDetail(
             ex.statusCode,
             ex.reason ?: "Request failed",
         )
         problem.title = HttpStatus.resolve(ex.statusCode.value())?.reasonPhrase
             ?: "Request failed"
+        problem.setProperty("traceId", traceId)
+        problem.setProperty("path", request.requestURI)
 
         return ResponseEntity.status(ex.statusCode).body(problem)
     }
@@ -90,7 +96,7 @@ class GlobalExceptionHandler {
         ex: Exception,
         request: HttpServletRequest
     ): ResponseEntity<ErrorResponse> {
-        val traceId = UUID.randomUUID().toString()
+        val traceId = traceId(request)
         // CRITICAL: We log the full stack trace to the internal server console for developers,
         // but we hide the dirty details from the API client so hackers can't see schema details.
         log.error("Fatal unhandled internal server execution error [Trace: {}]", traceId, ex)
@@ -104,5 +110,13 @@ class GlobalExceptionHandler {
             traceId = traceId
         )
         return ResponseEntity(errorResponse, HttpStatus.INTERNAL_SERVER_ERROR)
+    }
+
+    private fun traceId(request: HttpServletRequest): String {
+        return MDC.get("correlation_id")
+            ?: request.getHeader(PeakRequestHeaders.CORRELATION_ID)
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+            ?: UUID.randomUUID().toString()
     }
 }

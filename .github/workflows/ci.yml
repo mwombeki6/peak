@@ -6,6 +6,13 @@ on:
     branches:
       - master
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: Test
@@ -22,6 +29,20 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Install Podman Compose
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman podman-compose
+
+      - name: Validate production compose
+        run: podman compose --env-file ops/production/.env.example -f ops/production/compose.yaml config >/tmp/peak-production-compose.yaml
+
+      - name: Validate Keycloak realm JSON
+        run: python3 -m json.tool ops/keycloak/peak-realm.json >/dev/null
+
+      - name: Validate ops scripts
+        run: sh -n ops/scripts/*.sh
 
       - name: Run tests
         run: ./gradlew test

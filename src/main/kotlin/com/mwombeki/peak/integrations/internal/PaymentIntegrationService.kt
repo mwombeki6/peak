@@ -6,6 +6,7 @@ import com.mwombeki.peak.integrations.api.PaymentStatusResponse
 import com.mwombeki.peak.reliability.api.IdempotencyCommand
 import com.mwombeki.peak.reliability.api.IdempotencyPort
 import com.mwombeki.peak.reliability.api.IdempotencyReservation
+import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.JdbcTemplate
@@ -22,6 +23,7 @@ class PaymentIntegrationService(
     private val idempotencyPort: IdempotencyPort,
     private val requestContextHolder: RequestContextHolder,
     private val publicRequestScopeResolver: PublicRequestScopeResolver,
+    private val databaseSessionContext: DatabaseSessionContext,
     private val objectMapper: ObjectMapper
 ) : PaymentPort {
 
@@ -38,7 +40,10 @@ class PaymentIntegrationService(
             propertyId = propertyId,
             moduleId = BOOKING_ENGINE_MODULE,
         )
-        val idempotencyKey = context.idempotencyKey
+        requestContextHolder.set(context.withPublicScope(scope))
+        databaseSessionContext.bind(requestContextHolder.current().identity)
+
+        val idempotencyKey = requestContextHolder.current().idempotencyKey
             ?: throw IllegalArgumentException("Idempotency-Key header is required")
 
         val reservation = idempotencyPort.reserve(
