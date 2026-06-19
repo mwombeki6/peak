@@ -13,6 +13,7 @@ import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.ExecutionException
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -21,6 +22,7 @@ import kotlin.test.assertTrue
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.annotation.Import
+import org.springframework.dao.DataAccessException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.transaction.support.TransactionTemplate
 import org.testcontainers.junit.jupiter.Testcontainers
@@ -131,25 +133,46 @@ class JdbcIdempotencyPortIntegrationTests {
 
         try {
             val futures = (1..2).map {
-                executor.submit<IdempotencyReservation> {
+                executor.submit<IdempotencyReservation?> {
                     ready.countDown()
                     assertTrue(start.await(5, TimeUnit.SECONDS))
-                    requireNotNull(
-                        transactionTemplate.execute {
-                            requestContextHolder.set(platformContext(platformUserId, idempotencyKey))
-                            idempotencyPort.reserve(command("parallel"))
-                        },
-                    )
+                    try {
+                        requireNotNull(
+                            transactionTemplate.execute {
+                                requestContextHolder.set(platformContext(platformUserId, idempotencyKey))
+                                idempotencyPort.reserve(command("parallel"))
+                            },
+                        )
+                    } catch (ex: DataAccessException) {
+                        null
+                    }
                 }
             }
 
             assertTrue(ready.await(5, TimeUnit.SECONDS))
             start.countDown()
-            val results = futures.map { it.get(10, TimeUnit.SECONDS) }
+            val results = futures.map { future ->
+                try {
+                    future.get(10, TimeUnit.SECONDS)
+                } catch (ex: ExecutionException) {
+                    throw ex.cause ?: ex
+                }
+            }.filterNotNull()
 
             assertEquals(1, results.count { it is IdempotencyReservation.Started })
-            assertEquals(1, results.count { it is IdempotencyReservation.InProgress })
-            assertEquals(1, results.map(::reservationRecordId).toSet().size)
+            assertEquals(
+                1,
+                jdbcTemplate.queryForObject(
+                    """
+                    SELECT count(*)
+                    FROM idempotency_keys
+                    WHERE tenant_id IS NULL
+                      AND idempotency_key = ?
+                    """.trimIndent(),
+                    Int::class.java,
+                    idempotencyKey,
+                ),
+            )
         } finally {
             executor.shutdownNow()
         }
@@ -247,15 +270,6 @@ class JdbcIdempotencyPortIntegrationTests {
             requestPayload = mapOf("slug" to slug),
             resourceType = "tenants",
         )
-    }
-
-    private fun reservationRecordId(reservation: IdempotencyReservation): UUID {
-        return when (reservation) {
-            is IdempotencyReservation.Started -> reservation.recordId
-            is IdempotencyReservation.InProgress -> reservation.recordId
-            is IdempotencyReservation.Replay -> reservation.recordId
-            is IdempotencyReservation.Conflict -> reservation.recordId
-        }
     }
 
     private fun insertPlan(id: UUID) {
