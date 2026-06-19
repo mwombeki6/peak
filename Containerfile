@@ -1,12 +1,11 @@
-FROM eclipse-temurin:25-jre
+FROM eclipse-temurin:25-jre-alpine
 
 WORKDIR /app
 
-RUN apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl \
-  && rm -rf /var/lib/apt/lists/* \
-  && addgroup --system peak \
-  && adduser --system --ingroup peak peak
+RUN apk upgrade --no-cache \
+  && apk add --no-cache curl \
+  && addgroup -S peak \
+  && adduser -S -G peak peak
 
 COPY --chown=peak:peak build/libs/peak-*.jar /app/peak.jar
 

@@ -24,6 +24,8 @@ repositories {
 }
 
 extra["springModulithVersion"] = "2.0.6"
+extra["tomcat.version"] = "11.0.22"
+extra["postgresql.version"] = "42.7.11"
 
 dependencies {
     // Operations and observability
