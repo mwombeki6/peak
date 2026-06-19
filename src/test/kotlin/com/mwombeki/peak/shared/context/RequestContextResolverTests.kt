@@ -32,7 +32,7 @@ class RequestContextResolverTests {
         request.addHeader(PeakRequestHeaders.CORRELATION_ID, "corr-tenant")
         request.addHeader(PeakRequestHeaders.IDEMPOTENCY_KEY, "idem-tenant-1")
 
-        val context = resolver().resolve(
+        val context = resolver(allowTrustedJwtIdentityClaims = true).resolve(
             request,
             jwtAuthentication(
                 "peak_identity_mode" to "tenant",
@@ -54,7 +54,7 @@ class RequestContextResolverTests {
         val request = MockHttpServletRequest("POST", "/api/v1/platform/tenants")
         request.addHeader(PeakRequestHeaders.CORRELATION_ID, "corr-platform")
 
-        val context = resolver().resolve(
+        val context = resolver(allowTrustedJwtIdentityClaims = true).resolve(
             request,
             jwtAuthentication(
                 "peak_identity_mode" to "platform",
@@ -76,7 +76,7 @@ class RequestContextResolverTests {
         val request = MockHttpServletRequest("GET", "/api/v1/platform/support")
         request.addHeader(PeakRequestHeaders.CORRELATION_ID, "corr-support")
 
-        val context = resolver().resolve(
+        val context = resolver(allowTrustedJwtIdentityClaims = true).resolve(
             request,
             jwtAuthentication(
                 "peak_identity_mode" to "support",
@@ -197,6 +197,29 @@ class RequestContextResolverTests {
     }
 
     @Test
+    fun rejectsTrustedJwtIdentityClaimsByDefault() {
+        val tenantId = UUID.randomUUID()
+        val tenantUserId = UUID.randomUUID()
+        val request = MockHttpServletRequest("GET", "/api/v1/tenants/$tenantId/profile")
+
+        val error = assertFailsWith<RequestContextException> {
+            resolver().resolve(
+                request,
+                jwtAuthentication(
+                    "peak_identity_mode" to "tenant",
+                    "tenant_id" to tenantId.toString(),
+                    "tenant_user_id" to tenantUserId.toString(),
+                ),
+            )
+        }
+
+        assertEquals(
+            "Trusted JWT identity claims are disabled for this runtime",
+            error.message,
+        )
+    }
+
+    @Test
     fun resolvesPublicPropertyIdentityFromRoute() {
         val propertyId = UUID.randomUUID()
         val request = MockHttpServletRequest(
@@ -307,10 +330,14 @@ class RequestContextResolverTests {
 
     private fun resolver(
         allowHeaderIdentity: Boolean = false,
+        allowTrustedJwtIdentityClaims: Boolean = false,
         externalIdentityResolver: ExternalIdentityResolver = ExternalIdentityResolver { null },
     ): RequestContextResolver {
         return RequestContextResolver(
-            RequestContextProperties(allowHeaderIdentity = allowHeaderIdentity),
+            RequestContextProperties(
+                allowHeaderIdentity = allowHeaderIdentity,
+                allowTrustedJwtIdentityClaims = allowTrustedJwtIdentityClaims,
+            ),
             externalIdentityResolver,
         )
     }

@@ -28,10 +28,11 @@ Production profile validation fails startup when unsafe defaults are present.
 ## Key Security Rules
 
 1. Keycloak JWT validation is required in production.
-2. Trusted header identity is for local and controlled tests only.
-3. Public tenant/property scope is resolved from URL property id and database state.
-4. Authorization is centralized through user management and `module_access_matrix`.
-5. Unsafe commands must use idempotency, audit, and outbox where side effects are involved.
+2. Production JWT identity is resolved through database-backed OIDC identity links.
+3. Trusted header identity and trusted direct JWT identity claims are for local or controlled runtimes only.
+4. Public tenant/property scope is resolved from URL property id and database state.
+5. Authorization is centralized through user management and `module_access_matrix`.
+6. Unsafe commands must use idempotency, audit, and outbox where side effects are involved.
 
 ## Operations
 

@@ -105,12 +105,22 @@ do
 done
 
 for name in \
+  PEAK_ALLOW_HEADER_IDENTITY \
+  PEAK_ALLOW_TRUSTED_JWT_IDENTITY_CLAIMS \
   PEAK_OTLP_METRICS_EXPORT_ENABLED \
   PEAK_OTLP_LOGGING_EXPORT_ENABLED \
   PEAK_OTLP_TRACING_EXPORT_ENABLED
 do
   require_boolean "$name"
 done
+
+if [ "$(value_of PEAK_ALLOW_HEADER_IDENTITY)" != "false" ]; then
+  fail "PEAK_ALLOW_HEADER_IDENTITY must be false in production"
+fi
+
+if [ "$(value_of PEAK_ALLOW_TRUSTED_JWT_IDENTITY_CLAIMS)" != "false" ]; then
+  fail "PEAK_ALLOW_TRUSTED_JWT_IDENTITY_CLAIMS must be false in production"
+fi
 
 if [ "$(value_of PEAK_SECURITY_JWT_AUDIENCE)" != "peak-api" ]; then
   fail "PEAK_SECURITY_JWT_AUDIENCE must be peak-api"

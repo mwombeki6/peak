@@ -16,6 +16,7 @@ peak:
         allowed-origins: ${PEAK_CORS_ALLOWED_ORIGINS}
     request-context:
       allow-header-identity: false
+      allow-trusted-jwt-identity-claims: false
 
 springdoc:
   api-docs:

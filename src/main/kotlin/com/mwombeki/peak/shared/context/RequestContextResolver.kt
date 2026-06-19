@@ -83,6 +83,12 @@ class RequestContextResolver(
         val mode = stringClaim("peak_identity_mode")
             ?: return toExternalRequestIdentity(correlationId)
 
+        if (!properties.allowTrustedJwtIdentityClaims) {
+            throw RequestContextException(
+                "Trusted JWT identity claims are disabled for this runtime",
+            )
+        }
+
         val raw = when (mode) {
             "tenant" -> RawRequestIdentity(
                 tenantId = uuidClaim("tenant_id"),

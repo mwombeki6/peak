@@ -56,6 +56,7 @@ peak:
           - X-Correlation-Id
     request-context:
       allow-header-identity: ${PEAK_ALLOW_HEADER_IDENTITY:false}
+      allow-trusted-jwt-identity-claims: ${PEAK_ALLOW_TRUSTED_JWT_IDENTITY_CLAIMS:false}
     route-guard:
       enabled: ${PEAK_ROUTE_GUARD_ENABLED:true}
       deny-unregistered-api-routes: ${PEAK_ROUTE_GUARD_DENY_UNREGISTERED:true}

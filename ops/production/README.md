@@ -26,10 +26,12 @@ This directory contains the Podman Compose deployment baseline for Peak phase 1.
 - Never run API or worker as the migration login.
 - Keep Flyway disabled for API and worker; only `peak-migration` runs migrations.
 - Keep `PEAK_ALLOW_HEADER_IDENTITY=false` in production.
+- Keep `PEAK_ALLOW_TRUSTED_JWT_IDENTITY_CLAIMS=false` in production.
 - Keep SpringDoc disabled in production.
 - Keep CORS origins explicit.
 - Import and verify the Keycloak realm before allowing tenant users to authenticate.
 - Keep `PEAK_SECURITY_JWT_ISSUER_URI` equal to the Keycloak realm issuer and `PEAK_SECURITY_JWT_AUDIENCE=peak-api`.
+- Resolve tenant and platform users through active OIDC `identity_links`; do not rely on client-editable user attributes for authorization.
 - Reject placeholder secrets and short passwords with `ops/scripts/validate-production-env.sh`.
 - Store production secrets outside Git; `.env` is ignored and is only a local operator input file.
 
