@@ -1,0 +1,154 @@
+#!/usr/bin/env sh
+set -eu
+
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
+ENV_FILE="${1:-${ENV_FILE:-$ROOT_DIR/ops/production/.env}}"
+
+if [ ! -f "$ENV_FILE" ]; then
+  echo "Missing env file: $ENV_FILE" >&2
+  exit 1
+fi
+
+set -a
+. "$ENV_FILE"
+set +a
+
+failures=0
+
+fail() {
+  echo "production env: $1" >&2
+  failures=$((failures + 1))
+}
+
+value_of() {
+  eval "printf '%s' \"\${$1:-}\""
+}
+
+require_var() {
+  name="$1"
+  value="$(value_of "$name")"
+  if [ -z "$value" ]; then
+    fail "$name is required"
+  fi
+}
+
+reject_placeholder() {
+  name="$1"
+  value="$(value_of "$name")"
+  case "$value" in
+    *CHANGE_ME*|*change-me*|*changeme*|*CHANGE-ME*)
+      fail "$name still contains a placeholder value"
+      ;;
+  esac
+}
+
+require_secret() {
+  name="$1"
+  value="$(value_of "$name")"
+  require_var "$name"
+  reject_placeholder "$name"
+  if [ -n "$value" ] && [ "${#value}" -lt 16 ]; then
+    fail "$name must be at least 16 characters"
+  fi
+}
+
+require_boolean() {
+  name="$1"
+  value="$(value_of "$name")"
+  require_var "$name"
+  case "$value" in
+    true|false) ;;
+    *) fail "$name must be true or false" ;;
+  esac
+}
+
+require_distinct() {
+  left="$1"
+  right="$2"
+  left_value="$(value_of "$left")"
+  right_value="$(value_of "$right")"
+  if [ -n "$left_value" ] && [ "$left_value" = "$right_value" ]; then
+    fail "$left must not equal $right"
+  fi
+}
+
+for name in \
+  PEAK_IMAGE \
+  PEAK_PUBLIC_HOST \
+  PEAK_APP_ORIGIN \
+  POSTGRES_DB \
+  POSTGRES_MIGRATOR_USER \
+  POSTGRES_APP_USER \
+  POSTGRES_WORKER_USER \
+  KEYCLOAK_IMAGE \
+  KEYCLOAK_ADMIN \
+  KEYCLOAK_DB \
+  KEYCLOAK_DB_USER \
+  KEYCLOAK_HOSTNAME \
+  PEAK_SECURITY_JWT_ISSUER_URI \
+  PEAK_SECURITY_JWT_AUDIENCE \
+  PEAK_CORS_ALLOWED_ORIGINS
+do
+  require_var "$name"
+  reject_placeholder "$name"
+done
+
+for name in \
+  POSTGRES_MIGRATOR_PASSWORD \
+  POSTGRES_APP_PASSWORD \
+  POSTGRES_WORKER_PASSWORD \
+  POSTGRES_PLATFORM_SUPPORT_PASSWORD \
+  KEYCLOAK_ADMIN_PASSWORD \
+  KEYCLOAK_DB_PASSWORD
+do
+  require_secret "$name"
+done
+
+for name in \
+  PEAK_OTLP_METRICS_EXPORT_ENABLED \
+  PEAK_OTLP_LOGGING_EXPORT_ENABLED \
+  PEAK_OTLP_TRACING_EXPORT_ENABLED
+do
+  require_boolean "$name"
+done
+
+if [ "$(value_of PEAK_SECURITY_JWT_AUDIENCE)" != "peak-api" ]; then
+  fail "PEAK_SECURITY_JWT_AUDIENCE must be peak-api"
+fi
+
+case "$(value_of PEAK_SECURITY_JWT_ISSUER_URI)" in
+  http://*|https://*) ;;
+  *) fail "PEAK_SECURITY_JWT_ISSUER_URI must be an absolute http(s) URL" ;;
+esac
+
+case "$(value_of PEAK_APP_ORIGIN)" in
+  https://*) ;;
+  *) fail "PEAK_APP_ORIGIN must use https" ;;
+esac
+
+case "$(value_of PEAK_CORS_ALLOWED_ORIGINS)" in
+  *"*"*) fail "PEAK_CORS_ALLOWED_ORIGINS must not contain wildcards" ;;
+esac
+
+case "$(value_of PEAK_CORS_ALLOWED_ORIGINS)" in
+  *http://*) fail "PEAK_CORS_ALLOWED_ORIGINS must use https origins" ;;
+esac
+
+if [ "$(value_of POSTGRES_APP_USER)" = "$(value_of POSTGRES_MIGRATOR_USER)" ]; then
+  fail "POSTGRES_APP_USER must not equal POSTGRES_MIGRATOR_USER"
+fi
+
+if [ "$(value_of POSTGRES_WORKER_USER)" = "$(value_of POSTGRES_MIGRATOR_USER)" ]; then
+  fail "POSTGRES_WORKER_USER must not equal POSTGRES_MIGRATOR_USER"
+fi
+
+require_distinct POSTGRES_MIGRATOR_PASSWORD POSTGRES_APP_PASSWORD
+require_distinct POSTGRES_MIGRATOR_PASSWORD POSTGRES_WORKER_PASSWORD
+require_distinct POSTGRES_APP_PASSWORD POSTGRES_WORKER_PASSWORD
+require_distinct KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_DB_PASSWORD
+
+if [ "$failures" -gt 0 ]; then
+  exit 1
+fi
+
+echo "Production environment validated: $ENV_FILE"

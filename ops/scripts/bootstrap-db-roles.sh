@@ -11,6 +11,8 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
+"$ROOT_DIR/ops/scripts/validate-production-env.sh" "$ENV_FILE"
+
 set -a
 . "$ENV_FILE"
 set +a

@@ -11,6 +11,8 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
+"$ROOT_DIR/ops/scripts/validate-production-env.sh" "$ENV_FILE"
+
 podman compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull
 podman compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --profile migration up --abort-on-container-exit peak-migration
 podman compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d peak-api peak-worker
