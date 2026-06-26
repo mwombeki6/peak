@@ -249,6 +249,178 @@ Idempotency-Key: tenant-module-disable-property-001
 
 Expected: response has `enabled=false`, and the command is audited and outbox-backed.
 
+## Property Management Flow
+
+Use a tenant token whose user has `module.manage`, `property.view`, `property.manage`, `property.lifecycle`, and `communications.manage`. First enable the tenant modules required for setup:
+
+```http
+POST {{baseUrl}}/api/v1/tenants/{{tenantId}}/modules
+Idempotency-Key: tenant-module-enable-booking-engine-001
+
+{ "moduleId": "booking_engine" }
+```
+
+```http
+POST {{baseUrl}}/api/v1/tenants/{{tenantId}}/modules
+Idempotency-Key: tenant-module-enable-communications-001
+
+{ "moduleId": "communications" }
+```
+
+1. Create a property.
+
+```http
+POST {{baseUrl}}/api/v1/properties
+Idempotency-Key: property-create-001
+
+{
+  "name": "Phase 2 Test Hotel",
+  "location": "Arusha",
+  "code": "P2H001",
+  "type": "HOTEL"
+}
+```
+
+Expected: response has `propertyId`, `status=draft`, `changed=true`, `replayed=false`. Replay with the same idempotency key returns the same `propertyId` with `replayed=true`.
+
+2. Enable the booking engine for the property.
+
+```http
+POST {{baseUrl}}/api/v1/properties/{{propertyId}}/modules
+Idempotency-Key: property-module-booking-engine-001
+
+{ "moduleId": "booking_engine" }
+```
+
+Expected: `enabled=true`. Disabling the core `property` module must return `400`.
+
+3. Create the structural setup.
+
+```http
+POST {{baseUrl}}/api/v1/properties/{{propertyId}}/buildings
+Idempotency-Key: property-building-create-001
+
+{
+  "name": "Main Building",
+  "description": "Reception and guest rooms"
+}
+```
+
+```http
+POST {{baseUrl}}/api/v1/properties/{{propertyId}}/floors
+Idempotency-Key: property-floor-create-001
+
+{
+  "buildingId": "{{buildingId}}",
+  "floorNumber": 1,
+  "name": "Ground Floor",
+  "capacity": 30
+}
+```
+
+```http
+POST {{baseUrl}}/api/v1/properties/{{propertyId}}/room-types
+Idempotency-Key: property-room-type-create-001
+
+{
+  "name": "Deluxe King",
+  "code": "DLX",
+  "basePrice": 0,
+  "maxAdults": 2,
+  "maxChildren": 1,
+  "maxOccupancy": 3
+}
+```
+
+```http
+POST {{baseUrl}}/api/v1/properties/{{propertyId}}/rooms
+Idempotency-Key: property-room-create-001
+
+{
+  "buildingId": "{{buildingId}}",
+  "roomNumber": "101",
+  "roomTypeId": "{{roomTypeId}}",
+  "floorNumber": 1
+}
+```
+
+Expected: each command returns `resourceId`, writes audit/outbox records, and replays by idempotency key.
+
+4. Configure operational and financial setup.
+
+```http
+POST {{baseUrl}}/api/v1/properties/{{propertyId}}/revenue-centers
+Idempotency-Key: property-revenue-center-create-001
+
+{
+  "name": "Rooms Revenue",
+  "code": "ROOMS",
+  "centerType": "rooms",
+  "isRoomsRevenue": true,
+  "displayOrder": 1
+}
+```
+
+```http
+POST {{baseUrl}}/api/v1/properties/{{propertyId}}/departments
+Idempotency-Key: property-department-create-001
+
+{
+  "name": "Front Office",
+  "code": "FO"
+}
+```
+
+```http
+POST {{baseUrl}}/api/v1/properties/taxes
+Idempotency-Key: property-tax-create-001
+
+{
+  "name": "VAT",
+  "code": "VAT18",
+  "rate": 0.18,
+  "taxType": "vat"
+}
+```
+
+```http
+POST {{baseUrl}}/api/v1/properties/{{propertyId}}/rates
+Idempotency-Key: property-base-rate-001
+
+{
+  "roomTypeId": "{{roomTypeId}}",
+  "amount": 250000,
+  "currency": "TZS"
+}
+```
+
+5. Create and verify a business contact through the communication flow below. Property readiness requires at least one active verified contact channel.
+
+6. Check readiness and activate.
+
+```http
+GET {{baseUrl}}/api/v1/properties/{{propertyId}}/readiness
+```
+
+Expected before all setup: `isReady=false` with clear missing requirements. Expected after setup: `isReady=true`, `missingRequirements=[]`.
+
+```http
+POST {{baseUrl}}/api/v1/properties/{{propertyId}}/activate
+Idempotency-Key: property-activate-001
+```
+
+Expected: response remains ready, and `GET /api/v1/properties/{{propertyId}}` returns `status=active`, `isActive=true`.
+
+7. Verify isolation.
+
+Use a second tenant user without `user_property_roles` for `{{propertyId}}` and call:
+
+```http
+GET {{baseUrl}}/api/v1/properties/{{propertyId}}
+```
+
+Expected: `403`. A tenant user from another tenant must also receive `403` or `404` without leaking property details.
+
 ## Communication Flow
 
 Use a tenant token whose user has `communications.view`, `communications.manage`, and `communications.send`. The tenant must have the `communications` module enabled.

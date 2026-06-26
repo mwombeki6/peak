@@ -127,7 +127,7 @@ class RouteAccessMatrixCoverageIntegrationTests {
             this == "/api/v1/invitations/accept" -> RouteScope.PUBLIC
             startsWith("/api/v1/tenants/") -> RouteScope.TENANT
             this == "/api/v1/properties" -> RouteScope.TENANT
-            this == "/api/v1/properties/taxes" -> RouteScope.TENANT
+            startsWith("/api/v1/properties/taxes") -> RouteScope.TENANT
             startsWith("/api/v1/properties/") -> RouteScope.PROPERTY
             startsWith("/api/v1/communication") -> RouteScope.TENANT
             startsWith("/api/v1/realtime/") -> RouteScope.PROPERTY
@@ -163,7 +163,13 @@ class RouteAccessMatrixCoverageIntegrationTests {
             "identityLinkId" to UUID.fromString("55555555-5555-5555-5555-555555555555").toString(),
             "tenantRoleId" to UUID.fromString("66666666-6666-6666-6666-666666666666").toString(),
             "platformRoleId" to UUID.fromString("66666666-6666-6666-6666-666666666666").toString(),
+            "buildingId" to UUID.fromString("77777777-7777-7777-7777-777777777771").toString(),
+            "floorId" to UUID.fromString("77777777-7777-7777-7777-777777777772").toString(),
+            "roomTypeId" to UUID.fromString("77777777-7777-7777-7777-777777777773").toString(),
             "roomId" to UUID.fromString("77777777-7777-7777-7777-777777777777").toString(),
+            "revenueCenterId" to UUID.fromString("77777777-7777-7777-7777-777777777778").toString(),
+            "departmentId" to UUID.fromString("77777777-7777-7777-7777-777777777779").toString(),
+            "taxRateId" to UUID.fromString("77777777-7777-7777-7777-777777777780").toString(),
             "channelId" to UUID.fromString("88888888-8888-8888-8888-888888888888").toString(),
             "moduleId" to "booking_engine",
         )
