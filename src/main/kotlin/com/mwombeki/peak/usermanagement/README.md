@@ -1,12 +1,13 @@
 # User Management Module
 
-User management owns authorization, external identity resolution, tenant user invitations, tenant user lifecycle, and tenant role assignment. It is the permission boundary for platform and tenant-facing modules.
+User management owns authorization, external identity resolution, platform administration, tenant user invitations, tenant user lifecycle, and tenant role assignment. It is the permission boundary for platform and tenant-facing modules.
 
 ## Responsibilities
 
 - Resolve external OIDC identities to active platform or tenant users.
 - Enforce route authorization using `module_access_matrix`.
 - Authorize static permissions through canonical role-permission tables.
+- Manage platform users, platform roles, platform role assignments, platform permissions, and platform OIDC identity links through audited APIs.
 - Support tenant invitations, identity links, role assignment, role revocation, lock, unlock, disable, reactivate, and identity revocation.
 
 ## Access Control Model
@@ -21,6 +22,36 @@ User management owns authorization, external identity resolution, tenant user in
 - Staff and platform guards bind database session context before permission checks; public module guards stay unbound.
 - Route guard rules are cached briefly and refreshed from `module_access_matrix`.
 
+## Platform Administration API
+
+All routes below are platform-scoped, require `platform.security.manage`, and are covered by `module_access_matrix`.
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/platform/users` | List platform users, roles, and active identity-link counts. |
+| `GET` | `/api/v1/platform/users/{platformUserId}` | View one platform user. |
+| `POST` | `/api/v1/platform/users` | Create an invited or active platform user. |
+| `PUT` | `/api/v1/platform/users/{platformUserId}` | Update platform user profile fields. |
+| `POST` | `/api/v1/platform/users/{platformUserId}/lock` | Lock a platform user. |
+| `POST` | `/api/v1/platform/users/{platformUserId}/disable` | Disable a platform user. |
+| `POST` | `/api/v1/platform/users/{platformUserId}/reactivate` | Reactivate a platform user. |
+| `POST` | `/api/v1/platform/users/{platformUserId}/roles/{platformRoleId}/assign` | Assign a platform role. |
+| `POST` | `/api/v1/platform/users/{platformUserId}/roles/{platformRoleId}/revoke` | Revoke a platform role. |
+| `POST` | `/api/v1/platform/users/{platformUserId}/identity-links` | Link an OIDC issuer/subject to a platform user. |
+| `POST` | `/api/v1/platform/users/{platformUserId}/identity-links/{identityLinkId}/revoke` | Revoke a platform OIDC identity link. |
+| `GET` | `/api/v1/platform/roles` | List platform roles and permissions. |
+| `GET` | `/api/v1/platform/roles/{platformRoleId}` | View one platform role. |
+| `POST` | `/api/v1/platform/roles` | Create a dynamic platform role. |
+| `PUT` | `/api/v1/platform/roles/{platformRoleId}` | Update a dynamic platform role and its permissions. |
+| `DELETE` | `/api/v1/platform/roles/{platformRoleId}` | Deactivate a dynamic platform role. |
+| `GET` | `/api/v1/platform/permissions` | List immutable platform permissions. |
+
+Mutating platform administration routes require `Idempotency-Key`. Successful changes write a `platform_audit_logs` record and enqueue a platform outbox event. System platform roles cannot be modified, and an operator cannot lock, disable, assign roles to, or revoke roles from themselves.
+
+Metrics:
+
+- `peak.platform.admin.command{operation,result}` counts succeeded, conflicting, and in-progress platform administration commands.
+
 ## Production Rules
 
 1. Keep JWT validation enabled in production and require issuer plus audience.
@@ -31,3 +62,5 @@ User management owns authorization, external identity resolution, tenant user in
 6. Deny unregistered API routes by default in production.
 7. Keep platform RLS policies scoped to platform runtime roles instead of granting platform helpers to tenant API roles.
 8. Treat disabled, locked, deleted, or revoked OIDC identities as immediately unauthorized; do not cache positive identity resolution outside request scope.
+9. Require idempotency, audit, and outbox side effects for mutating platform administration commands.
+10. Keep platform OIDC identity links in `identity_links`; do not add provider-specific identity tables.
