@@ -34,9 +34,10 @@ class RealtimeStreamService(
                         .name(request.eventType)
                         .data(standardizedMessage)
                 )
+                sseRegistry.recordDelivered(request.eventType)
             } catch (e: Exception) {
-                // Emitter might be closed already
-                sseRegistry.remove(request.tenantId, request.propertyId, emitter)
+                sseRegistry.recordDeliveryFailure(request.eventType)
+                sseRegistry.remove(request.tenantId, request.propertyId, emitter, "send_failure")
             }
         }
 

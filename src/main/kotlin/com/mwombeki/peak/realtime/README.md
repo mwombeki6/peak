@@ -30,6 +30,7 @@ We support two ways for clients to receive data:
     -   A simpler, lightweight alternative to WebSockets.
     -   Endpoint: `GET /api/v1/realtime/tenants/{tenantId}/properties/{propertyId}/stream`
     -   Ideal for simple "read-only" live updates.
+    -   Bounded to 100 active SSE connections per tenant/property stream.
 
 ## Security & Isolation
 -   **Tenant and Property Authorization**: SSE routes are covered by `module_access_matrix`; WebSocket subscriptions call `can_access_module` directly. A user needs the `realtime.stream` permission and enabled `realtime` module for the target property.
@@ -38,9 +39,16 @@ We support two ways for clients to receive data:
 
 ## Monitoring & Metrics
 The module tracks its own health using professional metrics:
--   **Active Connections**: How many people are currently "tuned in."
--   **Connect Attempts**: Total number of connection requests.
--   **Security Violations**: Count of blocked cross-tenant access attempts.
+-   `peak.realtime.sse.connections.active`: active SSE connections.
+-   `peak.realtime.sse.connections.opened`: accepted SSE connections.
+-   `peak.realtime.sse.connections.closed{reason}`: SSE disconnects by reason.
+-   `peak.realtime.sse.connections.rejected{reason}`: rejected SSE connections, including per-property limit pressure.
+-   `peak.realtime.sse.events.delivered{eventType}`: SSE event deliveries.
+-   `peak.realtime.sse.events.failed{eventType}`: SSE delivery failures.
+-   `realtime.websocket.active_connections`: active WebSocket sessions.
+-   `realtime.websocket.connect_attempts`: WebSocket connection attempts.
+-   `realtime.websocket.subscriptions`: accepted WebSocket subscriptions.
+-   `realtime.security.violations`: blocked realtime subscription attempts.
 
 ## For Developers: Adding New Events
 To broadcast a new type of event from another module:

@@ -1,0 +1,140 @@
+-- ================================================================================
+-- Tenant administration API route contracts
+-- ================================================================================
+
+INSERT INTO module_access_matrix (
+    module_id,
+    screen_key,
+    screen_label,
+    http_method,
+    api_pattern,
+    permission_code,
+    route_scope,
+    guard_mode,
+    access_scope,
+    is_tanzania_v1,
+    is_enabled_by_default,
+    notes
+) VALUES
+    (
+        'tenant_admin',
+        'tenant.roles.create',
+        'Create Tenant Role',
+        'POST',
+        '/api/tenants/:tenantId/roles',
+        'tenant.users.manage',
+        'tenant',
+        'staff_permission',
+        'tenant',
+        true,
+        true,
+        'Create dynamic tenant-scoped roles; immutable system roles remain protected'
+    ),
+    (
+        'tenant_admin',
+        'tenant.roles.view',
+        'Tenant Role',
+        'GET',
+        '/api/tenants/:tenantId/roles/:tenantRoleId',
+        'tenant.users.manage',
+        'tenant',
+        'staff_permission',
+        'tenant',
+        true,
+        true,
+        'View a tenant role and its permission assignment'
+    ),
+    (
+        'tenant_admin',
+        'tenant.roles.update',
+        'Update Tenant Role',
+        'PUT',
+        '/api/tenants/:tenantId/roles/:tenantRoleId',
+        'tenant.users.manage',
+        'tenant',
+        'staff_permission',
+        'tenant',
+        true,
+        true,
+        'Update dynamic tenant role metadata and permission assignment'
+    ),
+    (
+        'tenant_admin',
+        'tenant.roles.deactivate',
+        'Deactivate Tenant Role',
+        'DELETE',
+        '/api/tenants/:tenantId/roles/:tenantRoleId',
+        'tenant.users.manage',
+        'tenant',
+        'staff_permission',
+        'tenant',
+        true,
+        true,
+        'Deactivate dynamic tenant roles and remove active assignments'
+    ),
+    (
+        'tenant_admin',
+        'tenant.modules.list',
+        'Tenant Modules',
+        'GET',
+        '/api/tenants/:tenantId/modules',
+        'module.manage',
+        'tenant',
+        'staff_permission',
+        'tenant',
+        true,
+        true,
+        'List tenant-level module enablement state'
+    ),
+    (
+        'tenant_admin',
+        'tenant.modules.enable',
+        'Enable Tenant Module',
+        'POST',
+        '/api/tenants/:tenantId/modules',
+        'module.manage',
+        'tenant',
+        'staff_permission',
+        'tenant',
+        true,
+        true,
+        'Enable active tenant-visible modules for a tenant'
+    ),
+    (
+        'tenant_admin',
+        'tenant.modules.disable',
+        'Disable Tenant Module',
+        'DELETE',
+        '/api/tenants/:tenantId/modules/:moduleId',
+        'module.manage',
+        'tenant',
+        'staff_permission',
+        'tenant',
+        true,
+        true,
+        'Disable tenant-level modules without deleting historical configuration'
+    ),
+    (
+        'tenant_admin',
+        'tenant.readiness.view',
+        'Tenant Readiness',
+        'GET',
+        '/api/tenants/:tenantId/readiness',
+        'tenant.profile.view',
+        'tenant',
+        'staff_permission',
+        'tenant',
+        true,
+        true,
+        'View tenant readiness requirements for operational setup'
+    )
+ON CONFLICT (module_id, screen_key, http_method, api_pattern, permission_code)
+DO UPDATE SET
+    screen_label = EXCLUDED.screen_label,
+    route_scope = EXCLUDED.route_scope,
+    guard_mode = EXCLUDED.guard_mode,
+    access_scope = EXCLUDED.access_scope,
+    is_tanzania_v1 = EXCLUDED.is_tanzania_v1,
+    is_enabled_by_default = EXCLUDED.is_enabled_by_default,
+    notes = EXCLUDED.notes,
+    updated_at = now();

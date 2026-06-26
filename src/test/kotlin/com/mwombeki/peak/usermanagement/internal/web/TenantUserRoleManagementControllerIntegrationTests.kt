@@ -14,12 +14,15 @@ import org.springframework.context.annotation.Import
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.testcontainers.junit.jupiter.Testcontainers
+import tools.jackson.databind.ObjectMapper
 
 @Import(TestcontainersConfiguration::class)
 @SpringBootTest(
@@ -36,6 +39,9 @@ class TenantUserRoleManagementControllerIntegrationTests {
 
     @Autowired
     private lateinit var jdbcTemplate: JdbcTemplate
+
+    @Autowired
+    private lateinit var objectMapper: ObjectMapper
 
     @Test
     fun listsTenantRolesThroughSecuredRoute() {
@@ -81,6 +87,138 @@ class TenantUserRoleManagementControllerIntegrationTests {
             .andExpect(jsonPath("$.replayed").value(false))
 
         assertEquals(1, roleAssignmentCount(fixture))
+    }
+
+    @Test
+    fun createsUpdatesAndDeactivatesDynamicTenantRoleThroughSecuredRoutes() {
+        val fixture = roleManagementFixture()
+        insertAuthorizedFixture(fixture)
+        val roleCode = "dynamic-${UUID.randomUUID()}"
+
+        val createResult = mockMvc.perform(
+            post("/api/v1/tenants/${fixture.tenantId}/roles")
+                .secure(true)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "code": "$roleCode",
+                      "name": "Front Office Supervisor",
+                      "description": "Can supervise front office workflows",
+                      "permissionCodes": ["reports.view"]
+                    }
+                    """.trimIndent(),
+                )
+                .header(PeakRequestHeaders.CORRELATION_ID, "corr-web-role-create")
+                .header(PeakRequestHeaders.IDEMPOTENCY_KEY, "idem-web-role-create")
+                .header(PeakRequestHeaders.TENANT_ID, fixture.tenantId.toString())
+                .header(PeakRequestHeaders.TENANT_USER_ID, fixture.actorUserId.toString()),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.tenantId").value(fixture.tenantId.toString()))
+            .andExpect(jsonPath("$.changed").value(true))
+            .andExpect(jsonPath("$.replayed").value(false))
+            .andReturn()
+
+        val tenantRoleId = objectMapper.readValue(
+            createResult.response.contentAsString,
+            TenantRoleMutationHttpResponse::class.java,
+        ).tenantRoleId
+
+        mockMvc.perform(
+            post("/api/v1/tenants/${fixture.tenantId}/roles")
+                .secure(true)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "code": "$roleCode",
+                      "name": "Front Office Supervisor",
+                      "description": "Can supervise front office workflows",
+                      "permissionCodes": ["reports.view"]
+                    }
+                    """.trimIndent(),
+                )
+                .header(PeakRequestHeaders.CORRELATION_ID, "corr-web-role-create-replay")
+                .header(PeakRequestHeaders.IDEMPOTENCY_KEY, "idem-web-role-create")
+                .header(PeakRequestHeaders.TENANT_ID, fixture.tenantId.toString())
+                .header(PeakRequestHeaders.TENANT_USER_ID, fixture.actorUserId.toString()),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.tenantRoleId").value(tenantRoleId.toString()))
+            .andExpect(jsonPath("$.replayed").value(true))
+
+        mockMvc.perform(
+            get("/api/v1/tenants/${fixture.tenantId}/roles/$tenantRoleId")
+                .secure(true)
+                .header(PeakRequestHeaders.CORRELATION_ID, "corr-web-role-get")
+                .header(PeakRequestHeaders.TENANT_ID, fixture.tenantId.toString())
+                .header(PeakRequestHeaders.TENANT_USER_ID, fixture.actorUserId.toString()),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.tenantRoleId").value(tenantRoleId.toString()))
+            .andExpect(jsonPath("$.code").value(roleCode))
+            .andExpect(jsonPath("$.permissionCodes", hasItem("reports.view")))
+
+        mockMvc.perform(
+            put("/api/v1/tenants/${fixture.tenantId}/roles/$tenantRoleId")
+                .secure(true)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "name": "Front Office Lead",
+                      "permissionCodes": ["tenant.users.manage"]
+                    }
+                    """.trimIndent(),
+                )
+                .header(PeakRequestHeaders.CORRELATION_ID, "corr-web-role-update")
+                .header(PeakRequestHeaders.IDEMPOTENCY_KEY, "idem-web-role-update")
+                .header(PeakRequestHeaders.TENANT_ID, fixture.tenantId.toString())
+                .header(PeakRequestHeaders.TENANT_USER_ID, fixture.actorUserId.toString()),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.tenantRoleId").value(tenantRoleId.toString()))
+            .andExpect(jsonPath("$.changed").value(true))
+
+        mockMvc.perform(
+            delete("/api/v1/tenants/${fixture.tenantId}/roles/$tenantRoleId")
+                .secure(true)
+                .header(PeakRequestHeaders.CORRELATION_ID, "corr-web-role-delete")
+                .header(PeakRequestHeaders.IDEMPOTENCY_KEY, "idem-web-role-delete")
+                .header(PeakRequestHeaders.TENANT_ID, fixture.tenantId.toString())
+                .header(PeakRequestHeaders.TENANT_USER_ID, fixture.actorUserId.toString()),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.tenantRoleId").value(tenantRoleId.toString()))
+            .andExpect(jsonPath("$.isActive").value(false))
+            .andExpect(jsonPath("$.changed").value(true))
+
+        assertEquals(1, auditCount(fixture.tenantId, "tenant.roles.created", tenantRoleId))
+        assertEquals(1, outboxCount(fixture.tenantId, "tenant.role.created", tenantRoleId))
+    }
+
+    @Test
+    fun rejectsSystemTenantRoleModificationThroughSecuredRoutes() {
+        val fixture = roleManagementFixture()
+        insertAuthorizedFixture(fixture)
+        jdbcTemplate.update(
+            "UPDATE tenant_roles SET is_system = true WHERE id = ?",
+            fixture.targetRoleId,
+        )
+
+        mockMvc.perform(
+            put("/api/v1/tenants/${fixture.tenantId}/roles/${fixture.targetRoleId}")
+                .secure(true)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Escalated System Role"}""")
+                .header(PeakRequestHeaders.CORRELATION_ID, "corr-web-role-system")
+                .header(PeakRequestHeaders.IDEMPOTENCY_KEY, "idem-web-role-system")
+                .header(PeakRequestHeaders.TENANT_ID, fixture.tenantId.toString())
+                .header(PeakRequestHeaders.TENANT_USER_ID, fixture.actorUserId.toString()),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(content().string(containsString("System tenant roles cannot be modified")))
     }
 
     @Test
@@ -265,6 +403,50 @@ class TenantUserRoleManagementControllerIntegrationTests {
                 fixture.tenantId,
                 fixture.targetUserId,
                 fixture.targetRoleId,
+            ),
+        )
+    }
+
+    private fun auditCount(
+        tenantId: UUID,
+        action: String,
+        entityId: UUID,
+    ): Int {
+        return requireNotNull(
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*)
+                FROM audit_logs
+                WHERE tenant_id = ?
+                  AND action = ?
+                  AND entity_id = ?
+                """.trimIndent(),
+                Int::class.java,
+                tenantId,
+                action,
+                entityId,
+            ),
+        )
+    }
+
+    private fun outboxCount(
+        tenantId: UUID,
+        eventType: String,
+        aggregateId: UUID,
+    ): Int {
+        return requireNotNull(
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*)
+                FROM outbox_events
+                WHERE tenant_id = ?
+                  AND event_type = ?
+                  AND aggregate_id = ?
+                """.trimIndent(),
+                Int::class.java,
+                tenantId,
+                eventType,
+                aggregateId,
             ),
         )
     }
