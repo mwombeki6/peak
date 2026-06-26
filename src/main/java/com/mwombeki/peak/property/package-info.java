@@ -1,7 +1,7 @@
 @ApplicationModule(
         id = "property",
         displayName = "Property Management Module",
-        allowedDependencies = {"shared::context", "audit::api"}
+        allowedDependencies = {"shared::context", "audit::api", "reliability::api"}
 )
 package com.mwombeki.peak.property;
 

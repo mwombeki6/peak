@@ -1,196 +1,480 @@
 package com.mwombeki.peak.property.internal.web
 
-import com.mwombeki.peak.property.api.*
-import com.mwombeki.peak.property.internal.PropertyManagementService
-import org.springframework.http.ResponseEntity
-import org.springframework.web.bind.annotation.*
+import com.mwombeki.peak.property.api.BuildingResponse
+import com.mwombeki.peak.property.api.CreateBuildingRequest
+import com.mwombeki.peak.property.api.CreateDepartmentRequest
+import com.mwombeki.peak.property.api.CreateFloorRequest
+import com.mwombeki.peak.property.api.CreatePropertyRequest
+import com.mwombeki.peak.property.api.CreateRevenueCenterRequest
+import com.mwombeki.peak.property.api.CreateRoomRequest
+import com.mwombeki.peak.property.api.CreateRoomTypeRequest
+import com.mwombeki.peak.property.api.CreateTaxRateRequest
+import com.mwombeki.peak.property.api.DepartmentResponse
+import com.mwombeki.peak.property.api.EnableModuleRequest
+import com.mwombeki.peak.property.api.FloorResponse
+import com.mwombeki.peak.property.api.PropertyChildMutationReceipt
+import com.mwombeki.peak.property.api.PropertyManagementConflictException
+import com.mwombeki.peak.property.api.PropertyManagementInProgressException
+import com.mwombeki.peak.property.api.PropertyManagementNotFoundException
+import com.mwombeki.peak.property.api.PropertyModuleMutationReceipt
+import com.mwombeki.peak.property.api.PropertyMutationReceipt
+import com.mwombeki.peak.property.api.PropertyPort
+import com.mwombeki.peak.property.api.PropertyReadinessResponse
+import com.mwombeki.peak.property.api.PropertyResponse
+import com.mwombeki.peak.property.api.RevenueCenterResponse
+import com.mwombeki.peak.property.api.RoomResponse
+import com.mwombeki.peak.property.api.RoomStatusMutationReceipt
+import com.mwombeki.peak.property.api.RoomTypeResponse
+import com.mwombeki.peak.property.api.SetBaseRateRequest
+import com.mwombeki.peak.property.api.TaxRateResponse
+import com.mwombeki.peak.property.api.UpdateBuildingRequest
+import com.mwombeki.peak.property.api.UpdateDepartmentRequest
+import com.mwombeki.peak.property.api.UpdateFloorRequest
+import com.mwombeki.peak.property.api.UpdatePropertyRequest
+import com.mwombeki.peak.property.api.UpdateRevenueCenterRequest
+import com.mwombeki.peak.property.api.UpdateRoomRequest
+import com.mwombeki.peak.property.api.UpdateRoomStatusRequest
+import com.mwombeki.peak.property.api.UpdateRoomTypeRequest
+import com.mwombeki.peak.property.api.UpdateTaxRateRequest
 import java.util.UUID
+import org.springframework.http.HttpStatus
+import org.springframework.http.ProblemDetail
+import org.springframework.http.ResponseEntity
+import org.springframework.web.bind.annotation.DeleteMapping
+import org.springframework.web.bind.annotation.ExceptionHandler
+import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.PutMapping
+import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RestController
 
 @RestController
 @RequestMapping("/api/v1/properties")
 class PropertyManagementController(
-    private val propertyService: PropertyManagementService,
+    private val propertyPort: PropertyPort,
 ) {
     @PostMapping
     fun createProperty(
         @RequestBody request: CreatePropertyRequest,
-    ): ResponseEntity<Map<String, UUID>> {
-        val id = propertyService.createProperty(request)
-        return ResponseEntity.ok(mapOf("propertyId" to id))
+    ): PropertyMutationReceipt {
+        return propertyPort.createProperty(request)
     }
 
     @GetMapping
-    fun listProperties(): ResponseEntity<List<PropertyResponse>> {
-        return ResponseEntity.ok(propertyService.listProperties())
+    fun listProperties(): List<PropertyResponse> {
+        return propertyPort.listProperties()
     }
 
     @GetMapping("/{propertyId}")
     fun getProperty(
         @PathVariable propertyId: UUID,
-    ): ResponseEntity<PropertyResponse> {
-        val property = propertyService.getProperty(propertyId)
-            ?: return ResponseEntity.notFound().build()
-        return ResponseEntity.ok(property)
+    ): PropertyResponse {
+        return propertyPort.getProperty(propertyId)
+            ?: throw PropertyManagementNotFoundException("Property record not found or access denied")
     }
 
     @PutMapping("/{propertyId}")
     fun updateProperty(
         @PathVariable propertyId: UUID,
         @RequestBody request: UpdatePropertyRequest,
-    ): ResponseEntity<Void> {
-        propertyService.updateProperty(propertyId, request)
-        return ResponseEntity.noContent().build()
+    ): PropertyMutationReceipt {
+        return propertyPort.updateProperty(propertyId, request)
     }
 
     @DeleteMapping("/{propertyId}")
     fun deleteProperty(
         @PathVariable propertyId: UUID,
-    ): ResponseEntity<Void> {
-        propertyService.deleteProperty(propertyId)
-        return ResponseEntity.noContent().build()
+    ): PropertyMutationReceipt {
+        return propertyPort.deleteProperty(propertyId)
+    }
+
+    @PostMapping("/{propertyId}/activate")
+    fun activateProperty(
+        @PathVariable propertyId: UUID,
+    ): PropertyReadinessResponse {
+        return propertyPort.activateProperty(propertyId)
+    }
+
+    @PostMapping("/{propertyId}/suspend")
+    fun suspendProperty(
+        @PathVariable propertyId: UUID,
+    ): PropertyMutationReceipt {
+        return propertyPort.suspendProperty(propertyId)
+    }
+
+    @PostMapping("/{propertyId}/archive")
+    fun archiveProperty(
+        @PathVariable propertyId: UUID,
+    ): PropertyMutationReceipt {
+        return propertyPort.archiveProperty(propertyId)
+    }
+
+    @GetMapping("/{propertyId}/readiness")
+    fun getReadinessReport(
+        @PathVariable propertyId: UUID,
+    ): PropertyReadinessResponse {
+        return propertyPort.checkReadiness(propertyId)
     }
 
     @PostMapping("/{propertyId}/buildings")
     fun addBuilding(
         @PathVariable propertyId: UUID,
         @RequestBody request: CreateBuildingRequest,
-    ): ResponseEntity<Map<String, UUID>>{
-        val id = propertyService.createBuilding(propertyId, request)
-        return ResponseEntity.ok(mapOf("buildingId" to id))
+    ): PropertyChildMutationReceipt {
+        return propertyPort.createBuilding(propertyId, request)
+    }
+
+    @GetMapping("/{propertyId}/buildings")
+    fun listBuildings(
+        @PathVariable propertyId: UUID,
+    ): List<BuildingResponse> {
+        return propertyPort.listBuildings(propertyId)
+    }
+
+    @GetMapping("/{propertyId}/buildings/{buildingId}")
+    fun getBuilding(
+        @PathVariable propertyId: UUID,
+        @PathVariable buildingId: UUID,
+    ): BuildingResponse {
+        return propertyPort.getBuilding(propertyId, buildingId)
+            ?: throw PropertyManagementNotFoundException("Building record not found or access denied")
+    }
+
+    @PutMapping("/{propertyId}/buildings/{buildingId}")
+    fun updateBuilding(
+        @PathVariable propertyId: UUID,
+        @PathVariable buildingId: UUID,
+        @RequestBody request: UpdateBuildingRequest,
+    ): PropertyChildMutationReceipt {
+        return propertyPort.updateBuilding(propertyId, buildingId, request)
+    }
+
+    @DeleteMapping("/{propertyId}/buildings/{buildingId}")
+    fun deleteBuilding(
+        @PathVariable propertyId: UUID,
+        @PathVariable buildingId: UUID,
+    ): PropertyChildMutationReceipt {
+        return propertyPort.deleteBuilding(propertyId, buildingId)
+    }
+
+    @PostMapping("/{propertyId}/floors")
+    fun addFloor(
+        @PathVariable propertyId: UUID,
+        @RequestBody request: CreateFloorRequest,
+    ): PropertyChildMutationReceipt {
+        return propertyPort.createFloor(propertyId, request)
+    }
+
+    @GetMapping("/{propertyId}/floors")
+    fun listFloors(
+        @PathVariable propertyId: UUID,
+    ): List<FloorResponse> {
+        return propertyPort.listFloors(propertyId)
+    }
+
+    @GetMapping("/{propertyId}/floors/{floorId}")
+    fun getFloor(
+        @PathVariable propertyId: UUID,
+        @PathVariable floorId: UUID,
+    ): FloorResponse {
+        return propertyPort.getFloor(propertyId, floorId)
+            ?: throw PropertyManagementNotFoundException("Floor record not found or access denied")
+    }
+
+    @PutMapping("/{propertyId}/floors/{floorId}")
+    fun updateFloor(
+        @PathVariable propertyId: UUID,
+        @PathVariable floorId: UUID,
+        @RequestBody request: UpdateFloorRequest,
+    ): PropertyChildMutationReceipt {
+        return propertyPort.updateFloor(propertyId, floorId, request)
+    }
+
+    @DeleteMapping("/{propertyId}/floors/{floorId}")
+    fun deleteFloor(
+        @PathVariable propertyId: UUID,
+        @PathVariable floorId: UUID,
+    ): PropertyChildMutationReceipt {
+        return propertyPort.deleteFloor(propertyId, floorId)
+    }
+
+    @PostMapping("/{propertyId}/room-types")
+    fun addRoomType(
+        @PathVariable propertyId: UUID,
+        @RequestBody request: CreateRoomTypeRequest,
+    ): PropertyChildMutationReceipt {
+        return propertyPort.createRoomType(propertyId, request)
+    }
+
+    @GetMapping("/{propertyId}/room-types")
+    fun listRoomTypes(
+        @PathVariable propertyId: UUID,
+    ): List<RoomTypeResponse> {
+        return propertyPort.listRoomTypes(propertyId)
+    }
+
+    @GetMapping("/{propertyId}/room-types/{roomTypeId}")
+    fun getRoomType(
+        @PathVariable propertyId: UUID,
+        @PathVariable roomTypeId: UUID,
+    ): RoomTypeResponse {
+        return propertyPort.getRoomType(propertyId, roomTypeId)
+            ?: throw PropertyManagementNotFoundException("Room type record not found or access denied")
+    }
+
+    @PutMapping("/{propertyId}/room-types/{roomTypeId}")
+    fun updateRoomType(
+        @PathVariable propertyId: UUID,
+        @PathVariable roomTypeId: UUID,
+        @RequestBody request: UpdateRoomTypeRequest,
+    ): PropertyChildMutationReceipt {
+        return propertyPort.updateRoomType(propertyId, roomTypeId, request)
+    }
+
+    @DeleteMapping("/{propertyId}/room-types/{roomTypeId}")
+    fun deleteRoomType(
+        @PathVariable propertyId: UUID,
+        @PathVariable roomTypeId: UUID,
+    ): PropertyChildMutationReceipt {
+        return propertyPort.deleteRoomType(propertyId, roomTypeId)
     }
 
     @PostMapping("/{propertyId}/rooms")
     fun addRoom(
         @PathVariable propertyId: UUID,
         @RequestBody request: CreateRoomRequest,
-    ): ResponseEntity<Map<String, UUID>>{
-        val id = propertyService.createRoom(propertyId, request)
-        return ResponseEntity.ok(mapOf("roomId" to id))
+    ): PropertyChildMutationReceipt {
+        return propertyPort.createRoom(propertyId, request)
     }
 
-    @GetMapping("/{propertyId}/readiness")
-    fun getReadinessReport(
+    @GetMapping("/{propertyId}/rooms")
+    fun listRooms(
         @PathVariable propertyId: UUID,
-    ): ResponseEntity<PropertyReadinessResponse> {
-        return ResponseEntity.ok(propertyService.checkReadiness(propertyId))
+    ): List<RoomResponse> {
+        return propertyPort.listRooms(propertyId)
     }
 
-    @PostMapping("/{propertyId}/activate")
-    fun activateProperty(
+    @GetMapping("/{propertyId}/rooms/{roomId}")
+    fun getRoom(
         @PathVariable propertyId: UUID,
-    ):ResponseEntity<PropertyReadinessResponse> {
-        return ResponseEntity.ok(propertyService.activateProperty(propertyId))
+        @PathVariable roomId: UUID,
+    ): RoomResponse {
+        return propertyPort.getRoom(propertyId, roomId)
+            ?: throw PropertyManagementNotFoundException("Room record not found or access denied")
     }
 
-    @PostMapping("/{propertyId}/suspend")
-    fun suspendProperty(
+    @PutMapping("/{propertyId}/rooms/{roomId}")
+    fun updateRoom(
         @PathVariable propertyId: UUID,
-    ): ResponseEntity<Void> {
-        propertyService.suspendProperty(propertyId)
-        return ResponseEntity.noContent().build()
+        @PathVariable roomId: UUID,
+        @RequestBody request: UpdateRoomRequest,
+    ): PropertyChildMutationReceipt {
+        return propertyPort.updateRoom(propertyId, roomId, request)
     }
 
-    @PostMapping("/{propertyId}/archive")
-    fun archiveProperty(
+    @DeleteMapping("/{propertyId}/rooms/{roomId}")
+    fun deleteRoom(
         @PathVariable propertyId: UUID,
-    ): ResponseEntity<Void> {
-        propertyService.archiveProperty(propertyId)
-        return ResponseEntity.noContent().build()
+        @PathVariable roomId: UUID,
+    ): PropertyChildMutationReceipt {
+        return propertyPort.deleteRoom(propertyId, roomId)
     }
 
     @PutMapping("/{propertyId}/rooms/{roomId}/status")
     fun changeRoomStatus(
         @PathVariable propertyId: UUID,
         @PathVariable roomId: UUID,
-        @RequestParam status: String,
-    ): ResponseEntity<Map<String, String>>{
-        propertyService.updateRoomStatus(propertyId, roomId, status)
-        return ResponseEntity.ok(mapOf("status" to "Successfully updated room state to ${status.uppercase()}"))
-    }
-
-    @PostMapping("/{propertyId}/floors")
-    fun addFloor(
-        @PathVariable propertyId: UUID,
-        @RequestBody request: CreateFloorRequest
-    ): ResponseEntity<Map<String, UUID>> {
-        val id = propertyService.createFloor(propertyId, request)
-        return ResponseEntity.ok(mapOf("floorId" to id))
-    }
-
-    @PostMapping("/{propertyId}/room-types")
-    fun addRoomType(
-        @PathVariable propertyId: UUID,
-        @RequestBody request: CreateRoomTypeRequest
-    ): ResponseEntity<Map<String, UUID>> {
-        val id = propertyService.createRoomType(propertyId, request)
-        return ResponseEntity.ok(mapOf("roomTypeId" to id))
+        @RequestBody request: UpdateRoomStatusRequest,
+    ): RoomStatusMutationReceipt {
+        return propertyPort.updateRoomStatus(propertyId, roomId, request)
     }
 
     @PostMapping("/{propertyId}/revenue-centers")
     fun addRevenueCenter(
         @PathVariable propertyId: UUID,
-        @RequestBody request: CreateRevenueCenterRequest
-    ): ResponseEntity<Map<String, UUID>> {
-        val id = propertyService.createRevenueCenter(propertyId, request)
-        return ResponseEntity.ok(mapOf("revenueCenterId" to id))
+        @RequestBody request: CreateRevenueCenterRequest,
+    ): PropertyChildMutationReceipt {
+        return propertyPort.createRevenueCenter(propertyId, request)
+    }
+
+    @GetMapping("/{propertyId}/revenue-centers")
+    fun listRevenueCenters(
+        @PathVariable propertyId: UUID,
+    ): List<RevenueCenterResponse> {
+        return propertyPort.listRevenueCenters(propertyId)
+    }
+
+    @GetMapping("/{propertyId}/revenue-centers/{revenueCenterId}")
+    fun getRevenueCenter(
+        @PathVariable propertyId: UUID,
+        @PathVariable revenueCenterId: UUID,
+    ): RevenueCenterResponse {
+        return propertyPort.getRevenueCenter(propertyId, revenueCenterId)
+            ?: throw PropertyManagementNotFoundException("Revenue center record not found or access denied")
+    }
+
+    @PutMapping("/{propertyId}/revenue-centers/{revenueCenterId}")
+    fun updateRevenueCenter(
+        @PathVariable propertyId: UUID,
+        @PathVariable revenueCenterId: UUID,
+        @RequestBody request: UpdateRevenueCenterRequest,
+    ): PropertyChildMutationReceipt {
+        return propertyPort.updateRevenueCenter(propertyId, revenueCenterId, request)
+    }
+
+    @DeleteMapping("/{propertyId}/revenue-centers/{revenueCenterId}")
+    fun deleteRevenueCenter(
+        @PathVariable propertyId: UUID,
+        @PathVariable revenueCenterId: UUID,
+    ): PropertyChildMutationReceipt {
+        return propertyPort.deleteRevenueCenter(propertyId, revenueCenterId)
     }
 
     @PostMapping("/{propertyId}/departments")
     fun addDepartment(
         @PathVariable propertyId: UUID,
-        @RequestBody request: CreateDepartmentRequest
-    ): ResponseEntity<Map<String, UUID>> {
-        val id = propertyService.createDepartment(propertyId, request)
-        return ResponseEntity.ok(mapOf("departmentId" to id))
+        @RequestBody request: CreateDepartmentRequest,
+    ): PropertyChildMutationReceipt {
+        return propertyPort.createDepartment(propertyId, request)
+    }
+
+    @GetMapping("/{propertyId}/departments")
+    fun listDepartments(
+        @PathVariable propertyId: UUID,
+    ): List<DepartmentResponse> {
+        return propertyPort.listDepartments(propertyId)
+    }
+
+    @GetMapping("/{propertyId}/departments/{departmentId}")
+    fun getDepartment(
+        @PathVariable propertyId: UUID,
+        @PathVariable departmentId: UUID,
+    ): DepartmentResponse {
+        return propertyPort.getDepartment(propertyId, departmentId)
+            ?: throw PropertyManagementNotFoundException("Department record not found or access denied")
+    }
+
+    @PutMapping("/{propertyId}/departments/{departmentId}")
+    fun updateDepartment(
+        @PathVariable propertyId: UUID,
+        @PathVariable departmentId: UUID,
+        @RequestBody request: UpdateDepartmentRequest,
+    ): PropertyChildMutationReceipt {
+        return propertyPort.updateDepartment(propertyId, departmentId, request)
+    }
+
+    @DeleteMapping("/{propertyId}/departments/{departmentId}")
+    fun deleteDepartment(
+        @PathVariable propertyId: UUID,
+        @PathVariable departmentId: UUID,
+    ): PropertyChildMutationReceipt {
+        return propertyPort.deleteDepartment(propertyId, departmentId)
     }
 
     @PostMapping("/{propertyId}/rates")
     fun configureBaseRate(
         @PathVariable propertyId: UUID,
-        @RequestBody request: SetBaseRateRequest
-    ): ResponseEntity<Map<String, String>> {
-        propertyService.setRoomTypeBaseRate(propertyId, request)
-        return ResponseEntity.ok(mapOf("status" to "Base rate applied successfully."))
+        @RequestBody request: SetBaseRateRequest,
+    ): PropertyChildMutationReceipt {
+        return propertyPort.setRoomTypeBaseRate(propertyId, request)
     }
 
-    // Tax Configuration
     @PostMapping("/taxes")
     fun createTaxRate(
-        @RequestBody request: CreateTaxRateRequest
-    ): ResponseEntity<Map<String, UUID>> {
-        val id = propertyService.createTaxRate(request)
-        return ResponseEntity.ok(mapOf("taxRateId" to id))
+        @RequestBody request: CreateTaxRateRequest,
+    ): PropertyChildMutationReceipt {
+        return propertyPort.createTaxRate(request)
     }
 
     @GetMapping("/taxes")
-    fun listTaxRates(): ResponseEntity<List<TaxRateResponse>> {
-        return ResponseEntity.ok(propertyService.listTaxRates())
+    fun listTaxRates(): List<TaxRateResponse> {
+        return propertyPort.listTaxRates()
     }
 
-    // Module Management
+    @GetMapping("/taxes/{taxRateId}")
+    fun getTaxRate(
+        @PathVariable taxRateId: UUID,
+    ): TaxRateResponse {
+        return propertyPort.getTaxRate(taxRateId)
+            ?: throw PropertyManagementNotFoundException("Tax rate record not found or access denied")
+    }
+
+    @PutMapping("/taxes/{taxRateId}")
+    fun updateTaxRate(
+        @PathVariable taxRateId: UUID,
+        @RequestBody request: UpdateTaxRateRequest,
+    ): PropertyChildMutationReceipt {
+        return propertyPort.updateTaxRate(taxRateId, request)
+    }
+
+    @DeleteMapping("/taxes/{taxRateId}")
+    fun deleteTaxRate(
+        @PathVariable taxRateId: UUID,
+    ): PropertyChildMutationReceipt {
+        return propertyPort.deleteTaxRate(taxRateId)
+    }
+
     @PostMapping("/{propertyId}/modules")
     fun enableModule(
         @PathVariable propertyId: UUID,
-        @RequestBody request: EnableModuleRequest
-    ): ResponseEntity<Void> {
-        propertyService.enableModule(propertyId, request.moduleId)
-        return ResponseEntity.noContent().build()
+        @RequestBody request: EnableModuleRequest,
+    ): PropertyModuleMutationReceipt {
+        return propertyPort.enableModule(propertyId, request.moduleId)
     }
 
     @DeleteMapping("/{propertyId}/modules/{moduleId}")
     fun disableModule(
         @PathVariable propertyId: UUID,
-        @PathVariable moduleId: String
-    ): ResponseEntity<Void> {
-        propertyService.disableModule(propertyId, moduleId)
-        return ResponseEntity.noContent().build()
+        @PathVariable moduleId: String,
+    ): PropertyModuleMutationReceipt {
+        return propertyPort.disableModule(propertyId, moduleId)
     }
 
     @GetMapping("/{propertyId}/modules")
     fun listEnabledModules(
-        @PathVariable propertyId: UUID
-    ): ResponseEntity<List<String>> {
-        return ResponseEntity.ok(propertyService.listEnabledModules(propertyId))
+        @PathVariable propertyId: UUID,
+    ): List<String> {
+        return propertyPort.listEnabledModules(propertyId)
     }
 
+    @ExceptionHandler(PropertyManagementNotFoundException::class)
+    fun handleNotFound(ex: PropertyManagementNotFoundException): ResponseEntity<ProblemDetail> {
+        return problem(HttpStatus.NOT_FOUND, "Property resource not found", ex.publicMessage())
+    }
+
+    @ExceptionHandler(PropertyManagementConflictException::class)
+    fun handleConflict(ex: PropertyManagementConflictException): ResponseEntity<ProblemDetail> {
+        return problem(HttpStatus.CONFLICT, "Property command conflict", ex.publicMessage())
+    }
+
+    @ExceptionHandler(PropertyManagementInProgressException::class)
+    fun handleInProgress(ex: PropertyManagementInProgressException): ResponseEntity<ProblemDetail> {
+        return problem(HttpStatus.CONFLICT, "Property command in progress", ex.publicMessage())
+    }
+
+    @ExceptionHandler(IllegalArgumentException::class)
+    fun handleInvalidRequest(ex: IllegalArgumentException): ResponseEntity<ProblemDetail> {
+        return problem(HttpStatus.BAD_REQUEST, "Invalid property request", ex.publicMessage())
+    }
+
+    private fun problem(
+        status: HttpStatus,
+        title: String,
+        detail: String,
+    ): ResponseEntity<ProblemDetail> {
+        val problem = ProblemDetail.forStatusAndDetail(status, detail)
+        problem.title = title
+        return ResponseEntity.status(status).body(problem)
+    }
+
+    private fun RuntimeException.publicMessage(): String {
+        val message = message.orEmpty()
+        return if (message.startsWith("ERROR:")) {
+            message.removePrefix("ERROR:").lineSequence().first().trim()
+        } else {
+            message
+        }
+    }
 }
