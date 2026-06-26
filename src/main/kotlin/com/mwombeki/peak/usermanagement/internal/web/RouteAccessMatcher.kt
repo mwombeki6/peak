@@ -20,8 +20,12 @@ class RouteAccessMatcher {
             }
 
             val match = matchPattern(rule.apiPattern, normalizedPath) ?: return@mapNotNull null
-            val request = rule.toAuthorizationRequest(match.variables, identity)
-            RouteRuleMatch(request, rule.specificityScore())
+            RouteRuleMatch(
+                rule = rule,
+                variables = match.variables,
+                identity = identity,
+                score = rule.specificityScore(),
+            )
         }
 
         return candidates.maxWithOrNull(
@@ -29,7 +33,9 @@ class RouteAccessMatcher {
                 .thenBy { it.score.literalCount }
                 .thenBy { it.score.segmentCount }
                 .thenByDescending { it.score.wildcardCount },
-        )?.request
+        )?.let { match ->
+            match.rule.toAuthorizationRequest(match.variables, match.identity)
+        }
     }
 
     private fun RouteAccessRule.methodMatches(httpMethod: String): Boolean {
@@ -128,7 +134,9 @@ class RouteAccessMatcher {
     )
 
     private data class RouteRuleMatch(
-        val request: RouteAuthorizationRequest,
+        val rule: RouteAccessRule,
+        val variables: Map<String, String>,
+        val identity: RequestIdentity,
         val score: SpecificityScore,
     )
 

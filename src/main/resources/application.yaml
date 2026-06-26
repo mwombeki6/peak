@@ -21,6 +21,9 @@ spring:
 peak:
   runtime:
     mode: ${PEAK_RUNTIME_MODE:api}
+  realtime:
+    websocket:
+      allowed-origins: ${PEAK_REALTIME_WEBSOCKET_ALLOWED_ORIGINS:}
   reliability:
     outbox:
       worker:
