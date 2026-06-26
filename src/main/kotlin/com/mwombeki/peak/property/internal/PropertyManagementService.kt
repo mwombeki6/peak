@@ -46,15 +46,19 @@ import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
+import com.mwombeki.peak.shared.context.RealtimeStreamEvent
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
 import io.micrometer.core.instrument.MeterRegistry
 import java.sql.ResultSet
 import java.util.UUID
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
+import org.springframework.transaction.support.TransactionSynchronization
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.ObjectMapper
 
@@ -69,6 +73,7 @@ class PropertyManagementService(
     private val transactionTemplate: TransactionTemplate,
     private val objectMapper: ObjectMapper,
     private val meterRegistry: MeterRegistry,
+    private val applicationEventPublisher: ApplicationEventPublisher,
 ) : PropertyPort {
 
     override fun listProperties(): List<PropertyResponse> {
@@ -2310,6 +2315,42 @@ class PropertyManagementService(
                 idempotencyKeyId = idempotencyKeyId,
                 priority = 4,
             ),
+        )
+
+        propertyId?.let {
+            publishRealtimeAfterCommit(
+                tenantId = tenantId,
+                propertyId = it,
+                eventType = eventType,
+                payload = payload,
+            )
+        }
+    }
+
+    private fun publishRealtimeAfterCommit(
+        tenantId: UUID,
+        propertyId: UUID,
+        eventType: String,
+        payload: Map<String, Any?>,
+    ) {
+        val event = RealtimeStreamEvent(
+            tenantId = tenantId,
+            propertyId = propertyId,
+            eventType = eventType,
+            payload = payload,
+        )
+
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            applicationEventPublisher.publishEvent(event)
+            return
+        }
+
+        TransactionSynchronizationManager.registerSynchronization(
+            object : TransactionSynchronization {
+                override fun afterCommit() {
+                    applicationEventPublisher.publishEvent(event)
+                }
+            },
         )
     }
 

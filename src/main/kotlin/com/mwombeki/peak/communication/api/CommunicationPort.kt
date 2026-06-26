@@ -1,5 +1,6 @@
 package com.mwombeki.peak.communication.api
 
+import java.time.OffsetDateTime
 import java.util.UUID
 
 data class EnqueueNotificationRequest(
@@ -17,6 +18,10 @@ interface CommunicationPort {
     fun createTemplate(request: CreateTemplateRequest): TemplateMutationReceipt
     fun verifyChannel(channelId: UUID, token: String): ChannelVerificationReceipt
     fun requestChannelVerification(channelId: UUID): ChannelVerificationRequestReceipt
+    fun listDeliveryRequests(): List<DeliveryRequestResponse>
+    fun getDeliveryRequest(deliveryRequestId: UUID): DeliveryRequestResponse
+    fun listDeliveryAttempts(deliveryRequestId: UUID): List<DeliveryAttemptResponse>
+    fun retryDelivery(deliveryRequestId: UUID): DeliveryRetryReceipt
 }
 
 data class CreateContactRequest(
@@ -53,6 +58,7 @@ data class CreateTemplateRequest(
 
 data class NotificationEnqueueReceipt(
     val eventId: UUID,
+    val deliveryRequestId: UUID? = null,
     val replayed: Boolean,
 )
 
@@ -70,6 +76,7 @@ data class TemplateMutationReceipt(
 data class ChannelVerificationRequestReceipt(
     val channelId: UUID,
     val notificationEventId: UUID,
+    val deliveryRequestId: UUID? = null,
     val replayed: Boolean,
 )
 
@@ -77,5 +84,41 @@ data class ChannelVerificationReceipt(
     val channelId: UUID,
     val verified: Boolean,
     val changed: Boolean,
+    val replayed: Boolean,
+)
+
+data class DeliveryRequestResponse(
+    val id: UUID,
+    val propertyId: UUID?,
+    val originalOutboxEventId: UUID,
+    val currentOutboxEventId: UUID,
+    val channel: String,
+    val recipientFingerprint: String,
+    val subjectPresent: Boolean,
+    val status: String,
+    val attemptCount: Int,
+    val maxAttempts: Int,
+    val requestedAt: OffsetDateTime,
+    val deliveredAt: OffsetDateTime?,
+    val failedAt: OffsetDateTime?,
+    val lastError: String?,
+)
+
+data class DeliveryAttemptResponse(
+    val id: UUID,
+    val deliveryRequestId: UUID,
+    val outboxEventId: UUID,
+    val attemptNumber: Int,
+    val provider: String,
+    val status: String,
+    val providerMessageId: String?,
+    val errorMessage: String?,
+    val startedAt: OffsetDateTime,
+    val completedAt: OffsetDateTime?,
+)
+
+data class DeliveryRetryReceipt(
+    val deliveryRequestId: UUID,
+    val eventId: UUID,
     val replayed: Boolean,
 )

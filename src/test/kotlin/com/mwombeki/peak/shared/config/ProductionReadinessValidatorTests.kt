@@ -25,6 +25,7 @@ class ProductionReadinessValidatorTests {
         assertTrue(message.contains("allow-trusted-jwt-identity-claims must be false"))
         assertTrue(message.contains("API/worker runtime must not use the migrator"))
         assertTrue(message.contains("spring.flyway.enabled must be false"))
+        assertTrue(message.contains("communication.delivery.local-provider.enabled must be false"))
     }
 
     @Test
@@ -36,7 +37,8 @@ class ProductionReadinessValidatorTests {
                 .withProperty("springdoc.api-docs.enabled", "false")
                 .withProperty("springdoc.swagger-ui.enabled", "false")
                 .withProperty("spring.flyway.enabled", "true")
-                .withProperty("spring.main.web-application-type", "none"),
+                .withProperty("spring.main.web-application-type", "none")
+                .withProperty("peak.communication.delivery.local-provider.enabled", "false"),
             runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.MIGRATION),
             httpSecurityProperties = secureHttpProperties(),
             requestContextProperties = RequestContextProperties(
@@ -111,7 +113,8 @@ class ProductionReadinessValidatorTests {
                 .withProperty("springdoc.api-docs.enabled", "false")
                 .withProperty("springdoc.swagger-ui.enabled", "false")
                 .withProperty("peak.realtime.websocket.allowed-origins[0]", "https://app.peak.example.com")
-                .withProperty("spring.flyway.enabled", "false"),
+                .withProperty("spring.flyway.enabled", "false")
+                .withProperty("peak.communication.delivery.local-provider.enabled", "false"),
             runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.API),
             httpSecurityProperties = secureHttpProperties(),
             requestContextProperties = RequestContextProperties(
@@ -169,5 +172,6 @@ class ProductionReadinessValidatorTests {
             .withProperty("springdoc.api-docs.enabled", "false")
             .withProperty("springdoc.swagger-ui.enabled", "false")
             .withProperty("peak.realtime.websocket.allowed-origins[0]", "https://app.peak.example.com")
+            .withProperty("peak.communication.delivery.local-provider.enabled", "false")
     }
 }

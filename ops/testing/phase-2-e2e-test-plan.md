@@ -53,6 +53,8 @@ roomId=
 contactId=
 channelId=
 templateId=
+deliveryRequestId=
+sseLastEventId=
 correlationId=phase2-manual-001
 idempotencyKey=phase2-idem-001
 ```
@@ -457,7 +459,7 @@ POST {{baseUrl}}/api/v1/communication/channels/{{channelId}}/request-verificatio
 Idempotency-Key: communication-channel-request-001
 ```
 
-Expected: `202 Accepted`, `notificationEventId` is returned, channel status becomes `pending`, and no raw token is returned by the API. The token is staged for delivery through the outbox.
+Expected: `202 Accepted`, `notificationEventId` and `deliveryRequestId` are returned, channel status becomes `pending`, and no raw token is returned by the API. The token is staged for delivery through the outbox.
 
 4. Verify a channel with the delivered token.
 
@@ -503,7 +505,80 @@ Idempotency-Key: communication-notification-001
 }
 ```
 
-Expected: response has `eventId`; the notification outbox event is tenant/property scoped. Audit must contain a recipient fingerprint, not the raw recipient or message body.
+Expected: response has `eventId` and `deliveryRequestId`; the notification outbox event is tenant/property scoped. Audit must contain a recipient fingerprint, not the raw recipient or message body.
+
+7. Check delivery request status.
+
+```http
+GET {{baseUrl}}/api/v1/communication/delivery-requests/{{deliveryRequestId}}
+```
+
+Expected: status starts as `queued` or `sending`, then becomes `delivered` after the worker processes the notification destination. The response must show `recipientFingerprint`, not raw message content.
+
+8. List provider attempts.
+
+```http
+GET {{baseUrl}}/api/v1/communication/delivery-requests/{{deliveryRequestId}}/attempts
+```
+
+Expected: at least one attempt appears with `provider`, `attemptNumber`, `status`, and provider message/error fields.
+
+9. Retry a failed delivery.
+
+Use this only after forcing or observing a `failed` or `dead_letter` delivery request.
+
+```http
+POST {{baseUrl}}/api/v1/communication/delivery-requests/{{deliveryRequestId}}/retry
+Idempotency-Key: communication-delivery-retry-001
+```
+
+Expected: response has a new `eventId`, the delivery request returns to `queued`, and replaying the same idempotency key returns `replayed=true`.
+
+## Realtime Flow
+
+These routes require a tenant token with `realtime.stream` for the target property and the `realtime` module enabled for that property.
+
+1. Open an SSE stream.
+
+```bash
+curl -N \
+  -H "Authorization: Bearer ${tenantToken}" \
+  -H "X-Correlation-Id: phase2-realtime-sse-001" \
+  "${baseUrl}/api/v1/realtime/tenants/${tenantId}/properties/${propertyId}/stream"
+```
+
+Expected: the stream starts with `connection-established`.
+
+2. Trigger a property event from another terminal or Postman tab.
+
+```http
+PUT {{baseUrl}}/api/v1/properties/{{propertyId}}/rooms/{{roomId}}/status
+Idempotency-Key: realtime-room-status-001
+
+{
+  "status": "maintenance"
+}
+```
+
+Expected: the SSE stream receives a `property.room.status_changed` event with an `id:` line. Save that id as `sseLastEventId`.
+
+3. Reconnect with resume.
+
+```bash
+curl -N \
+  -H "Authorization: Bearer ${tenantToken}" \
+  -H "X-Correlation-Id: phase2-realtime-sse-resume-001" \
+  -H "Last-Event-ID: ${sseLastEventId}" \
+  "${baseUrl}/api/v1/realtime/tenants/${tenantId}/properties/${propertyId}/stream"
+```
+
+Expected: only events newer than `sseLastEventId` are replayed. Invalid `Last-Event-ID` values return `400`.
+
+4. Verify isolation.
+
+Use a token from another tenant or a property where the user lacks `realtime.stream`.
+
+Expected: the stream is denied with `403`, and `realtime.security.violations` increases for WebSocket subscription denials.
 
 ## Cross-Cutting Checks
 
@@ -534,6 +609,6 @@ ORDER BY created_at DESC
 LIMIT 20;
 ```
 
-## Remaining Phase 2 Flows
+## Phase 2 Completion Notes
 
-The next E2E expansions must cover full property child-resource CRUD, provider-specific communication delivery status, and realtime reconnect/backpressure behavior.
+Normal Phase 2 verification should not require manual SQL. SQL is reserved for emergency inspection, forced failure simulation, or release triage.

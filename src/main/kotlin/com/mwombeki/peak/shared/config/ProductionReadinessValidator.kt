@@ -47,6 +47,7 @@ class ProductionReadinessValidator(
             validateDatasource()
             validateFlyway()
             validateRuntimeTopology()
+            validateCommunicationProviders()
         }
 
         if (violations.isNotEmpty()) {
@@ -139,6 +140,17 @@ class ProductionReadinessValidator(
         }
         requireTrue(origins.none { it == "*" }) {
             "peak.realtime.websocket.allowed-origins must not include wildcard origins in prod"
+        }
+    }
+
+    private fun MutableList<String>.validateCommunicationProviders() {
+        val localProviderEnabled = environment.getProperty(
+            "peak.communication.delivery.local-provider.enabled",
+            Boolean::class.java,
+            true,
+        )
+        requireTrue(!localProviderEnabled) {
+            "peak.communication.delivery.local-provider.enabled must be false in prod"
         }
     }
 
