@@ -13,19 +13,25 @@ import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.usermanagement.api.AssignTenantUserRoleCommand
+import com.mwombeki.peak.usermanagement.api.CreateTenantRoleCommand
+import com.mwombeki.peak.usermanagement.api.DeactivateTenantRoleCommand
+import com.mwombeki.peak.usermanagement.api.GetTenantRoleQuery
 import com.mwombeki.peak.usermanagement.api.ListTenantPermissionsQuery
 import com.mwombeki.peak.usermanagement.api.ListTenantRolesQuery
 import com.mwombeki.peak.usermanagement.api.RevokeTenantUserRoleCommand
 import com.mwombeki.peak.usermanagement.api.TenantPermissionSummary
+import com.mwombeki.peak.usermanagement.api.TenantRoleMutationReceipt
 import com.mwombeki.peak.usermanagement.api.TenantRoleSummary
 import com.mwombeki.peak.usermanagement.api.TenantUserRoleAssignmentReceipt
 import com.mwombeki.peak.usermanagement.api.TenantUserRoleManagementConflictException
 import com.mwombeki.peak.usermanagement.api.TenantUserRoleManagementInProgressException
 import com.mwombeki.peak.usermanagement.api.TenantUserRoleManagementNotFoundException
 import com.mwombeki.peak.usermanagement.api.TenantUserRoleManagementPort
+import com.mwombeki.peak.usermanagement.api.UpdateTenantRoleCommand
 import java.sql.Array
 import java.sql.ResultSet
 import java.util.UUID
+import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
 import org.springframework.transaction.support.TransactionTemplate
@@ -79,6 +85,44 @@ class TenantUserRoleManagementService(
         )
     }
 
+    override fun getTenantRole(query: GetTenantRoleQuery): TenantRoleSummary? {
+        return requireNotNull(
+            transactionTemplate.execute {
+                requireTenantActor(query.tenantId)
+                databaseSessionContext.bind(requestContextHolder.current().identity)
+                jdbcTemplate.query(
+                    """
+                    SELECT
+                        tr.id,
+                        tr.tenant_id,
+                        tr.code,
+                        tr.name,
+                        tr.description,
+                        tr.is_system,
+                        tr.is_active,
+                        COALESCE(
+                            array_agg(p.code ORDER BY p.code) FILTER (WHERE p.code IS NOT NULL),
+                            ARRAY[]::text[]
+                        ) AS permission_codes
+                    FROM tenant_roles tr
+                    LEFT JOIN tenant_role_permissions trp
+                        ON trp.tenant_role_id = tr.id
+                    LEFT JOIN permissions p
+                        ON p.id = trp.permission_id
+                       AND p.tenant_id = tr.tenant_id
+                    WHERE tr.tenant_id = ?
+                      AND tr.id = ?
+                    GROUP BY tr.id, tr.tenant_id, tr.code, tr.name, tr.description,
+                             tr.is_system, tr.is_active
+                    """.trimIndent(),
+                    ::mapTenantRole,
+                    query.tenantId,
+                    query.tenantRoleId,
+                ).singleOrNull()
+            },
+        )
+    }
+
     override fun listTenantPermissions(
         query: ListTenantPermissionsQuery,
     ): List<TenantPermissionSummary> {
@@ -98,6 +142,174 @@ class TenantUserRoleManagementService(
                 )
             },
         )
+    }
+
+    override fun createTenantRole(command: CreateTenantRoleCommand): TenantRoleMutationReceipt {
+        return mutateTenantRole(
+            tenantId = command.tenantId,
+            operationType = "tenant.role.create",
+            requestPayload = command,
+        ) { idempotencyKeyId ->
+            val roleId = UUID.randomUUID()
+            val permissionIds = requireTenantPermissions(command.tenantId, command.permissionCodes)
+            try {
+                jdbcTemplate.update(
+                    """
+                    INSERT INTO tenant_roles (
+                        id,
+                        tenant_id,
+                        code,
+                        name,
+                        description,
+                        is_system,
+                        is_active
+                    )
+                    VALUES (?, ?, ?, ?, ?, false, true)
+                    """.trimIndent(),
+                    roleId,
+                    command.tenantId,
+                    command.code.normalizedCode(),
+                    command.name.normalizedRequired("name"),
+                    command.description?.trim()?.takeIf { it.isNotEmpty() },
+                )
+            } catch (ex: DuplicateKeyException) {
+                throw TenantUserRoleManagementConflictException("Tenant role code is already in use")
+            }
+            replaceTenantRolePermissions(roleId, permissionIds)
+
+            TenantRoleMutationReceipt(
+                tenantId = command.tenantId,
+                tenantRoleId = roleId,
+                isActive = true,
+                changed = true,
+                replayed = false,
+            ).also { receipt ->
+                recordRoleDefinitionSideEffects(
+                    tenantId = command.tenantId,
+                    tenantRoleId = roleId,
+                    action = "created",
+                    eventType = "tenant.role.created",
+                    payload = mapOf(
+                        "tenantId" to command.tenantId,
+                        "tenantRoleId" to roleId,
+                        "code" to command.code.normalizedCode(),
+                        "permissionCodes" to command.permissionCodes.map { it.normalizedCode() },
+                    ),
+                    idempotencyKeyId = idempotencyKeyId,
+                )
+            }
+        }
+    }
+
+    override fun updateTenantRole(command: UpdateTenantRoleCommand): TenantRoleMutationReceipt {
+        return mutateTenantRole(
+            tenantId = command.tenantId,
+            operationType = "tenant.role.update",
+            requestPayload = command,
+        ) { idempotencyKeyId ->
+            requireMutableTenantRole(command.tenantId, command.tenantRoleId)
+            val permissionIds = command.permissionCodes
+                ?.let { requireTenantPermissions(command.tenantId, it) }
+            val rows = jdbcTemplate.update(
+                """
+                UPDATE tenant_roles
+                SET name = COALESCE(?, name),
+                    description = COALESCE(?, description),
+                    updated_at = now()
+                WHERE tenant_id = ?
+                  AND id = ?
+                  AND is_system = false
+                """.trimIndent(),
+                command.name?.normalizedRequired("name"),
+                command.description?.trim()?.takeIf { it.isNotEmpty() },
+                command.tenantId,
+                command.tenantRoleId,
+            )
+            if (permissionIds != null) {
+                replaceTenantRolePermissions(command.tenantRoleId, permissionIds)
+            }
+
+            TenantRoleMutationReceipt(
+                tenantId = command.tenantId,
+                tenantRoleId = command.tenantRoleId,
+                isActive = tenantRoleIsActive(command.tenantId, command.tenantRoleId),
+                changed = rows == 1 || permissionIds != null,
+                replayed = false,
+            ).also { receipt ->
+                if (receipt.changed) {
+                    recordRoleDefinitionSideEffects(
+                        tenantId = command.tenantId,
+                        tenantRoleId = command.tenantRoleId,
+                        action = "updated",
+                        eventType = "tenant.role.updated",
+                        payload = mapOf(
+                            "tenantId" to command.tenantId,
+                            "tenantRoleId" to command.tenantRoleId,
+                            "permissionsChanged" to (permissionIds != null),
+                        ),
+                        idempotencyKeyId = idempotencyKeyId,
+                    )
+                }
+            }
+        }
+    }
+
+    override fun deactivateTenantRole(
+        command: DeactivateTenantRoleCommand,
+    ): TenantRoleMutationReceipt {
+        return mutateTenantRole(
+            tenantId = command.tenantId,
+            operationType = "tenant.role.deactivate",
+            requestPayload = command,
+        ) { idempotencyKeyId ->
+            requireMutableTenantRole(command.tenantId, command.tenantRoleId)
+            val rows = jdbcTemplate.update(
+                """
+                UPDATE tenant_roles
+                SET is_active = false,
+                    updated_at = now()
+                WHERE tenant_id = ?
+                  AND id = ?
+                  AND is_system = false
+                  AND is_active = true
+                """.trimIndent(),
+                command.tenantId,
+                command.tenantRoleId,
+            )
+            if (rows == 1) {
+                jdbcTemplate.update(
+                    """
+                    DELETE FROM user_tenant_roles
+                    WHERE tenant_id = ?
+                      AND tenant_role_id = ?
+                    """.trimIndent(),
+                    command.tenantId,
+                    command.tenantRoleId,
+                )
+            }
+
+            TenantRoleMutationReceipt(
+                tenantId = command.tenantId,
+                tenantRoleId = command.tenantRoleId,
+                isActive = false,
+                changed = rows == 1,
+                replayed = false,
+            ).also { receipt ->
+                if (receipt.changed) {
+                    recordRoleDefinitionSideEffects(
+                        tenantId = command.tenantId,
+                        tenantRoleId = command.tenantRoleId,
+                        action = "deactivated",
+                        eventType = "tenant.role.deactivated",
+                        payload = mapOf(
+                            "tenantId" to command.tenantId,
+                            "tenantRoleId" to command.tenantRoleId,
+                        ),
+                        idempotencyKeyId = idempotencyKeyId,
+                    )
+                }
+            }
+        }
     }
 
     override fun assignTenantUserRole(
@@ -440,6 +652,172 @@ class TenantUserRoleManagementService(
         )
     }
 
+    private fun recordRoleDefinitionSideEffects(
+        tenantId: UUID,
+        tenantRoleId: UUID,
+        action: String,
+        eventType: String,
+        payload: Map<String, Any?>,
+        idempotencyKeyId: UUID,
+    ) {
+        auditPort.recordTenantEvent(
+            TenantAuditEvent(
+                tenantId = tenantId,
+                action = "tenant.roles.$action",
+                resource = AuditResource("tenant_roles", tenantRoleId),
+                after = payload,
+            ),
+        )
+
+        outboxPort.enqueue(
+            OutboxEventCommand(
+                aggregateType = "tenant_roles",
+                aggregateId = tenantRoleId,
+                tenantId = tenantId,
+                eventType = eventType,
+                destination = OutboxDestination.PLATFORM,
+                payload = payload,
+                idempotencyKeyId = idempotencyKeyId,
+                priority = 3,
+            ),
+        )
+    }
+
+    private fun mutateTenantRole(
+        tenantId: UUID,
+        operationType: String,
+        requestPayload: Any,
+        block: (UUID) -> TenantRoleMutationReceipt,
+    ): TenantRoleMutationReceipt {
+        return requireNotNull(
+            transactionTemplate.execute {
+                requireTenantActor(tenantId)
+                databaseSessionContext.bind(requestContextHolder.current().identity)
+                val reservation = idempotencyPort.reserve(
+                    IdempotencyCommand(
+                        operationType = operationType,
+                        requestPayload = requestPayload,
+                        resourceType = "tenant_roles",
+                    ),
+                )
+
+                when (reservation) {
+                    is IdempotencyReservation.Started -> {
+                        val receipt = block(reservation.recordId)
+                        idempotencyPort.markSucceeded(
+                            recordId = reservation.recordId,
+                            responseCode = 200,
+                            responseBody = receipt,
+                            resourceId = receipt.tenantRoleId,
+                        )
+                        receipt
+                    }
+
+                    is IdempotencyReservation.Replay -> replayTenantRoleMutation(reservation)
+                    is IdempotencyReservation.InProgress -> {
+                        throw TenantUserRoleManagementInProgressException(
+                            "Tenant role command is already being processed for this idempotency key",
+                        )
+                    }
+
+                    is IdempotencyReservation.Conflict -> {
+                        throw TenantUserRoleManagementConflictException(
+                            "Idempotency key was already used for a different tenant role request",
+                        )
+                    }
+                }
+            },
+        )
+    }
+
+    private fun requireTenantPermissions(
+        tenantId: UUID,
+        permissionCodes: List<String>,
+    ): List<UUID> {
+        val normalizedCodes = permissionCodes.map { it.normalizedCode() }.distinct()
+        require(normalizedCodes.isNotEmpty()) {
+            "At least one tenant permission is required"
+        }
+        val placeholders = normalizedCodes.joinToString(", ") { "?" }
+        val args = mutableListOf<Any>(tenantId)
+        args.addAll(normalizedCodes)
+        val permissionIds = jdbcTemplate.query(
+            """
+            SELECT id
+            FROM permissions
+            WHERE tenant_id = ?
+              AND code IN ($placeholders)
+            ORDER BY code
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("id", UUID::class.java) },
+            *args.toTypedArray(),
+        )
+        if (permissionIds.size != normalizedCodes.size) {
+            throw TenantUserRoleManagementNotFoundException(
+                "One or more tenant permissions were not found",
+            )
+        }
+        return permissionIds
+    }
+
+    private fun replaceTenantRolePermissions(
+        tenantRoleId: UUID,
+        permissionIds: List<UUID>,
+    ) {
+        jdbcTemplate.update(
+            "DELETE FROM tenant_role_permissions WHERE tenant_role_id = ?",
+            tenantRoleId,
+        )
+        permissionIds.forEach { permissionId ->
+            jdbcTemplate.update(
+                """
+                INSERT INTO tenant_role_permissions (tenant_role_id, permission_id)
+                VALUES (?, ?)
+                ON CONFLICT ON CONSTRAINT tenant_role_permissions_pkey DO NOTHING
+                """.trimIndent(),
+                tenantRoleId,
+                permissionId,
+            )
+        }
+    }
+
+    private fun requireMutableTenantRole(tenantId: UUID, tenantRoleId: UUID) {
+        val role = findTenantRole(tenantId, tenantRoleId, activeOnly = false)
+            ?: throw TenantUserRoleManagementNotFoundException("Tenant role was not found")
+        require(!role.isSystem) {
+            "System tenant roles cannot be modified"
+        }
+    }
+
+    private fun tenantRoleIsActive(tenantId: UUID, tenantRoleId: UUID): Boolean {
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT is_active
+            FROM tenant_roles
+            WHERE tenant_id = ?
+              AND id = ?
+            """.trimIndent(),
+            Boolean::class.java,
+            tenantId,
+            tenantRoleId,
+        ) == true
+    }
+
+    private fun replayTenantRoleMutation(
+        reservation: IdempotencyReservation.Replay,
+    ): TenantRoleMutationReceipt {
+        if (reservation.responseBody.isNullOrBlank()) {
+            throw TenantUserRoleManagementConflictException(
+                "Tenant role replay does not contain a stored response body",
+            )
+        }
+
+        return objectMapper.readValue(
+            reservation.responseBody,
+            TenantRoleMutationReceipt::class.java,
+        ).copy(replayed = true)
+    }
+
     private fun replayAssignment(
         reservation: IdempotencyReservation.Replay,
     ): TenantUserRoleAssignmentReceipt {
@@ -484,6 +862,15 @@ class TenantUserRoleManagementService(
             is kotlin.Array<*> -> value.filterIsInstance<String>()
             else -> emptyList()
         }
+    }
+
+    private fun String.normalizedRequired(field: String): String {
+        return trim().takeIf { it.isNotEmpty() }
+            ?: throw IllegalArgumentException("$field is required")
+    }
+
+    private fun String.normalizedCode(): String {
+        return normalizedRequired("code").lowercase()
     }
 
     private data class RoleChangeCommand(

@@ -8,7 +8,7 @@ User management owns authorization, external identity resolution, platform admin
 - Enforce route authorization using `module_access_matrix`.
 - Authorize static permissions through canonical role-permission tables.
 - Manage platform users, platform roles, platform role assignments, platform permissions, and platform OIDC identity links through audited APIs.
-- Support tenant invitations, identity links, role assignment, role revocation, lock, unlock, disable, reactivate, and identity revocation.
+- Support tenant invitations, identity links, dynamic tenant role CRUD, role assignment, role revocation, lock, unlock, disable, reactivate, and identity revocation.
 
 ## Access Control Model
 
@@ -52,6 +52,23 @@ Metrics:
 
 - `peak.platform.admin.command{operation,result}` counts succeeded, conflicting, and in-progress platform administration commands.
 
+## Tenant Role Administration API
+
+All tenant role routes are tenant-scoped, require `tenant.users.manage`, and are covered by `module_access_matrix`.
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/tenants/{tenantId}/roles` | List tenant roles and their permissions. |
+| `GET` | `/api/v1/tenants/{tenantId}/roles/{tenantRoleId}` | View one tenant role. |
+| `POST` | `/api/v1/tenants/{tenantId}/roles` | Create a dynamic tenant role. |
+| `PUT` | `/api/v1/tenants/{tenantId}/roles/{tenantRoleId}` | Update a dynamic tenant role and its permission set. |
+| `DELETE` | `/api/v1/tenants/{tenantId}/roles/{tenantRoleId}` | Deactivate a dynamic tenant role and remove assignments. |
+| `GET` | `/api/v1/tenants/{tenantId}/permissions` | List tenant permission codes available for tenant roles. |
+| `POST` | `/api/v1/tenants/{tenantId}/users/{userId}/roles/{tenantRoleId}/assign` | Assign a dynamic tenant role to a tenant user. |
+| `POST` | `/api/v1/tenants/{tenantId}/users/{userId}/roles/{tenantRoleId}/revoke` | Revoke a dynamic tenant role from a tenant user. |
+
+Mutating tenant role routes require `Idempotency-Key`. Successful dynamic role definition changes write `audit_logs` entries and enqueue platform outbox events. Tenant system roles are read-only through tenant self-service, and a tenant user cannot change their own role assignments.
+
 ## Production Rules
 
 1. Keep JWT validation enabled in production and require issuer plus audience.
@@ -62,5 +79,5 @@ Metrics:
 6. Deny unregistered API routes by default in production.
 7. Keep platform RLS policies scoped to platform runtime roles instead of granting platform helpers to tenant API roles.
 8. Treat disabled, locked, deleted, or revoked OIDC identities as immediately unauthorized; do not cache positive identity resolution outside request scope.
-9. Require idempotency, audit, and outbox side effects for mutating platform administration commands.
+9. Require idempotency, audit, and outbox side effects for mutating platform and tenant role administration commands.
 10. Keep platform OIDC identity links in `identity_links`; do not add provider-specific identity tables.

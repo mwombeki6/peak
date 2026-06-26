@@ -158,6 +158,97 @@ POST {{baseUrl}}/api/v1/platform/users/{{platformTargetUserId}}/reactivate
 
 Expected: locked/disabled users cannot authorize platform routes.
 
+## Tenant Administration Flow
+
+Switch the default `Authorization` header to a tenant token linked to an active `users` row in `identity_links`. The tenant user must have `tenant.users.manage`, `module.manage`, and `tenant.profile.view` through tenant roles.
+
+1. List tenant permissions and roles.
+
+```http
+GET {{baseUrl}}/api/v1/tenants/{{tenantId}}/permissions
+GET {{baseUrl}}/api/v1/tenants/{{tenantId}}/roles
+```
+
+Expected: `tenant.users.manage`, `module.manage`, and `tenant.profile.view` are visible in the permission list, and the current admin role is visible in roles.
+
+2. Create a dynamic tenant role.
+
+```http
+POST {{baseUrl}}/api/v1/tenants/{{tenantId}}/roles
+Idempotency-Key: tenant-role-create-001
+
+{
+  "code": "phase2_front_office_lead",
+  "name": "Phase 2 Front Office Lead",
+  "description": "Can supervise front office setup checks",
+  "permissionCodes": [
+    "tenant.profile.view"
+  ]
+}
+```
+
+Expected: response has `tenantRoleId`, `changed=true`, `replayed=false`.
+
+3. Replay the same role create request.
+
+Expected: same `tenantRoleId`, `replayed=true`, and no duplicate audit or outbox records.
+
+4. Update then deactivate the dynamic tenant role.
+
+```http
+PUT {{baseUrl}}/api/v1/tenants/{{tenantId}}/roles/{{tenantRoleId}}
+Idempotency-Key: tenant-role-update-001
+
+{
+  "name": "Phase 2 Front Office Supervisor",
+  "permissionCodes": [
+    "tenant.profile.view",
+    "property.view"
+  ]
+}
+```
+
+```http
+DELETE {{baseUrl}}/api/v1/tenants/{{tenantId}}/roles/{{tenantRoleId}}
+Idempotency-Key: tenant-role-delete-001
+```
+
+Expected: only dynamic roles can be changed. Attempts to update or deactivate system roles must return `400` and must not mutate assignments.
+
+5. Enable and list a tenant module.
+
+```http
+POST {{baseUrl}}/api/v1/tenants/{{tenantId}}/modules
+Idempotency-Key: tenant-module-enable-property-001
+
+{
+  "moduleId": "property"
+}
+```
+
+```http
+GET {{baseUrl}}/api/v1/tenants/{{tenantId}}/modules
+```
+
+Expected: `property` appears with `isEnabled=true`.
+
+6. Check tenant readiness.
+
+```http
+GET {{baseUrl}}/api/v1/tenants/{{tenantId}}/readiness
+```
+
+Expected before full setup: `isReady=false` and `missingRequirements` lists the remaining business profile, contact, consent, report recipient, or module requirements. Expected after profile/contact/report setup: `isReady=true` and `missingRequirements=[]`.
+
+7. Disable the tenant module when testing rollback behavior.
+
+```http
+DELETE {{baseUrl}}/api/v1/tenants/{{tenantId}}/modules/property
+Idempotency-Key: tenant-module-disable-property-001
+```
+
+Expected: response has `enabled=false`, and the command is audited and outbox-backed.
+
 ## Cross-Cutting Checks
 
 - Every `/api/**` route must resolve through `module_access_matrix`.
@@ -189,4 +280,4 @@ LIMIT 20;
 
 ## Remaining Phase 2 Flows
 
-The next E2E expansions must cover tenant role CRUD, tenant module enablement/readiness, full property child-resource CRUD, communication provider delivery status, and realtime reconnect/backpressure behavior.
+The next E2E expansions must cover full property child-resource CRUD, communication provider delivery status, and realtime reconnect/backpressure behavior.

@@ -10,6 +10,32 @@ data class ListTenantPermissionsQuery(
     val tenantId: UUID,
 )
 
+data class GetTenantRoleQuery(
+    val tenantId: UUID,
+    val tenantRoleId: UUID,
+)
+
+data class CreateTenantRoleCommand(
+    val tenantId: UUID,
+    val code: String,
+    val name: String,
+    val description: String?,
+    val permissionCodes: List<String>,
+)
+
+data class UpdateTenantRoleCommand(
+    val tenantId: UUID,
+    val tenantRoleId: UUID,
+    val name: String?,
+    val description: String?,
+    val permissionCodes: List<String>?,
+)
+
+data class DeactivateTenantRoleCommand(
+    val tenantId: UUID,
+    val tenantRoleId: UUID,
+)
+
 data class AssignTenantUserRoleCommand(
     val tenantId: UUID,
     val userId: UUID,
@@ -45,6 +71,14 @@ data class TenantUserRoleAssignmentReceipt(
     val userId: UUID,
     val tenantRoleId: UUID,
     val assigned: Boolean,
+    val changed: Boolean,
+    val replayed: Boolean,
+)
+
+data class TenantRoleMutationReceipt(
+    val tenantId: UUID,
+    val tenantRoleId: UUID,
+    val isActive: Boolean,
     val changed: Boolean,
     val replayed: Boolean,
 )
