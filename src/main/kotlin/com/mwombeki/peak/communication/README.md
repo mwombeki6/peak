@@ -36,11 +36,11 @@ The Communication Module provides infrastructure for multi-channel tenant notifi
 | POST | `/api/v1/communication/templates` | Create a message template | `TENANT_ADMIN` |
 
 ## Outbox Pattern
-The module uses a `outbox_events` table to stage notifications. 
-1. **Producer**: The application logic (e.g., `OutboxService`) inserts a record into `outbox_events` within the same database transaction as the business operation.
-2. **Worker**: A background process (`OutboxDeliveryWorker`) polls the table for `pending` events.
-3. **Delivery**: The worker attempts delivery via a provider abstraction.
-4. **Completion**: Upon success, the event is marked as `delivered`. On failure, it is retried with exponential backoff until it reaches `max_attempts`, after which it is marked as `failed`.
+The module stages notifications through the shared `reliability::api` `OutboxPort`.
+1. **Producer**: `OutboxService` creates a typed `OutboxEventCommand` in the same transaction as the communication action.
+2. **Worker**: Worker runtime is owned by the Reliability module and is enabled only in `peak.runtime.mode=worker`.
+3. **Delivery**: `NotificationOutboxHandler` handles `notification` destination events and records operational metrics. Provider-specific delivery adapters should hang behind this handler.
+4. **Completion**: The Reliability module owns claim locking, retry, timeout, metrics, and dead-letter state transitions.
 
 ## Data Model
 - **Tenant Contact**: Individual people associated with a tenant.
@@ -50,5 +50,6 @@ The module uses a `outbox_events` table to stage notifications.
 
 ## Security
 - All endpoints require an active tenant context.
-- Permissions are enforced using `@PreAuthorize` based on Phase 2 security matrix.
-- `idempotency_key` support for unsafe operations to prevent duplicate notifications.
+- Permissions are enforced through `module_access_matrix` route contracts and tenant RBAC permissions: `communications.view`, `communications.manage`, and `communications.send`.
+- Verification tokens are stored only as SHA-256 hashes and checked with constant-time comparison.
+- Property-scoped notifications validate tenant ownership before enqueue.

@@ -1,4 +1,8 @@
 peak:
+  realtime:
+    websocket:
+      allowed-origins:
+        - http://localhost
   security:
     http:
       jwt:

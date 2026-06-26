@@ -3,7 +3,6 @@ package com.mwombeki.peak.property.internal.web
 import com.mwombeki.peak.property.api.*
 import com.mwombeki.peak.property.internal.PropertyManagementService
 import org.springframework.http.ResponseEntity
-import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.web.bind.annotation.*
 import java.util.UUID
 
@@ -13,7 +12,6 @@ class PropertyManagementController(
     private val propertyService: PropertyManagementService,
 ) {
     @PostMapping
-    @PreAuthorize("hasRole('ROLE_TENANT_ADMIN')")
     fun createProperty(
         @RequestBody request: CreatePropertyRequest,
     ): ResponseEntity<Map<String, UUID>> {
@@ -22,13 +20,11 @@ class PropertyManagementController(
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN', 'ROLE_PLATFORM_OPERATOR')")
     fun listProperties(): ResponseEntity<List<PropertyResponse>> {
         return ResponseEntity.ok(propertyService.listProperties())
     }
 
     @GetMapping("/{propertyId}")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN', 'ROLE_PROPERTY_MANAGER', 'ROLE_PLATFORM_OPERATOR')")
     fun getProperty(
         @PathVariable propertyId: UUID,
     ): ResponseEntity<PropertyResponse> {
@@ -38,7 +34,6 @@ class PropertyManagementController(
     }
 
     @PutMapping("/{propertyId}")
-    @PreAuthorize("hasRole('ROLE_TENANT_ADMIN')")
     fun updateProperty(
         @PathVariable propertyId: UUID,
         @RequestBody request: UpdatePropertyRequest,
@@ -48,7 +43,6 @@ class PropertyManagementController(
     }
 
     @DeleteMapping("/{propertyId}")
-    @PreAuthorize("hasRole('ROLE_TENANT_ADMIN')")
     fun deleteProperty(
         @PathVariable propertyId: UUID,
     ): ResponseEntity<Void> {
@@ -57,7 +51,6 @@ class PropertyManagementController(
     }
 
     @PostMapping("/{propertyId}/buildings")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN', 'ROLE_PROPERTY_MANAGER')")
     fun addBuilding(
         @PathVariable propertyId: UUID,
         @RequestBody request: CreateBuildingRequest,
@@ -67,7 +60,6 @@ class PropertyManagementController(
     }
 
     @PostMapping("/{propertyId}/rooms")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN')")
     fun addRoom(
         @PathVariable propertyId: UUID,
         @RequestBody request: CreateRoomRequest,
@@ -77,7 +69,6 @@ class PropertyManagementController(
     }
 
     @GetMapping("/{propertyId}/readiness")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN', 'ROLE_PROPERTY_MANAGER','ROLE_PLATFORM_OPERATOR')")
     fun getReadinessReport(
         @PathVariable propertyId: UUID,
     ): ResponseEntity<PropertyReadinessResponse> {
@@ -85,7 +76,6 @@ class PropertyManagementController(
     }
 
     @PostMapping("/{propertyId}/activate")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN')")
     fun activateProperty(
         @PathVariable propertyId: UUID,
     ):ResponseEntity<PropertyReadinessResponse> {
@@ -93,7 +83,6 @@ class PropertyManagementController(
     }
 
     @PostMapping("/{propertyId}/suspend")
-    @PreAuthorize("hasRole('ROLE_TENANT_ADMIN')")
     fun suspendProperty(
         @PathVariable propertyId: UUID,
     ): ResponseEntity<Void> {
@@ -102,7 +91,6 @@ class PropertyManagementController(
     }
 
     @PostMapping("/{propertyId}/archive")
-    @PreAuthorize("hasRole('ROLE_TENANT_ADMIN')")
     fun archiveProperty(
         @PathVariable propertyId: UUID,
     ): ResponseEntity<Void> {
@@ -111,18 +99,16 @@ class PropertyManagementController(
     }
 
     @PutMapping("/{propertyId}/rooms/{roomId}/status")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN', 'ROLE_PROPERTY_MANAGER', 'ROLE_HOUSEKEEPER')")
     fun changeRoomStatus(
         @PathVariable propertyId: UUID,
         @PathVariable roomId: UUID,
         @RequestParam status: String,
     ): ResponseEntity<Map<String, String>>{
-        propertyService.updateRoomStatus(roomId, status)
+        propertyService.updateRoomStatus(propertyId, roomId, status)
         return ResponseEntity.ok(mapOf("status" to "Successfully updated room state to ${status.uppercase()}"))
     }
 
     @PostMapping("/{propertyId}/floors")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN', 'ROLE_PROPERTY_MANAGER')")
     fun addFloor(
         @PathVariable propertyId: UUID,
         @RequestBody request: CreateFloorRequest
@@ -132,7 +118,6 @@ class PropertyManagementController(
     }
 
     @PostMapping("/{propertyId}/room-types")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN', 'ROLE_PROPERTY_MANAGER')")
     fun addRoomType(
         @PathVariable propertyId: UUID,
         @RequestBody request: CreateRoomTypeRequest
@@ -142,7 +127,6 @@ class PropertyManagementController(
     }
 
     @PostMapping("/{propertyId}/revenue-centers")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN')")
     fun addRevenueCenter(
         @PathVariable propertyId: UUID,
         @RequestBody request: CreateRevenueCenterRequest
@@ -152,7 +136,6 @@ class PropertyManagementController(
     }
 
     @PostMapping("/{propertyId}/departments")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN', 'ROLE_PROPERTY_MANAGER')")
     fun addDepartment(
         @PathVariable propertyId: UUID,
         @RequestBody request: CreateDepartmentRequest
@@ -162,7 +145,6 @@ class PropertyManagementController(
     }
 
     @PostMapping("/{propertyId}/rates")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN', 'ROLE_PROPERTY_MANAGER')")
     fun configureBaseRate(
         @PathVariable propertyId: UUID,
         @RequestBody request: SetBaseRateRequest
@@ -173,7 +155,6 @@ class PropertyManagementController(
 
     // Tax Configuration
     @PostMapping("/taxes")
-    @PreAuthorize("hasRole('ROLE_TENANT_ADMIN')")
     fun createTaxRate(
         @RequestBody request: CreateTaxRateRequest
     ): ResponseEntity<Map<String, UUID>> {
@@ -182,14 +163,12 @@ class PropertyManagementController(
     }
 
     @GetMapping("/taxes")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN', 'ROLE_PROPERTY_MANAGER')")
     fun listTaxRates(): ResponseEntity<List<TaxRateResponse>> {
         return ResponseEntity.ok(propertyService.listTaxRates())
     }
 
     // Module Management
     @PostMapping("/{propertyId}/modules")
-    @PreAuthorize("hasRole('ROLE_TENANT_ADMIN')")
     fun enableModule(
         @PathVariable propertyId: UUID,
         @RequestBody request: EnableModuleRequest
@@ -199,7 +178,6 @@ class PropertyManagementController(
     }
 
     @DeleteMapping("/{propertyId}/modules/{moduleId}")
-    @PreAuthorize("hasRole('ROLE_TENANT_ADMIN')")
     fun disableModule(
         @PathVariable propertyId: UUID,
         @PathVariable moduleId: String
@@ -209,7 +187,6 @@ class PropertyManagementController(
     }
 
     @GetMapping("/{propertyId}/modules")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN', 'ROLE_PROPERTY_MANAGER')")
     fun listEnabledModules(
         @PathVariable propertyId: UUID
     ): ResponseEntity<List<String>> {

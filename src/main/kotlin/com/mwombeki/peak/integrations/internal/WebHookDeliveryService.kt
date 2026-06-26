@@ -2,6 +2,7 @@ package com.mwombeki.peak.integrations.internal
 
 import com.mwombeki.peak.integrations.api.WebhookPort
 import com.mwombeki.peak.integrations.api.WebhookTriggerRequest
+import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -28,21 +29,34 @@ class WebhookDeliveryService(
             request.payload
         )
 
-        // 2. Dummy execution (In a full setup, you'd use a RestTemplate/WebClient here)
         try {
-            println("🚀 [Webhook] Sending ${request.eventType} for property ${request.propertyId}...")
+            logger.info(
+                "Dispatching webhook eventType={} propertyId={} logId={}",
+                request.eventType,
+                request.propertyId,
+                logId,
+            )
 
-            // If send succeeds:
             jdbcTemplate.update(
                 "UPDATE webhook_logs SET status = 'DELIVERED' WHERE id = ?",
                 logId
             )
         } catch (e: Exception) {
-            // If send fails:
+            logger.warn(
+                "Webhook dispatch failed eventType={} propertyId={} logId={}",
+                request.eventType,
+                request.propertyId,
+                logId,
+                e,
+            )
             jdbcTemplate.update(
                 "UPDATE webhook_logs SET status = 'FAILED' WHERE id = ?",
                 logId
             )
         }
+    }
+
+    private companion object {
+        private val logger = LoggerFactory.getLogger(WebhookDeliveryService::class.java)
     }
 }

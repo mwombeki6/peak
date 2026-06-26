@@ -32,8 +32,9 @@ We support two ways for clients to receive data:
     -   Ideal for simple "read-only" live updates.
 
 ## Security & Isolation
--   **Tenant Shield**: Every subscription attempt is intercepted. The system compares the `tenantId` in the URL with the `tenantId` in the user's secure token. If they don't match, the connection is instantly dropped.
--   **Platform Access**: Platform admins are allowed to monitor any stream for troubleshooting purposes.
+-   **Tenant and Property Authorization**: SSE routes are covered by `module_access_matrix`; WebSocket subscriptions call `can_access_module` directly. A user needs the `realtime.stream` permission and enabled `realtime` module for the target property.
+-   **Origin Control**: WebSocket origins are configured with `peak.realtime.websocket.allowed-origins`. Wildcard origins are rejected.
+-   **No Platform Bypass**: Platform users do not bypass tenant/property realtime permissions.
 
 ## Monitoring & Metrics
 The module tracks its own health using professional metrics:

@@ -4,9 +4,11 @@ import com.mwombeki.peak.audit.api.AuditOutcome
 import com.mwombeki.peak.audit.api.AuditPort
 import com.mwombeki.peak.audit.api.AuditResource
 import com.mwombeki.peak.audit.api.TenantAuditEvent
+import com.mwombeki.peak.realtime.internal.RealtimeSubscriptionAuthorizer
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
 import io.micrometer.core.instrument.MeterRegistry
+import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.messaging.Message
 import org.springframework.messaging.MessageChannel
@@ -16,6 +18,8 @@ import org.springframework.messaging.simp.stomp.StompCommand
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor
 import org.springframework.messaging.support.ChannelInterceptor
 import org.springframework.messaging.support.MessageHeaderAccessor
+import org.springframework.scheduling.TaskScheduler
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer
@@ -27,7 +31,10 @@ import java.util.concurrent.atomic.AtomicInteger
 class WebSocketConfig(
     private val requestContextHolder: RequestContextHolder,
     private val auditPort: AuditPort,
-    private val meterRegistry: MeterRegistry
+    private val meterRegistry: MeterRegistry,
+    private val realtimeBrokerTaskScheduler: TaskScheduler,
+    private val webSocketProperties: RealtimeWebSocketProperties,
+    private val subscriptionAuthorizer: RealtimeSubscriptionAuthorizer,
 ) : WebSocketMessageBrokerConfigurer {
 
     private val activeConnections = AtomicInteger(0)
@@ -39,6 +46,7 @@ class WebSocketConfig(
     override fun configureMessageBroker(config: MessageBrokerRegistry) {
         // /topic is where clients listen for live broadcast updates
         config.enableSimpleBroker("/topic")
+            .setTaskScheduler(realtimeBrokerTaskScheduler)
             .setHeartbeatValue(longArrayOf(10000, 10000)) // 10s heartbeats
         
         // /app is the prefix clients use to send messages to us
@@ -46,8 +54,11 @@ class WebSocketConfig(
     }
 
     override fun registerStompEndpoints(registry: StompEndpointRegistry) {
-        // The URL the frontend connects to initially
-        registry.addEndpoint("/ws-connect").setAllowedOrigins("*")
+        val endpoint = registry.addEndpoint("/ws-connect")
+        val allowedOrigins = webSocketProperties.cleanedAllowedOrigins
+        if (allowedOrigins.isNotEmpty()) {
+            endpoint.setAllowedOrigins(*allowedOrigins.toTypedArray())
+        }
     }
 
     override fun configureClientInboundChannel(registration: ChannelRegistration) {
@@ -65,31 +76,17 @@ class WebSocketConfig(
                     }
                     StompCommand.SUBSCRIBE -> {
                         val destination = accessor.destination ?: throw IllegalStateException("No channel destination provided.")
+                        val match = STREAM_DESTINATION_PATTERN.matchEntire(destination) ?: return message
+                        val targetTenantId = UUID.fromString(match.groupValues[1])
+                        val targetPropertyId = UUID.fromString(match.groupValues[2])
+                        val identity = requestContextHolder.current().identity
 
-                        // Destination format: /topic/tenants/{tenantId}/properties/{propertyId}/stream
-                        val routeParts = destination.split("/")
-                        if (routeParts.size >= 6 && routeParts[2] == "tenants") {
-                            val targetTenantIdStr = routeParts[3]
-                            val targetTenantId = UUID.fromString(targetTenantIdStr)
-
-                            // Grab who is currently trying to subscribe from our security context
-                            val context = requestContextHolder.current()
-                            val identity = context.identity
-
-                            if (identity is RequestIdentity.Tenant) {
-                                val activeTenantId = identity.tenantId
-
-                                // 🚨 THE SECURITY SHIELD: If they don't match, drop the connection immediately!
-                                if (activeTenantId != targetTenantId) {
-                                    recordSuspiciousAccess(activeTenantId, targetTenantId, destination)
-                                    throw SecurityException("Access Denied: You cannot subscribe to another tenant's live stream!")
-                                }
-                            } else if (identity !is RequestIdentity.Platform) {
-                                throw SecurityException("Access Denied: Missing valid credentials.")
-                            }
-                            
-                            meterRegistry.counter("realtime.websocket.subscriptions", "tenantId", targetTenantIdStr).increment()
+                        if (!subscriptionAuthorizer.canSubscribe(identity, targetTenantId, targetPropertyId)) {
+                            recordDeniedSubscription(identity, targetTenantId, targetPropertyId, destination)
+                            throw SecurityException("Access denied for realtime property stream.")
                         }
+
+                        meterRegistry.counter("realtime.websocket.subscriptions").increment()
                     }
                     else -> {}
                 }
@@ -98,21 +95,43 @@ class WebSocketConfig(
         })
     }
 
-    private fun recordSuspiciousAccess(activeTenantId: UUID, targetTenantId: UUID, destination: String) {
+    private fun recordDeniedSubscription(
+        identity: RequestIdentity,
+        targetTenantId: UUID,
+        targetPropertyId: UUID,
+        destination: String,
+    ) {
         meterRegistry.counter("realtime.security.violations").increment()
-        
-        auditPort.recordTenantEvent(
-            TenantAuditEvent(
-                tenantId = activeTenantId,
-                action = "SUSPICIOUS_REALTIME_SUBSCRIPTION",
-                resource = AuditResource("realtime_stream", targetTenantId),
-                outcome = AuditOutcome.FAILURE,
-                after = mapOf(
-                    "attempted_destination" to destination,
-                    "target_tenant_id" to targetTenantId
-                )
+        if (identity is RequestIdentity.Tenant) {
+            auditPort.recordTenantEvent(
+                TenantAuditEvent(
+                    tenantId = identity.tenantId,
+                    action = "realtime.subscription_denied",
+                    resource = AuditResource("realtime_stream", targetPropertyId),
+                    outcome = AuditOutcome.FAILURE,
+                    after = mapOf(
+                        "attempted_destination" to destination,
+                        "target_tenant_id" to targetTenantId,
+                        "target_property_id" to targetPropertyId,
+                    ),
+                ),
             )
-        )
+        }
+    }
+
+    private companion object {
+        val STREAM_DESTINATION_PATTERN = Regex("^/topic/tenants/([^/]+)/properties/([^/]+)/stream$")
     }
 }
 
+@Configuration
+class RealtimeBrokerSchedulerConfiguration {
+    @Bean
+    fun realtimeBrokerTaskScheduler(): TaskScheduler {
+        return ThreadPoolTaskScheduler().apply {
+            poolSize = 2
+            setThreadNamePrefix("realtime-broker-")
+            setRemoveOnCancelPolicy(true)
+        }
+    }
+}

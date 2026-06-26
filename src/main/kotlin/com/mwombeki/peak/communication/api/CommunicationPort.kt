@@ -3,7 +3,7 @@ package com.mwombeki.peak.communication.api
 import java.util.UUID
 
 data class EnqueueNotificationRequest(
-   val propertyId: UUID,
+   val propertyId: UUID? = null,
    val channel: String,     // "EMAIL", "SMS", "WHATSAPP"
    val recipient: String,   // e.g., "manager@mbeyapeak.com" or "255712345678"
    val subject: String?,
@@ -41,4 +41,3 @@ data class CreateTemplateRequest(
     val content: String,
     val type: String // EMAIL, SMS, WHATSAPP
 )
-

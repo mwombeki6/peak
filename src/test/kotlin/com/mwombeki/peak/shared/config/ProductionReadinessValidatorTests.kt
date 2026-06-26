@@ -110,6 +110,7 @@ class ProductionReadinessValidatorTests {
                 .withProperty("spring.datasource.password", "not-local-secret")
                 .withProperty("springdoc.api-docs.enabled", "false")
                 .withProperty("springdoc.swagger-ui.enabled", "false")
+                .withProperty("peak.realtime.websocket.allowed-origins[0]", "https://app.peak.example.com")
                 .withProperty("spring.flyway.enabled", "false"),
             runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.API),
             httpSecurityProperties = secureHttpProperties(),
@@ -167,5 +168,6 @@ class ProductionReadinessValidatorTests {
         return prodEnvironment()
             .withProperty("springdoc.api-docs.enabled", "false")
             .withProperty("springdoc.swagger-ui.enabled", "false")
+            .withProperty("peak.realtime.websocket.allowed-origins[0]", "https://app.peak.example.com")
     }
 }

@@ -6,9 +6,9 @@ The Property Management module is responsible for defining and managing the phys
 This module also enforces a "Readiness" workflow, ensuring a property is fully configured before it can be activated for operational use.
 
 ## Key Features
-- **Property Lifecycle**: Manage properties through states: `draft`, `active`, `suspended`, `archived`.
+- **Property Lifecycle**: Manage properties through canonical schema states: `active`, `suspended`, `frozen`, `archived`, and `terminated`.
 - **Structural Configuration**: CRUD operations for Buildings, Floors, and Room Types.
-- **Inventory Management**: Room allocation and real-time status updates (`AVAILABLE`, `DIRTY`, `MAINTENANCE`, `SUSPENDED`, `OUT_OF_ORDER`).
+- **Inventory Management**: Room allocation and real-time status updates using canonical statuses (`vacant_clean`, `vacant_dirty`, `occupied`, `maintenance`, `out_of_order`, `blocked`).
 - **Operational Setup**: Manage Departments and Revenue Centers.
 - **Financial Configuration**: Configure Tax Rates (VAT, Levies, etc.) and Base Rates for room types.
 - **Property Readiness**: Automated checklist to verify configuration completeness.
@@ -77,5 +77,5 @@ A property cannot be `activated` until the following conditions are met:
 
 ## Security & Auditing
 - **Tenant Isolation**: All operations are scoped to the active `tenant_id` resolved from the security context.
-- **Role-Based Access**: Restricted to `TENANT_ADMIN`, `PROPERTY_MANAGER`, and `HOUSEKEEPER` roles as appropriate.
+- **Route Matrix Access**: HTTP access is enforced through `module_access_matrix` and tenant RBAC permissions: `property.view`, `property.manage`, and `property.lifecycle`.
 - **Audit Logging**: All mutating actions (creation, updates, status changes) are recorded via the `AuditPort` for compliance and tracking.

@@ -2,7 +2,6 @@ package com.mwombeki.peak.communication.internal.web
 
 import com.mwombeki.peak.communication.api.*
 import org.springframework.http.ResponseEntity
-import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.web.bind.annotation.*
 import java.util.UUID
 
@@ -13,7 +12,6 @@ class CommunicationController(
 ) {
 
     @PostMapping("/notifications")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN', 'ROLE_PROPERTY_MANAGER', 'ROLE_SYSTEM')")
     fun sendNotification(
         @RequestBody request: EnqueueNotificationRequest
     ): ResponseEntity<Map<String, UUID>> {
@@ -22,7 +20,6 @@ class CommunicationController(
     }
 
     @PostMapping("/contacts")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN', 'ROLE_PROPERTY_MANAGER')")
     fun createContact(
         @RequestBody request: CreateContactRequest
     ): ResponseEntity<Map<String, UUID>> {
@@ -31,13 +28,11 @@ class CommunicationController(
     }
 
     @GetMapping("/contacts")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN', 'ROLE_PROPERTY_MANAGER')")
     fun listContacts(): ResponseEntity<List<ContactResponse>> {
         return ResponseEntity.ok(communicationPort.listContacts())
     }
 
     @PostMapping("/templates")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN')")
     fun createTemplate(
         @RequestBody request: CreateTemplateRequest
     ): ResponseEntity<Map<String, UUID>> {
@@ -46,7 +41,6 @@ class CommunicationController(
     }
 
     @PostMapping("/channels/{channelId}/request-verification")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN', 'ROLE_PROPERTY_MANAGER')")
     fun requestVerification(
         @PathVariable channelId: UUID
     ): ResponseEntity<Void> {
@@ -55,7 +49,6 @@ class CommunicationController(
     }
 
     @PostMapping("/channels/{channelId}/verify")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN', 'ROLE_PROPERTY_MANAGER')")
     fun verifyChannel(
         @PathVariable channelId: UUID,
         @RequestParam token: String

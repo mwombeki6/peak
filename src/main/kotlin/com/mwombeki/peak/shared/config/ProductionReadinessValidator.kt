@@ -109,6 +109,7 @@ class ProductionReadinessValidator(
                 requireTrue(webApplicationType != WEB_APPLICATION_TYPE_NONE) {
                     "spring.main.web-application-type must not be none for API runtime in prod"
                 }
+                validateRealtimeWebSocketOrigins()
             }
 
             PeakRuntimeMode.WORKER -> {
@@ -131,12 +132,34 @@ class ProductionReadinessValidator(
         }
     }
 
+    private fun MutableList<String>.validateRealtimeWebSocketOrigins() {
+        val origins = configuredList("peak.realtime.websocket.allowed-origins")
+        requireTrue(origins.isNotEmpty()) {
+            "peak.realtime.websocket.allowed-origins must be explicit in prod"
+        }
+        requireTrue(origins.none { it == "*" }) {
+            "peak.realtime.websocket.allowed-origins must not include wildcard origins in prod"
+        }
+    }
+
     private fun String?.isDefaultLocalSecret(): Boolean {
         return this == LOCAL_MIGRATOR_USER || this == "peak_app" || this == "peak_worker"
     }
 
     private fun springDocEnabled(property: String): Boolean {
         return environment.getProperty(property, Boolean::class.java, true)
+    }
+
+    private fun configuredList(property: String): List<String> {
+        val direct = environment.getProperty(property)
+            ?.split(",")
+            ?.map { it.trim() }
+            ?.filter { it.isNotBlank() }
+            .orEmpty()
+        val indexed = (0..50).mapNotNull { index ->
+            environment.getProperty("$property[$index]")?.trim()?.takeIf { it.isNotBlank() }
+        }
+        return (direct + indexed).distinct()
     }
 
     private fun MutableList<String>.requirePresent(

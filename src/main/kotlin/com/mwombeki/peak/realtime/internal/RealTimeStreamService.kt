@@ -3,6 +3,7 @@ package com.mwombeki.peak.realtime.internal
 import com.mwombeki.peak.realtime.api.BroadcastEventRequest
 import com.mwombeki.peak.realtime.api.RealtimePort
 import org.springframework.messaging.simp.SimpMessagingTemplate
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 
@@ -39,6 +40,15 @@ class RealtimeStreamService(
             }
         }
 
-        println("⚡ [Realtime Broadcast] Streamed event '${request.eventType}' to destination: $targetDestination (WS + ${sseEmitters.size} SSE)")
+        logger.info(
+            "Broadcast realtime event type={} destination={} sseSubscribers={}",
+            request.eventType,
+            targetDestination,
+            sseEmitters.size,
+        )
+    }
+
+    private companion object {
+        private val logger = LoggerFactory.getLogger(RealtimeStreamService::class.java)
     }
 }

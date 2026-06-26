@@ -16,6 +16,9 @@ spring:
     add-properties: false
 
 peak:
+  realtime:
+    websocket:
+      allowed-origins: ${PEAK_REALTIME_WEBSOCKET_ALLOWED_ORIGINS}
   security:
     http:
       jwt:

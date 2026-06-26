@@ -113,6 +113,9 @@ class RouteAccessMatrixCoverageIntegrationTests {
             startsWith("/api/v1/public/properties/") -> GuardMode.MODULE_ONLY
             this == "/api/v1/invitations/accept" -> GuardMode.PUBLIC_TOKEN
             startsWith("/api/v1/tenants/") -> GuardMode.STAFF_PERMISSION
+            startsWith("/api/v1/properties") -> GuardMode.STAFF_PERMISSION
+            startsWith("/api/v1/communication") -> GuardMode.STAFF_PERMISSION
+            startsWith("/api/v1/realtime/") -> GuardMode.STAFF_PERMISSION
             else -> error("No expected guard mode for API route pattern $this")
         }
     }
@@ -123,6 +126,11 @@ class RouteAccessMatrixCoverageIntegrationTests {
             startsWith("/api/v1/public/properties/") -> RouteScope.PUBLIC_PROPERTY
             this == "/api/v1/invitations/accept" -> RouteScope.PUBLIC
             startsWith("/api/v1/tenants/") -> RouteScope.TENANT
+            this == "/api/v1/properties" -> RouteScope.TENANT
+            this == "/api/v1/properties/taxes" -> RouteScope.TENANT
+            startsWith("/api/v1/properties/") -> RouteScope.PROPERTY
+            startsWith("/api/v1/communication") -> RouteScope.TENANT
+            startsWith("/api/v1/realtime/") -> RouteScope.PROPERTY
             else -> error("No expected route scope for API route pattern $this")
         }
     }
@@ -153,6 +161,9 @@ class RouteAccessMatrixCoverageIntegrationTests {
             "userId" to UUID.fromString("44444444-4444-4444-4444-444444444444").toString(),
             "identityLinkId" to UUID.fromString("55555555-5555-5555-5555-555555555555").toString(),
             "tenantRoleId" to UUID.fromString("66666666-6666-6666-6666-666666666666").toString(),
+            "roomId" to UUID.fromString("77777777-7777-7777-7777-777777777777").toString(),
+            "channelId" to UUID.fromString("88888888-8888-8888-8888-888888888888").toString(),
+            "moduleId" to "booking_engine",
         )
     }
 }
