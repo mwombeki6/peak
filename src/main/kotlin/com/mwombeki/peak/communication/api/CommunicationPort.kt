@@ -11,12 +11,12 @@ data class EnqueueNotificationRequest(
 )
 
 interface CommunicationPort {
-    fun enqueue(request: EnqueueNotificationRequest): UUID
-    fun createContact(request: CreateContactRequest): UUID
+    fun enqueue(request: EnqueueNotificationRequest): NotificationEnqueueReceipt
+    fun createContact(request: CreateContactRequest): ContactMutationReceipt
     fun listContacts(): List<ContactResponse>
-    fun createTemplate(request: CreateTemplateRequest): UUID
-    fun verifyChannel(channelId: UUID, token: String): Boolean
-    fun requestChannelVerification(channelId: UUID)
+    fun createTemplate(request: CreateTemplateRequest): TemplateMutationReceipt
+    fun verifyChannel(channelId: UUID, token: String): ChannelVerificationReceipt
+    fun requestChannelVerification(channelId: UUID): ChannelVerificationRequestReceipt
 }
 
 data class CreateContactRequest(
@@ -32,7 +32,16 @@ data class ContactResponse(
     val fullName: String,
     val jobTitle: String?,
     val status: String,
-    val isPrimary: Boolean
+    val isPrimary: Boolean,
+    val channels: List<ContactChannelResponse> = emptyList(),
+)
+
+data class ContactChannelResponse(
+    val id: UUID,
+    val channelType: String,
+    val address: String,
+    val verificationStatus: String,
+    val isPrimary: Boolean,
 )
 
 data class CreateTemplateRequest(
@@ -40,4 +49,33 @@ data class CreateTemplateRequest(
     val subject: String?,
     val content: String,
     val type: String // EMAIL, SMS, WHATSAPP
+)
+
+data class NotificationEnqueueReceipt(
+    val eventId: UUID,
+    val replayed: Boolean,
+)
+
+data class ContactMutationReceipt(
+    val contactId: UUID,
+    val channelIds: List<UUID>,
+    val replayed: Boolean,
+)
+
+data class TemplateMutationReceipt(
+    val templateId: UUID,
+    val replayed: Boolean,
+)
+
+data class ChannelVerificationRequestReceipt(
+    val channelId: UUID,
+    val notificationEventId: UUID,
+    val replayed: Boolean,
+)
+
+data class ChannelVerificationReceipt(
+    val channelId: UUID,
+    val verified: Boolean,
+    val changed: Boolean,
+    val replayed: Boolean,
 )

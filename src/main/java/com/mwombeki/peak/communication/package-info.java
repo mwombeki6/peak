@@ -1,7 +1,11 @@
 @ApplicationModule(
         id = "communications",
         displayName = "Communications & Outbox Module",
-        allowedDependencies = {"shared::context", "reliability::api"}
+        allowedDependencies = {
+                "audit::api",
+                "reliability::api",
+                "shared::context"
+        }
 )
 package com.mwombeki.peak.communication;
 

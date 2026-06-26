@@ -249,6 +249,90 @@ Idempotency-Key: tenant-module-disable-property-001
 
 Expected: response has `enabled=false`, and the command is audited and outbox-backed.
 
+## Communication Flow
+
+Use a tenant token whose user has `communications.view`, `communications.manage`, and `communications.send`. The tenant must have the `communications` module enabled.
+
+1. Create a contact with channels.
+
+```http
+POST {{baseUrl}}/api/v1/communication/contacts
+Idempotency-Key: communication-contact-create-001
+
+{
+  "fullName": "Operations Manager",
+  "jobTitle": "Operations",
+  "email": "ops@example.com",
+  "phone": "+255712345678",
+  "whatsapp": "+255712345678"
+}
+```
+
+Expected: response has `contactId`, `channelIds`, and `replayed=false`. Replay with the same idempotency key must return the same `contactId` with `replayed=true`.
+
+2. List contacts.
+
+```http
+GET {{baseUrl}}/api/v1/communication/contacts
+```
+
+Expected: the contact appears with channel ids and verification statuses.
+
+3. Request channel verification.
+
+```http
+POST {{baseUrl}}/api/v1/communication/channels/{{channelId}}/request-verification
+Idempotency-Key: communication-channel-request-001
+```
+
+Expected: `202 Accepted`, `notificationEventId` is returned, channel status becomes `pending`, and no raw token is returned by the API. The token is staged for delivery through the outbox.
+
+4. Verify a channel with the delivered token.
+
+```http
+POST {{baseUrl}}/api/v1/communication/channels/{{channelId}}/verify
+Idempotency-Key: communication-channel-verify-001
+
+{
+  "token": "TOKEN_FROM_DELIVERY"
+}
+```
+
+Expected: `verified=true`, channel status becomes `verified`, and replay with the same idempotency key returns `replayed=true`.
+
+5. Create a template.
+
+```http
+POST {{baseUrl}}/api/v1/communication/templates
+Idempotency-Key: communication-template-create-001
+
+{
+  "name": "Arrival Alert",
+  "subject": "Arrival alert",
+  "content": "Guest {{guestName}} has arrived.",
+  "type": "EMAIL"
+}
+```
+
+Expected: response has `templateId`; audit and platform outbox events are written.
+
+6. Enqueue a notification.
+
+```http
+POST {{baseUrl}}/api/v1/communication/notifications
+Idempotency-Key: communication-notification-001
+
+{
+  "propertyId": "{{propertyId}}",
+  "channel": "EMAIL",
+  "recipient": "ops@example.com",
+  "subject": "Operational alert",
+  "content": "A test alert was emitted."
+}
+```
+
+Expected: response has `eventId`; the notification outbox event is tenant/property scoped. Audit must contain a recipient fingerprint, not the raw recipient or message body.
+
 ## Cross-Cutting Checks
 
 - Every `/api/**` route must resolve through `module_access_matrix`.
@@ -280,4 +364,4 @@ LIMIT 20;
 
 ## Remaining Phase 2 Flows
 
-The next E2E expansions must cover full property child-resource CRUD, communication provider delivery status, and realtime reconnect/backpressure behavior.
+The next E2E expansions must cover full property child-resource CRUD, provider-specific communication delivery status, and realtime reconnect/backpressure behavior.

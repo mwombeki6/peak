@@ -9,31 +9,33 @@ The Communication Module provides infrastructure for multi-channel tenant notifi
 - **Verification Workflow**: Token-based verification for communication channels.
 - **Message Templates**: Dynamic templates with variable support.
 - **Reliable Delivery**: Outbox-based asynchronous delivery with retry logic and dead-letter support.
-- **Audit & Security**: Full audit logging for sensitive communication changes and tenant-isolated data access.
+- **Audit & Security**: Audit logging, idempotency, tenant-isolated data access, and sanitized audit payloads for sensitive communication changes.
 
 ## API Endpoints
 
 ### Contact Management
 | Method | Endpoint | Description | Roles |
 |--------|----------|-------------|-------|
-| POST | `/api/v1/communication/contacts` | Create a new contact | `TENANT_ADMIN`, `PROPERTY_MANAGER` |
-| GET | `/api/v1/communication/contacts` | List all contacts | `TENANT_ADMIN`, `PROPERTY_MANAGER` |
+| POST | `/api/v1/communication/contacts` | Create a contact and email/phone/WhatsApp channels | `communications.manage` |
+| GET | `/api/v1/communication/contacts` | List contacts and channel verification state | `communications.view` |
 
 ### Channel Verification
 | Method | Endpoint | Description | Roles |
 |--------|----------|-------------|-------|
-| POST | `/api/v1/communication/channels/{id}/request-verification` | Request verification token | `TENANT_ADMIN` |
-| POST | `/api/v1/communication/channels/{id}/verify` | Submit verification token | `TENANT_ADMIN` |
+| POST | `/api/v1/communication/channels/{id}/request-verification` | Request verification token delivery through outbox | `communications.manage` |
+| POST | `/api/v1/communication/channels/{id}/verify` | Submit verification token in a JSON body | `communications.manage` |
 
 ### Notifications
 | Method | Endpoint | Description | Roles |
 |--------|----------|-------------|-------|
-| POST | `/api/v1/communication/notifications` | Enqueue a new notification | `TENANT_ADMIN`, `SYSTEM` |
+| POST | `/api/v1/communication/notifications` | Enqueue a tenant or property notification | `communications.send` |
 
 ### Templates
 | Method | Endpoint | Description | Roles |
 |--------|----------|-------------|-------|
-| POST | `/api/v1/communication/templates` | Create a message template | `TENANT_ADMIN` |
+| POST | `/api/v1/communication/templates` | Create a message template | `communications.manage` |
+
+All mutating endpoints require `Idempotency-Key`. Replay returns the original resource id with `replayed=true`.
 
 ## Outbox Pattern
 The module stages notifications through the shared `reliability::api` `OutboxPort`.
@@ -52,4 +54,6 @@ The module stages notifications through the shared `reliability::api` `OutboxPor
 - All endpoints require an active tenant context.
 - Permissions are enforced through `module_access_matrix` route contracts and tenant RBAC permissions: `communications.view`, `communications.manage`, and `communications.send`.
 - Verification tokens are stored only as SHA-256 hashes and checked with constant-time comparison.
+- Verification tokens are delivered through outbox payloads and are not returned by the request API.
 - Property-scoped notifications validate tenant ownership before enqueue.
+- Communication audit entries avoid storing raw recipient addresses or message content.

@@ -1,0 +1,545 @@
+package com.mwombeki.peak.communication.internal.web
+
+import com.mwombeki.peak.TestcontainersConfiguration
+import com.mwombeki.peak.communication.api.ChannelVerificationReceipt
+import com.mwombeki.peak.communication.api.ChannelVerificationRequestReceipt
+import com.mwombeki.peak.communication.api.ContactMutationReceipt
+import com.mwombeki.peak.communication.api.NotificationEnqueueReceipt
+import com.mwombeki.peak.communication.api.TemplateMutationReceipt
+import com.mwombeki.peak.shared.context.PeakRequestHeaders
+import java.security.MessageDigest
+import java.util.UUID
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import org.hamcrest.Matchers.hasItem
+import org.hamcrest.Matchers.hasSize
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
+import org.springframework.context.annotation.Import
+import org.springframework.http.MediaType
+import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import org.testcontainers.junit.jupiter.Testcontainers
+import tools.jackson.databind.ObjectMapper
+
+@Import(TestcontainersConfiguration::class)
+@SpringBootTest(
+    properties = [
+        "peak.security.request-context.allow-header-identity=true",
+    ],
+)
+@AutoConfigureMockMvc
+@Testcontainers(disabledWithoutDocker = true)
+class CommunicationControllerIntegrationTests {
+
+    @Autowired
+    private lateinit var mockMvc: MockMvc
+
+    @Autowired
+    private lateinit var jdbcTemplate: JdbcTemplate
+
+    @Autowired
+    private lateinit var objectMapper: ObjectMapper
+
+    @Test
+    fun createsContactRequestsAndVerifiesChannelWithAuditOutboxAndIdempotency() {
+        val fixture = communicationFixture()
+        insertAuthorizedFixture(fixture)
+
+        val createResult = mockMvc.perform(
+            post("/api/v1/communication/contacts")
+                .secure(true)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "fullName": "Operations Manager",
+                      "jobTitle": "Operations",
+                      "email": "ops-${fixture.tenantId}@example.com",
+                      "phone": "+255712345678"
+                    }
+                    """.trimIndent(),
+                )
+                .headersFor(fixture, "corr-communication-contact-create", "idem-communication-contact-create"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.contactId").exists())
+            .andExpect(jsonPath("$.channelIds", hasSize<Any>(2)))
+            .andExpect(jsonPath("$.replayed").value(false))
+            .andReturn()
+
+        val contact = objectMapper.readValue(
+            createResult.response.contentAsString,
+            ContactMutationReceipt::class.java,
+        )
+        val emailChannelId = contact.channelIds.first()
+
+        mockMvc.perform(
+            post("/api/v1/communication/contacts")
+                .secure(true)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "fullName": "Operations Manager",
+                      "jobTitle": "Operations",
+                      "email": "ops-${fixture.tenantId}@example.com",
+                      "phone": "+255712345678"
+                    }
+                    """.trimIndent(),
+                )
+                .headersFor(fixture, "corr-communication-contact-replay", "idem-communication-contact-create"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.contactId").value(contact.contactId.toString()))
+            .andExpect(jsonPath("$.replayed").value(true))
+
+        mockMvc.perform(
+            get("/api/v1/communication/contacts")
+                .secure(true)
+                .headersFor(fixture, "corr-communication-contact-list"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$[*].id", hasItem(contact.contactId.toString())))
+            .andExpect(jsonPath("$[0].channels[*].id", hasItem(emailChannelId.toString())))
+            .andExpect(jsonPath("$[0].channels[*].verificationStatus", hasItem("unverified")))
+
+        val requestVerificationResult = mockMvc.perform(
+            post("/api/v1/communication/channels/$emailChannelId/request-verification")
+                .secure(true)
+                .headersFor(
+                    fixture,
+                    "corr-communication-verification-request",
+                    "idem-communication-verification-request",
+                ),
+        )
+            .andExpect(status().isAccepted)
+            .andExpect(jsonPath("$.channelId").value(emailChannelId.toString()))
+            .andExpect(jsonPath("$.notificationEventId").exists())
+            .andExpect(jsonPath("$.replayed").value(false))
+            .andReturn()
+
+        val verificationRequest = objectMapper.readValue(
+            requestVerificationResult.response.contentAsString,
+            ChannelVerificationRequestReceipt::class.java,
+        )
+
+        mockMvc.perform(
+            post("/api/v1/communication/channels/$emailChannelId/request-verification")
+                .secure(true)
+                .headersFor(
+                    fixture,
+                    "corr-communication-verification-request-replay",
+                    "idem-communication-verification-request",
+                ),
+        )
+            .andExpect(status().isAccepted)
+            .andExpect(jsonPath("$.notificationEventId").value(verificationRequest.notificationEventId.toString()))
+            .andExpect(jsonPath("$.replayed").value(true))
+
+        assertEquals("pending", channelVerificationStatus(emailChannelId))
+        assertEquals(
+            1,
+            auditCount(fixture.tenantId, "communication.channel.verification_requested", emailChannelId),
+        )
+        assertEquals(
+            1,
+            outboxCount(fixture.tenantId, "communication.channel.verification.requested", emailChannelId),
+        )
+
+        val token = "verified-token-${UUID.randomUUID()}"
+        jdbcTemplate.update(
+            """
+            UPDATE contact_channels
+            SET verification_status = 'pending',
+                verification_token_hash = ?,
+                verification_expires_at = now() + interval '1 hour'
+            WHERE id = ?
+            """.trimIndent(),
+            sha256Hex(token),
+            emailChannelId,
+        )
+
+        val verifyResult = mockMvc.perform(
+            post("/api/v1/communication/channels/$emailChannelId/verify")
+                .secure(true)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"token": "$token"}""")
+                .headersFor(fixture, "corr-communication-verify", "idem-communication-verify"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.channelId").value(emailChannelId.toString()))
+            .andExpect(jsonPath("$.verified").value(true))
+            .andExpect(jsonPath("$.changed").value(true))
+            .andExpect(jsonPath("$.replayed").value(false))
+            .andReturn()
+
+        val verified = objectMapper.readValue(
+            verifyResult.response.contentAsString,
+            ChannelVerificationReceipt::class.java,
+        )
+
+        mockMvc.perform(
+            post("/api/v1/communication/channels/$emailChannelId/verify")
+                .secure(true)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"token": "$token"}""")
+                .headersFor(fixture, "corr-communication-verify-replay", "idem-communication-verify"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.channelId").value(verified.channelId.toString()))
+            .andExpect(jsonPath("$.verified").value(true))
+            .andExpect(jsonPath("$.replayed").value(true))
+
+        assertEquals("verified", channelVerificationStatus(emailChannelId))
+        assertEquals(1, auditCount(fixture.tenantId, "communication.channel.verified", emailChannelId))
+    }
+
+    @Test
+    fun createsTemplateAndEnqueuesNotificationWithAuditOutboxAndIdempotency() {
+        val fixture = communicationFixture()
+        insertAuthorizedFixture(fixture)
+        insertProperty(fixture)
+
+        val templateResult = mockMvc.perform(
+            post("/api/v1/communication/templates")
+                .secure(true)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "name": "Arrival Alert ${fixture.tenantId}",
+                      "subject": "Arrival alert",
+                      "content": "Guest {{guestName}} has arrived.",
+                      "type": "EMAIL"
+                    }
+                    """.trimIndent(),
+                )
+                .headersFor(fixture, "corr-communication-template-create", "idem-communication-template-create"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.templateId").exists())
+            .andExpect(jsonPath("$.replayed").value(false))
+            .andReturn()
+
+        val template = objectMapper.readValue(
+            templateResult.response.contentAsString,
+            TemplateMutationReceipt::class.java,
+        )
+
+        mockMvc.perform(
+            post("/api/v1/communication/templates")
+                .secure(true)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "name": "Arrival Alert ${fixture.tenantId}",
+                      "subject": "Arrival alert",
+                      "content": "Guest {{guestName}} has arrived.",
+                      "type": "EMAIL"
+                    }
+                    """.trimIndent(),
+                )
+                .headersFor(fixture, "corr-communication-template-replay", "idem-communication-template-create"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.templateId").value(template.templateId.toString()))
+            .andExpect(jsonPath("$.replayed").value(true))
+
+        assertEquals(1, auditCount(fixture.tenantId, "communication.template.created", template.templateId))
+        assertEquals(1, outboxCount(fixture.tenantId, "communication.template.created", template.templateId))
+
+        val notificationResult = mockMvc.perform(
+            post("/api/v1/communication/notifications")
+                .secure(true)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "propertyId": "${fixture.propertyId}",
+                      "channel": "EMAIL",
+                      "recipient": "ops-${fixture.tenantId}@example.com",
+                      "subject": "Operational alert",
+                      "content": "A test alert was emitted."
+                    }
+                    """.trimIndent(),
+                )
+                .headersFor(
+                    fixture,
+                    "corr-communication-notification-enqueue",
+                    "idem-communication-notification-enqueue",
+                ),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.eventId").exists())
+            .andExpect(jsonPath("$.replayed").value(false))
+            .andReturn()
+
+        val notification = objectMapper.readValue(
+            notificationResult.response.contentAsString,
+            NotificationEnqueueReceipt::class.java,
+        )
+
+        mockMvc.perform(
+            post("/api/v1/communication/notifications")
+                .secure(true)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "propertyId": "${fixture.propertyId}",
+                      "channel": "EMAIL",
+                      "recipient": "ops-${fixture.tenantId}@example.com",
+                      "subject": "Operational alert",
+                      "content": "A test alert was emitted."
+                    }
+                    """.trimIndent(),
+                )
+                .headersFor(
+                    fixture,
+                    "corr-communication-notification-replay",
+                    "idem-communication-notification-enqueue",
+                ),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.eventId").value(notification.eventId.toString()))
+            .andExpect(jsonPath("$.replayed").value(true))
+
+        assertEquals(
+            1,
+            auditCount(fixture.tenantId, "communication.notification.enqueued", notification.eventId),
+        )
+        assertEquals(
+            1,
+            outboxCount(fixture.tenantId, "communication.notification.email", fixture.propertyId),
+        )
+    }
+
+    @Test
+    fun deniesNotificationRouteWithoutSendPermission() {
+        val fixture = communicationFixture()
+        insertFixtureWithoutPermissions(fixture)
+        grantPermissionToActor(fixture, "communications.manage")
+
+        mockMvc.perform(
+            post("/api/v1/communication/notifications")
+                .secure(true)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "channel": "EMAIL",
+                      "recipient": "ops-${fixture.tenantId}@example.com",
+                      "subject": "Denied",
+                      "content": "Denied"
+                    }
+                    """.trimIndent(),
+                )
+                .headersFor(fixture, "corr-communication-denied", "idem-communication-denied"),
+        )
+            .andExpect(status().isForbidden)
+            .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+    }
+
+    private fun communicationFixture(): CommunicationFixture {
+        return CommunicationFixture(
+            planId = UUID.randomUUID(),
+            tenantId = UUID.randomUUID(),
+            tenantUserId = UUID.randomUUID(),
+            tenantRoleId = UUID.randomUUID(),
+            propertyId = UUID.randomUUID(),
+        )
+    }
+
+    private fun insertAuthorizedFixture(fixture: CommunicationFixture) {
+        insertFixtureWithoutPermissions(fixture)
+        grantPermissionToActor(fixture, "communications.manage")
+        grantPermissionToActor(fixture, "communications.view")
+        grantPermissionToActor(fixture, "communications.send")
+    }
+
+    private fun insertFixtureWithoutPermissions(fixture: CommunicationFixture) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO plans (id, name, code)
+            VALUES (?, ?, ?)
+            """.trimIndent(),
+            fixture.planId,
+            "Communication Plan ${fixture.planId}",
+            "communication-${fixture.planId}",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenants (id, name, slug, schema_name, plan_id, status)
+            VALUES (?, ?, ?, ?, ?, 'active')
+            """.trimIndent(),
+            fixture.tenantId,
+            "Communication Tenant ${fixture.tenantId}",
+            "communication-${fixture.tenantId}",
+            "tenant_${fixture.tenantId}".replace("-", "_"),
+            fixture.planId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_modules (tenant_id, module_id, is_enabled, is_configured)
+            VALUES (?, 'communications', true, true)
+            """.trimIndent(),
+            fixture.tenantId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO users (id, tenant_id, full_name, email, status, is_active)
+            VALUES (?, ?, ?, ?, 'active', true)
+            """.trimIndent(),
+            fixture.tenantUserId,
+            fixture.tenantId,
+            "Communication Admin ${fixture.tenantUserId}",
+            "communication-admin-${fixture.tenantUserId}@example.com",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_roles (id, tenant_id, name, code)
+            VALUES (?, ?, ?, ?)
+            """.trimIndent(),
+            fixture.tenantRoleId,
+            fixture.tenantId,
+            "Communication Admin ${fixture.tenantRoleId}",
+            "communication-admin-${fixture.tenantRoleId}",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO user_tenant_roles (user_id, tenant_id, tenant_role_id)
+            VALUES (?, ?, ?)
+            """.trimIndent(),
+            fixture.tenantUserId,
+            fixture.tenantId,
+            fixture.tenantRoleId,
+        )
+    }
+
+    private fun grantPermissionToActor(
+        fixture: CommunicationFixture,
+        permissionCode: String,
+    ) {
+        val permissionId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO permissions (id, tenant_id, code, description)
+            VALUES (?, ?, ?, ?)
+            """.trimIndent(),
+            permissionId,
+            fixture.tenantId,
+            permissionCode,
+            "Permission $permissionCode",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_role_permissions (tenant_role_id, permission_id)
+            VALUES (?, ?)
+            """.trimIndent(),
+            fixture.tenantRoleId,
+            permissionId,
+        )
+    }
+
+    private fun insertProperty(fixture: CommunicationFixture) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO properties (id, tenant_id, name, location, code, type, status, is_active)
+            VALUES (?, ?, ?, 'Dar es Salaam', ?, 'HOTEL', 'active', true)
+            """.trimIndent(),
+            fixture.propertyId,
+            fixture.tenantId,
+            "Communication Property ${fixture.propertyId}",
+            "COM-${fixture.propertyId.toString().take(8)}",
+        )
+    }
+
+    private fun channelVerificationStatus(channelId: UUID): String {
+        return requireNotNull(
+            jdbcTemplate.queryForObject(
+                "SELECT verification_status FROM contact_channels WHERE id = ?",
+                String::class.java,
+                channelId,
+            ),
+        )
+    }
+
+    private fun auditCount(
+        tenantId: UUID,
+        action: String,
+        entityId: UUID,
+    ): Int {
+        return requireNotNull(
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*)
+                FROM audit_logs
+                WHERE tenant_id = ?
+                  AND action = ?
+                  AND entity_id = ?
+                """.trimIndent(),
+                Int::class.java,
+                tenantId,
+                action,
+                entityId,
+            ),
+        )
+    }
+
+    private fun outboxCount(
+        tenantId: UUID,
+        eventType: String,
+        aggregateId: UUID,
+    ): Int {
+        return requireNotNull(
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*)
+                FROM outbox_events
+                WHERE tenant_id = ?
+                  AND event_type = ?
+                  AND aggregate_id = ?
+                """.trimIndent(),
+                Int::class.java,
+                tenantId,
+                eventType,
+                aggregateId,
+            ),
+        )
+    }
+
+    private fun org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder.headersFor(
+        fixture: CommunicationFixture,
+        correlationId: String,
+        idempotencyKey: String? = null,
+    ): org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder {
+        header(PeakRequestHeaders.CORRELATION_ID, correlationId)
+        header(PeakRequestHeaders.TENANT_ID, fixture.tenantId.toString())
+        header(PeakRequestHeaders.TENANT_USER_ID, fixture.tenantUserId.toString())
+        idempotencyKey?.let { header(PeakRequestHeaders.IDEMPOTENCY_KEY, it) }
+        return this
+    }
+
+    private fun sha256Hex(value: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+        return digest.joinToString(separator = "") {
+            "%02x".format(it.toInt() and 0xff)
+        }
+    }
+
+    private data class CommunicationFixture(
+        val planId: UUID,
+        val tenantId: UUID,
+        val tenantUserId: UUID,
+        val tenantRoleId: UUID,
+        val propertyId: UUID,
+    )
+}
