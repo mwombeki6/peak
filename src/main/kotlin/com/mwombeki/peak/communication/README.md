@@ -28,7 +28,11 @@ The Communication Module provides infrastructure for multi-channel tenant notifi
 ### Notifications
 | Method | Endpoint | Description | Roles |
 |--------|----------|-------------|-------|
-| POST | `/api/v1/communication/notifications` | Enqueue a tenant or property notification | `communications.send` |
+| POST | `/api/v1/communication/notifications` | Enqueue a tenant or property notification and create a delivery request | `communications.send` |
+| GET | `/api/v1/communication/delivery-requests` | List recent tenant delivery requests | `communications.view` |
+| GET | `/api/v1/communication/delivery-requests/{id}` | Get delivery request status | `communications.view` |
+| GET | `/api/v1/communication/delivery-requests/{id}/attempts` | List provider delivery attempts | `communications.view` |
+| POST | `/api/v1/communication/delivery-requests/{id}/retry` | Retry a failed or dead-lettered delivery request | `communications.send` |
 
 ### Templates
 | Method | Endpoint | Description | Roles |
@@ -41,14 +45,22 @@ All mutating endpoints require `Idempotency-Key`. Replay returns the original re
 The module stages notifications through the shared `reliability::api` `OutboxPort`.
 1. **Producer**: `OutboxService` creates a typed `OutboxEventCommand` in the same transaction as the communication action.
 2. **Worker**: Worker runtime is owned by the Reliability module and is enabled only in `peak.runtime.mode=worker`.
-3. **Delivery**: `NotificationOutboxHandler` handles `notification` destination events and records operational metrics. Provider-specific delivery adapters should hang behind this handler.
+3. **Delivery**: `NotificationOutboxHandler` handles `notification` destination events, creates provider attempts, updates `communication_delivery_requests`, and records operational metrics.
 4. **Completion**: The Reliability module owns claim locking, retry, timeout, metrics, and dead-letter state transitions.
+5. **Provider adapters**: `NotificationDeliveryProvider` isolates provider integrations from delivery state management. The default local provider accepts messages for development and tests; production providers should be configured without placing credentials in YAML defaults.
 
 ## Data Model
 - **Tenant Contact**: Individual people associated with a tenant.
 - **Contact Channel**: Specific addresses (email, phone number) for a contact.
 - **Communication Template**: Pre-defined messages for common notifications.
-- **Outbox Event**: Records tracking the delivery status of notifications.
+- **Communication Delivery Request**: Logical notification delivery with status, fingerprints, current outbox event, and retry state.
+- **Communication Delivery Attempt**: Provider attempt history for each delivery request and outbox claim.
+- **Outbox Event**: Reliability work item claimed by the bounded worker runtime.
+
+## Metrics
+- `peak.communication.delivery.attempts.started{channel,provider}`: provider attempt started.
+- `peak.communication.delivery.attempts.delivered{channel,provider}`: provider attempt delivered.
+- `peak.communication.delivery.attempts.failed{channel,provider,status}`: provider attempt failed or dead-lettered.
 
 ## Security
 - All endpoints require an active tenant context.
@@ -57,3 +69,4 @@ The module stages notifications through the shared `reliability::api` `OutboxPor
 - Verification tokens are delivered through outbox payloads and are not returned by the request API.
 - Property-scoped notifications validate tenant ownership before enqueue.
 - Communication audit entries avoid storing raw recipient addresses or message content.
+- Delivery status rows store recipient and content fingerprints for lookup and diagnostics without duplicating raw message content.

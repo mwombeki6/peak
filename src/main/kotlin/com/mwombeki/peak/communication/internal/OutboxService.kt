@@ -11,6 +11,9 @@ import com.mwombeki.peak.communication.api.ContactMutationReceipt
 import com.mwombeki.peak.communication.api.ContactResponse
 import com.mwombeki.peak.communication.api.CreateContactRequest
 import com.mwombeki.peak.communication.api.CreateTemplateRequest
+import com.mwombeki.peak.communication.api.DeliveryAttemptResponse
+import com.mwombeki.peak.communication.api.DeliveryRequestResponse
+import com.mwombeki.peak.communication.api.DeliveryRetryReceipt
 import com.mwombeki.peak.communication.api.EnqueueNotificationRequest
 import com.mwombeki.peak.communication.api.NotificationEnqueueReceipt
 import com.mwombeki.peak.communication.api.TemplateMutationReceipt
@@ -23,6 +26,7 @@ import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
+import java.sql.ResultSet
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.time.OffsetDateTime
@@ -82,6 +86,16 @@ class OutboxService(
                     priority = 4,
                 ),
             )
+            val deliveryRequestId = insertDeliveryRequest(
+                tenantId = tenantId,
+                propertyId = request.propertyId,
+                originalOutboxEventId = eventId,
+                currentOutboxEventId = eventId,
+                channel = channel,
+                recipient = recipient,
+                subject = request.subject?.trim(),
+                content = content,
+            )
 
             auditPort.recordTenantEvent(
                 TenantAuditEvent(
@@ -98,7 +112,11 @@ class OutboxService(
                 ),
             )
 
-            NotificationEnqueueReceipt(eventId = eventId, replayed = false)
+            NotificationEnqueueReceipt(
+                eventId = eventId,
+                deliveryRequestId = deliveryRequestId,
+                replayed = false,
+            )
         }
     }
 
@@ -338,6 +356,16 @@ class OutboxService(
                     priority = 3,
                 ),
             )
+            val deliveryRequestId = insertDeliveryRequest(
+                tenantId = tenantId,
+                propertyId = null,
+                originalOutboxEventId = eventId,
+                currentOutboxEventId = eventId,
+                channel = channelInfo.channelType,
+                recipient = channelInfo.address,
+                subject = "Verify your contact channel",
+                content = "Your verification token is: $token",
+            )
 
             auditPort.recordTenantEvent(
                 TenantAuditEvent(
@@ -355,6 +383,7 @@ class OutboxService(
             ChannelVerificationRequestReceipt(
                 channelId = channelId,
                 notificationEventId = eventId,
+                deliveryRequestId = deliveryRequestId,
                 replayed = false,
             )
         }
@@ -442,6 +471,148 @@ class OutboxService(
         }
     }
 
+    @Transactional
+    override fun listDeliveryRequests(): List<DeliveryRequestResponse> {
+        val tenantId = bindTenantContext()
+        return jdbcTemplate.query(
+            """
+            SELECT id,
+                   property_id,
+                   original_outbox_event_id,
+                   current_outbox_event_id,
+                   channel_type,
+                   recipient_fingerprint,
+                   subject,
+                   status,
+                   attempt_count,
+                   max_attempts,
+                   requested_at,
+                   delivered_at,
+                   failed_at,
+                   last_error
+            FROM communication_delivery_requests
+            WHERE tenant_id = ? AND deleted_at IS NULL
+            ORDER BY requested_at DESC, id DESC
+            LIMIT 200
+            """.trimIndent(),
+            ::mapDeliveryRequest,
+            tenantId,
+        )
+    }
+
+    @Transactional
+    override fun getDeliveryRequest(deliveryRequestId: UUID): DeliveryRequestResponse {
+        val tenantId = bindTenantContext()
+        return deliveryRequest(tenantId, deliveryRequestId)
+    }
+
+    @Transactional
+    override fun listDeliveryAttempts(deliveryRequestId: UUID): List<DeliveryAttemptResponse> {
+        val tenantId = bindTenantContext()
+        ensureDeliveryRequestExists(tenantId, deliveryRequestId)
+        return jdbcTemplate.query(
+            """
+            SELECT id,
+                   delivery_request_id,
+                   outbox_event_id,
+                   attempt_number,
+                   provider,
+                   status,
+                   provider_message_id,
+                   error_message,
+                   started_at,
+                   completed_at
+            FROM communication_delivery_attempts
+            WHERE tenant_id = ? AND delivery_request_id = ?
+            ORDER BY attempt_number DESC, started_at DESC
+            """.trimIndent(),
+            { rs, _ ->
+                DeliveryAttemptResponse(
+                    id = rs.getObject("id", UUID::class.java),
+                    deliveryRequestId = rs.getObject("delivery_request_id", UUID::class.java),
+                    outboxEventId = rs.getObject("outbox_event_id", UUID::class.java),
+                    attemptNumber = rs.getInt("attempt_number"),
+                    provider = rs.getString("provider"),
+                    status = rs.getString("status"),
+                    providerMessageId = rs.getString("provider_message_id"),
+                    errorMessage = rs.getString("error_message"),
+                    startedAt = rs.getObject("started_at", OffsetDateTime::class.java),
+                    completedAt = rs.getObject("completed_at", OffsetDateTime::class.java),
+                )
+            },
+            tenantId,
+            deliveryRequestId,
+        )
+    }
+
+    @Transactional
+    override fun retryDelivery(deliveryRequestId: UUID): DeliveryRetryReceipt {
+        val tenantId = bindTenantContext()
+        ensureDeliveryRequestExists(tenantId, deliveryRequestId)
+
+        return withIdempotency(
+            operationType = "communication.delivery.retry",
+            requestPayload = mapOf("deliveryRequestId" to deliveryRequestId),
+            resourceType = "communication_delivery_requests",
+            replayType = DeliveryRetryReceipt::class.java,
+        ) { idempotencyKeyId ->
+            val existing = deliveryRequest(tenantId, deliveryRequestId)
+            require(existing.status in RETRYABLE_DELIVERY_STATUSES) {
+                "Only failed or dead-lettered communication deliveries can be retried."
+            }
+            val source = deliveryRetrySource(tenantId, existing.currentOutboxEventId)
+            val newEventId = outboxPort.enqueue(
+                OutboxEventCommand(
+                    aggregateType = source.aggregateType,
+                    aggregateId = source.aggregateId,
+                    eventType = source.eventType,
+                    destination = OutboxDestination.NOTIFICATION,
+                    tenantId = tenantId,
+                    propertyId = source.propertyId,
+                    payload = source.payload,
+                    idempotencyKeyId = idempotencyKeyId,
+                    priority = 3,
+                    maxAttempts = source.maxAttempts,
+                ),
+            )
+
+            jdbcTemplate.update(
+                """
+                UPDATE communication_delivery_requests
+                SET current_outbox_event_id = ?,
+                    status = 'queued',
+                    delivered_at = NULL,
+                    failed_at = NULL,
+                    last_error = NULL,
+                    updated_at = now()
+                WHERE id = ? AND tenant_id = ?
+                """.trimIndent(),
+                newEventId,
+                deliveryRequestId,
+                tenantId,
+            )
+
+            auditPort.recordTenantEvent(
+                TenantAuditEvent(
+                    tenantId = tenantId,
+                    action = "communication.delivery.retry_requested",
+                    resource = AuditResource("communication_delivery_requests", deliveryRequestId),
+                    after = mapOf(
+                        "deliveryRequestId" to deliveryRequestId,
+                        "outboxEventId" to newEventId,
+                        "channel" to existing.channel,
+                    ),
+                ),
+            )
+
+            DeliveryRetryReceipt(
+                deliveryRequestId = deliveryRequestId,
+                eventId = newEventId,
+                replayed = false,
+            )
+        }
+    }
+
     private fun bindTenantContext(): UUID {
         val identity = requestContextHolder.current().identity
         require(identity is RequestIdentity.Tenant) {
@@ -522,6 +693,154 @@ class OutboxService(
         }
     }
 
+    private fun insertDeliveryRequest(
+        tenantId: UUID,
+        propertyId: UUID?,
+        originalOutboxEventId: UUID,
+        currentOutboxEventId: UUID,
+        channel: String,
+        recipient: String,
+        subject: String?,
+        content: String,
+    ): UUID {
+        val deliveryRequestId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO communication_delivery_requests (
+                id,
+                tenant_id,
+                property_id,
+                original_outbox_event_id,
+                current_outbox_event_id,
+                channel_type,
+                recipient,
+                recipient_fingerprint,
+                subject,
+                content_fingerprint
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """.trimIndent(),
+            deliveryRequestId,
+            tenantId,
+            propertyId,
+            originalOutboxEventId,
+            currentOutboxEventId,
+            channel,
+            recipient,
+            sha256Hex(recipient),
+            subject?.takeIf { it.isNotBlank() },
+            sha256Hex(content),
+        )
+        return deliveryRequestId
+    }
+
+    private fun deliveryRequest(
+        tenantId: UUID,
+        deliveryRequestId: UUID,
+    ): DeliveryRequestResponse {
+        return jdbcTemplate.query(
+            """
+            SELECT id,
+                   property_id,
+                   original_outbox_event_id,
+                   current_outbox_event_id,
+                   channel_type,
+                   recipient_fingerprint,
+                   subject,
+                   status,
+                   attempt_count,
+                   max_attempts,
+                   requested_at,
+                   delivered_at,
+                   failed_at,
+                   last_error
+            FROM communication_delivery_requests
+            WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL
+            """.trimIndent(),
+            ::mapDeliveryRequest,
+            deliveryRequestId,
+            tenantId,
+        ).firstOrNull() ?: throw NoSuchElementException("Communication delivery request not found or access denied.")
+    }
+
+    private fun ensureDeliveryRequestExists(
+        tenantId: UUID,
+        deliveryRequestId: UUID,
+    ) {
+        val exists = requireNotNull(
+            jdbcTemplate.queryForObject(
+                """
+                SELECT EXISTS(
+                    SELECT 1
+                    FROM communication_delivery_requests
+                    WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL
+                )
+                """.trimIndent(),
+                Boolean::class.java,
+                deliveryRequestId,
+                tenantId,
+            ),
+        )
+        if (!exists) {
+            throw NoSuchElementException("Communication delivery request not found or access denied.")
+        }
+    }
+
+    private fun mapDeliveryRequest(rs: ResultSet, rowNumber: Int): DeliveryRequestResponse {
+        return DeliveryRequestResponse(
+            id = rs.getObject("id", UUID::class.java),
+            propertyId = rs.getObject("property_id", UUID::class.java),
+            originalOutboxEventId = rs.getObject("original_outbox_event_id", UUID::class.java),
+            currentOutboxEventId = rs.getObject("current_outbox_event_id", UUID::class.java),
+            channel = rs.getString("channel_type"),
+            recipientFingerprint = rs.getString("recipient_fingerprint"),
+            subjectPresent = !rs.getString("subject").isNullOrBlank(),
+            status = rs.getString("status"),
+            attemptCount = rs.getInt("attempt_count"),
+            maxAttempts = rs.getInt("max_attempts"),
+            requestedAt = rs.getObject("requested_at", OffsetDateTime::class.java),
+            deliveredAt = rs.getObject("delivered_at", OffsetDateTime::class.java),
+            failedAt = rs.getObject("failed_at", OffsetDateTime::class.java),
+            lastError = rs.getString("last_error"),
+        )
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun deliveryRetrySource(
+        tenantId: UUID,
+        outboxEventId: UUID,
+    ): DeliveryRetrySource {
+        return jdbcTemplate.query(
+            """
+            SELECT aggregate_type,
+                   aggregate_id,
+                   event_type,
+                   property_id,
+                   payload::text AS payload,
+                   max_attempts
+            FROM outbox_events
+            WHERE id = ?
+              AND tenant_id = ?
+              AND destination = 'notification'
+            """.trimIndent(),
+            { rs, _ ->
+                DeliveryRetrySource(
+                    aggregateType = rs.getString("aggregate_type"),
+                    aggregateId = rs.getObject("aggregate_id", UUID::class.java),
+                    eventType = rs.getString("event_type"),
+                    propertyId = rs.getObject("property_id", UUID::class.java),
+                    payload = objectMapper.readValue(
+                        rs.getString("payload"),
+                        Map::class.java,
+                    ) as Map<String, Any?>,
+                    maxAttempts = rs.getInt("max_attempts"),
+                )
+            },
+            outboxEventId,
+            tenantId,
+        ).firstOrNull() ?: throw NoSuchElementException("Original notification outbox event not found.")
+    }
+
     private fun ensureUpdated(rowsUpdated: Int, message: String) {
         if (rowsUpdated == 0) {
             throw NoSuchElementException(message)
@@ -588,6 +907,7 @@ class OutboxService(
             is TemplateMutationReceipt -> copy(replayed = true)
             is ChannelVerificationRequestReceipt -> copy(replayed = true)
             is ChannelVerificationReceipt -> copy(replayed = true)
+            is DeliveryRetryReceipt -> copy(replayed = true)
             else -> this
         } as T
     }
@@ -599,6 +919,7 @@ class OutboxService(
             is TemplateMutationReceipt -> templateId
             is ChannelVerificationRequestReceipt -> channelId
             is ChannelVerificationReceipt -> channelId
+            is DeliveryRetryReceipt -> deliveryRequestId
             else -> null
         }
     }
@@ -646,8 +967,18 @@ class OutboxService(
         val expiresAt: OffsetDateTime?,
     )
 
+    private data class DeliveryRetrySource(
+        val aggregateType: String,
+        val aggregateId: UUID?,
+        val eventType: String,
+        val propertyId: UUID?,
+        val payload: Map<String, Any?>,
+        val maxAttempts: Int,
+    )
+
     private companion object {
         private val ALLOWED_CHANNELS = setOf("email", "sms", "whatsapp", "voice_phone")
+        private val RETRYABLE_DELIVERY_STATUSES = setOf("failed", "dead_letter")
         private val secureRandom = SecureRandom()
     }
 }

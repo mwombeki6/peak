@@ -4,13 +4,17 @@ import com.mwombeki.peak.TestcontainersConfiguration
 import com.mwombeki.peak.communication.api.ChannelVerificationReceipt
 import com.mwombeki.peak.communication.api.ChannelVerificationRequestReceipt
 import com.mwombeki.peak.communication.api.ContactMutationReceipt
+import com.mwombeki.peak.communication.api.DeliveryRetryReceipt
 import com.mwombeki.peak.communication.api.NotificationEnqueueReceipt
 import com.mwombeki.peak.communication.api.TemplateMutationReceipt
+import com.mwombeki.peak.reliability.api.OutboxDestination
+import com.mwombeki.peak.reliability.internal.OutboxWorkerProcessor
 import com.mwombeki.peak.shared.context.PeakRequestHeaders
 import java.security.MessageDigest
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import org.hamcrest.Matchers.hasItem
 import org.hamcrest.Matchers.hasSize
 import org.springframework.beans.factory.annotation.Autowired
@@ -46,6 +50,9 @@ class CommunicationControllerIntegrationTests {
 
     @Autowired
     private lateinit var objectMapper: ObjectMapper
+
+    @Autowired
+    private lateinit var outboxWorkerProcessor: OutboxWorkerProcessor
 
     @Test
     fun createsContactRequestsAndVerifiesChannelWithAuditOutboxAndIdempotency() {
@@ -286,6 +293,7 @@ class CommunicationControllerIntegrationTests {
             notificationResult.response.contentAsString,
             NotificationEnqueueReceipt::class.java,
         )
+        val deliveryRequestId = assertNotNull(notification.deliveryRequestId)
 
         mockMvc.perform(
             post("/api/v1/communication/notifications")
@@ -312,13 +320,103 @@ class CommunicationControllerIntegrationTests {
             .andExpect(jsonPath("$.eventId").value(notification.eventId.toString()))
             .andExpect(jsonPath("$.replayed").value(true))
 
+        mockMvc.perform(
+            get("/api/v1/communication/delivery-requests")
+                .secure(true)
+                .headersFor(fixture, "corr-communication-delivery-list"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$[*].id", hasItem(deliveryRequestId.toString())))
+
+        mockMvc.perform(
+            get("/api/v1/communication/delivery-requests/$deliveryRequestId")
+                .secure(true)
+                .headersFor(fixture, "corr-communication-delivery-get"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.id").value(deliveryRequestId.toString()))
+            .andExpect(jsonPath("$.currentOutboxEventId").value(notification.eventId.toString()))
+            .andExpect(jsonPath("$.status").value("queued"))
+            .andExpect(jsonPath("$.recipientFingerprint").exists())
+
+        outboxWorkerProcessor.processBatchBlocking(OutboxDestination.NOTIFICATION)
+
+        mockMvc.perform(
+            get("/api/v1/communication/delivery-requests/$deliveryRequestId")
+                .secure(true)
+                .headersFor(fixture, "corr-communication-delivery-delivered"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.status").value("delivered"))
+            .andExpect(jsonPath("$.attemptCount").value(1))
+            .andExpect(jsonPath("$.deliveredAt").exists())
+
+        mockMvc.perform(
+            get("/api/v1/communication/delivery-requests/$deliveryRequestId/attempts")
+                .secure(true)
+                .headersFor(fixture, "corr-communication-delivery-attempts"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$[0].outboxEventId").value(notification.eventId.toString()))
+            .andExpect(jsonPath("$[0].provider").value("local"))
+            .andExpect(jsonPath("$[0].status").value("delivered"))
+
+        jdbcTemplate.update(
+            """
+            UPDATE communication_delivery_requests
+            SET status = 'failed',
+                failed_at = now(),
+                last_error = 'manual retry test'
+            WHERE id = ?
+            """.trimIndent(),
+            deliveryRequestId,
+        )
+
+        val retryResult = mockMvc.perform(
+            post("/api/v1/communication/delivery-requests/$deliveryRequestId/retry")
+                .secure(true)
+                .headersFor(fixture, "corr-communication-delivery-retry", "idem-communication-delivery-retry"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.deliveryRequestId").value(deliveryRequestId.toString()))
+            .andExpect(jsonPath("$.eventId").exists())
+            .andExpect(jsonPath("$.replayed").value(false))
+            .andReturn()
+
+        val retry = objectMapper.readValue(
+            retryResult.response.contentAsString,
+            DeliveryRetryReceipt::class.java,
+        )
+
+        mockMvc.perform(
+            post("/api/v1/communication/delivery-requests/$deliveryRequestId/retry")
+                .secure(true)
+                .headersFor(fixture, "corr-communication-delivery-retry-replay", "idem-communication-delivery-retry"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.eventId").value(retry.eventId.toString()))
+            .andExpect(jsonPath("$.replayed").value(true))
+
+        mockMvc.perform(
+            get("/api/v1/communication/delivery-requests/$deliveryRequestId")
+                .secure(true)
+                .headersFor(fixture, "corr-communication-delivery-retry-status"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.currentOutboxEventId").value(retry.eventId.toString()))
+            .andExpect(jsonPath("$.status").value("queued"))
+
         assertEquals(
             1,
             auditCount(fixture.tenantId, "communication.notification.enqueued", notification.eventId),
         )
         assertEquals(
-            1,
+            2,
             outboxCount(fixture.tenantId, "communication.notification.email", fixture.propertyId),
+        )
+        assertEquals(
+            1,
+            auditCount(fixture.tenantId, "communication.delivery.retry_requested", deliveryRequestId),
         )
     }
 

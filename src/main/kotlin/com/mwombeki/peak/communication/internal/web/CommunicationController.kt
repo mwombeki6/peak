@@ -7,6 +7,9 @@ import com.mwombeki.peak.communication.api.ContactMutationReceipt
 import com.mwombeki.peak.communication.api.ContactResponse
 import com.mwombeki.peak.communication.api.CreateContactRequest
 import com.mwombeki.peak.communication.api.CreateTemplateRequest
+import com.mwombeki.peak.communication.api.DeliveryAttemptResponse
+import com.mwombeki.peak.communication.api.DeliveryRequestResponse
+import com.mwombeki.peak.communication.api.DeliveryRetryReceipt
 import com.mwombeki.peak.communication.api.EnqueueNotificationRequest
 import com.mwombeki.peak.communication.api.NotificationEnqueueReceipt
 import com.mwombeki.peak.communication.api.TemplateMutationReceipt
@@ -69,6 +72,32 @@ class CommunicationController(
         @RequestBody request: VerifyChannelHttpRequest,
     ): ChannelVerificationReceipt {
         return communicationPort.verifyChannel(channelId, request.token)
+    }
+
+    @GetMapping("/delivery-requests")
+    fun listDeliveryRequests(): List<DeliveryRequestResponse> {
+        return communicationPort.listDeliveryRequests()
+    }
+
+    @GetMapping("/delivery-requests/{deliveryRequestId}")
+    fun getDeliveryRequest(
+        @PathVariable deliveryRequestId: UUID,
+    ): DeliveryRequestResponse {
+        return communicationPort.getDeliveryRequest(deliveryRequestId)
+    }
+
+    @GetMapping("/delivery-requests/{deliveryRequestId}/attempts")
+    fun listDeliveryAttempts(
+        @PathVariable deliveryRequestId: UUID,
+    ): List<DeliveryAttemptResponse> {
+        return communicationPort.listDeliveryAttempts(deliveryRequestId)
+    }
+
+    @PostMapping("/delivery-requests/{deliveryRequestId}/retry")
+    fun retryDelivery(
+        @PathVariable deliveryRequestId: UUID,
+    ): DeliveryRetryReceipt {
+        return communicationPort.retryDelivery(deliveryRequestId)
     }
 
     @ExceptionHandler(NoSuchElementException::class)

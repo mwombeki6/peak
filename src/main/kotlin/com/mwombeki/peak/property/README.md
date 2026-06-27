@@ -69,3 +69,4 @@ Activation is denied until all readiness checks pass:
 - Disable of the core `property` module is blocked to avoid locking admins out of property setup.
 - Enabling a property module requires the same tenant module to already be enabled.
 - Public booking access remains blocked until the property is active and the `booking_engine` tenant/property modules are enabled.
+- Committed property side effects publish `RealtimeStreamEvent` envelopes so room status and setup changes can fan out to property-scoped SSE/WebSocket subscribers.

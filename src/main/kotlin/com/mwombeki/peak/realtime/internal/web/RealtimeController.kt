@@ -6,6 +6,7 @@ import com.mwombeki.peak.shared.context.RequestIdentity
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
@@ -23,7 +24,8 @@ class RealtimeController(
     @GetMapping("/tenants/{tenantId}/properties/{propertyId}/stream", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
     fun streamEvents(
         @PathVariable tenantId: UUID,
-        @PathVariable propertyId: UUID
+        @PathVariable propertyId: UUID,
+        @RequestHeader(name = "Last-Event-ID", required = false) lastEventId: String? = null,
     ): SseEmitter {
         val context = requestContextHolder.current()
         val identity = context.identity
@@ -50,8 +52,24 @@ class RealtimeController(
                     .name("connection-established")
                     .data("Connected to stream for property $propertyId"),
             )
+            sseRegistry.replayAfter(tenantId, propertyId, lastEventId).forEach { event ->
+                emitter.send(
+                    SseEmitter.event()
+                        .id(event.id)
+                        .name(event.eventType)
+                        .data(event.data),
+                )
+                sseRegistry.recordDelivered(event.eventType)
+            }
         } catch (ex: Exception) {
             sseRegistry.remove(tenantId, propertyId, emitter, "initial_send_failed")
+            if (ex is IllegalArgumentException) {
+                throw ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    ex.message,
+                    ex,
+                )
+            }
             throw ResponseStatusException(
                 HttpStatus.SERVICE_UNAVAILABLE,
                 "Unable to establish realtime SSE stream.",
