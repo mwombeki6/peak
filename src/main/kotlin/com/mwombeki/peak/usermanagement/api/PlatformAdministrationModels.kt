@@ -19,6 +19,8 @@ interface PlatformAdministrationPort {
     fun listPlatformPermissions(): List<PlatformPermissionSummary>
     fun linkPlatformOidcIdentity(command: LinkPlatformOidcIdentityCommand): PlatformIdentityLinkReceipt
     fun revokePlatformOidcIdentity(command: RevokePlatformOidcIdentityCommand): PlatformIdentityLinkReceipt
+    fun provisionTenantAdministrator(command: ProvisionTenantAdministratorCommand): TenantAdministratorProvisioningReceipt
+    fun verifyTenantBusinessProfile(command: VerifyTenantBusinessProfileCommand): TenantProfileVerificationReceipt
 }
 
 data class CreatePlatformUserCommand(
@@ -84,6 +86,18 @@ data class RevokePlatformOidcIdentityCommand(
     val identityLinkId: UUID,
 )
 
+data class ProvisionTenantAdministratorCommand(
+    val tenantId: UUID,
+    val fullName: String,
+    val email: String,
+    val issuer: String,
+    val subject: String,
+)
+
+data class VerifyTenantBusinessProfileCommand(
+    val tenantId: UUID,
+)
+
 data class PlatformUserSummary(
     val platformUserId: UUID,
     val fullName: String,
@@ -137,6 +151,22 @@ data class PlatformIdentityLinkReceipt(
     val platformUserId: UUID,
     val identityLinkId: UUID,
     val revokedAt: Instant?,
+    val changed: Boolean,
+    val replayed: Boolean,
+)
+
+data class TenantAdministratorProvisioningReceipt(
+    val tenantId: UUID,
+    val tenantUserId: UUID,
+    val tenantRoleId: UUID,
+    val identityLinkId: UUID,
+    val changed: Boolean,
+    val replayed: Boolean,
+)
+
+data class TenantProfileVerificationReceipt(
+    val tenantId: UUID,
+    val verificationStatus: String,
     val changed: Boolean,
     val replayed: Boolean,
 )

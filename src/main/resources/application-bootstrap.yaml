@@ -1,0 +1,24 @@
+spring:
+  main:
+    web-application-type: none
+  flyway:
+    enabled: false
+  datasource:
+    hikari:
+      maximum-pool-size: ${PEAK_MIGRATION_DB_POOL_MAX_SIZE:2}
+      minimum-idle: ${PEAK_MIGRATION_DB_POOL_MIN_IDLE:0}
+
+peak:
+  runtime:
+    mode: bootstrap
+  reliability:
+    outbox:
+      worker:
+        enabled: false
+  bootstrap:
+    platform:
+      enabled: ${PEAK_PLATFORM_BOOTSTRAP_ENABLED:false}
+      full-name: ${PEAK_PLATFORM_BOOTSTRAP_FULL_NAME:}
+      email: ${PEAK_PLATFORM_BOOTSTRAP_EMAIL:}
+      issuer: ${PEAK_PLATFORM_BOOTSTRAP_ISSUER:}
+      subject: ${PEAK_PLATFORM_BOOTSTRAP_SUBJECT:}

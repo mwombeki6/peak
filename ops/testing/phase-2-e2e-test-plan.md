@@ -19,6 +19,16 @@ Phase 2 passes when a platform operator and tenant admin can configure a hotel p
 
 Use the production-like local runtime from `ops/production/README.md`.
 
+The authoritative automated gate starts from empty PostgreSQL and Keycloak volumes and performs all normal application setup through APIs:
+
+```bash
+./gradlew test bootJar
+podman build -t localhost/peak:phase2-acceptance .
+PHASE2_RESET=true ops/testing/run-phase2-acceptance.sh
+```
+
+The command writes machine-readable evidence to `build/phase2-acceptance-evidence.json`. It is destructive only to the isolated `peak-phase2-acceptance` Compose project. Do not point it at shared or production volumes.
+
 Minimum checks before API testing:
 
 ```bash
@@ -76,6 +86,14 @@ Idempotency-Key: {{idempotencyKey}}
 ## Platform Administration Flow
 
 These routes require a platform token linked to an active `platform_users` row with `platform.security.manage`.
+
+Before the first login, create the platform root once with:
+
+```bash
+ops/scripts/bootstrap-platform.sh
+```
+
+The bootstrap runtime is non-web, requires a real Keycloak issuer/subject, and refuses to create another root after platform administration exists.
 
 1. List permissions.
 
@@ -159,6 +177,27 @@ POST {{baseUrl}}/api/v1/platform/users/{{platformTargetUserId}}/reactivate
 ```
 
 Expected: locked/disabled users cannot authorize platform routes.
+
+8. Register a tenant, provision its first administrator, and verify its reviewed profile.
+
+```http
+POST {{baseUrl}}/api/v1/platform/tenants/{{tenantId}}/administrators
+Idempotency-Key: tenant-admin-provision-001
+
+{
+  "fullName": "Tenant Administrator",
+  "email": "tenant.admin@example.com",
+  "issuer": "{{keycloakUrl}}/realms/{{realm}}",
+  "subject": "{{tenantKeycloakSubject}}"
+}
+```
+
+```http
+POST {{baseUrl}}/api/v1/platform/tenants/{{tenantId}}/profile/verify
+Idempotency-Key: tenant-profile-verify-001
+```
+
+Expected: the administrator, immutable system role, permissions, module enablement, and OIDC link are created atomically; the tenant token resolves without SQL.
 
 ## Tenant Administration Flow
 

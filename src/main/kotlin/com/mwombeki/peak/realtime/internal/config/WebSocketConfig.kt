@@ -1,13 +1,13 @@
 package com.mwombeki.peak.realtime.internal.config
 
-import com.mwombeki.peak.audit.api.AuditOutcome
-import com.mwombeki.peak.audit.api.AuditPort
-import com.mwombeki.peak.audit.api.AuditResource
-import com.mwombeki.peak.audit.api.TenantAuditEvent
+import com.mwombeki.peak.realtime.internal.RealtimeSecurityAuditService
 import com.mwombeki.peak.realtime.internal.RealtimeSubscriptionAuthorizer
-import com.mwombeki.peak.shared.context.RequestContextHolder
+import com.mwombeki.peak.shared.context.RequestContext
+import com.mwombeki.peak.shared.context.RequestContextException
+import com.mwombeki.peak.shared.context.RequestContextResolver
 import com.mwombeki.peak.shared.context.RequestIdentity
 import io.micrometer.core.instrument.MeterRegistry
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.messaging.Message
@@ -20,17 +20,26 @@ import org.springframework.messaging.support.ChannelInterceptor
 import org.springframework.messaging.support.MessageHeaderAccessor
 import org.springframework.scheduling.TaskScheduler
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
+import org.springframework.http.server.ServerHttpRequest
+import org.springframework.http.server.ServerHttpResponse
+import org.springframework.http.server.ServletServerHttpRequest
+import org.springframework.security.core.Authentication
+import org.springframework.security.core.context.SecurityContextHolder
+import org.springframework.stereotype.Component
+import org.springframework.web.socket.WebSocketHandler
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer
+import org.springframework.web.socket.server.HandshakeInterceptor
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 
 @Configuration
 @EnableWebSocketMessageBroker
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 class WebSocketConfig(
-    private val requestContextHolder: RequestContextHolder,
-    private val auditPort: AuditPort,
+    private val handshakeContextResolver: WebSocketHandshakeContextResolver,
+    private val securityAuditService: RealtimeSecurityAuditService,
     private val meterRegistry: MeterRegistry,
     private val realtimeBrokerTaskScheduler: TaskScheduler,
     private val webSocketProperties: RealtimeWebSocketProperties,
@@ -55,6 +64,25 @@ class WebSocketConfig(
 
     override fun registerStompEndpoints(registry: StompEndpointRegistry) {
         val endpoint = registry.addEndpoint("/ws-connect")
+            .addInterceptors(object : HandshakeInterceptor {
+                override fun beforeHandshake(
+                    request: ServerHttpRequest,
+                    response: ServerHttpResponse,
+                    wsHandler: WebSocketHandler,
+                    attributes: MutableMap<String, Any>,
+                ): Boolean {
+                    val context = handshakeContextResolver.resolve(request) ?: return false
+                    attributes[SESSION_CONTEXT_ATTRIBUTE] = context
+                    return true
+                }
+
+                override fun afterHandshake(
+                    request: ServerHttpRequest,
+                    response: ServerHttpResponse,
+                    wsHandler: WebSocketHandler,
+                    exception: Exception?,
+                ) = Unit
+            })
         val allowedOrigins = webSocketProperties.cleanedAllowedOrigins
         if (allowedOrigins.isNotEmpty()) {
             endpoint.setAllowedOrigins(*allowedOrigins.toTypedArray())
@@ -68,21 +96,35 @@ class WebSocketConfig(
 
                 when (accessor.command) {
                     StompCommand.CONNECT -> {
-                        activeConnections.incrementAndGet()
+                        val attributes = accessor.sessionAttributes
+                            ?: throw SecurityException("Authenticated WebSocket session is required.")
+                        val identity = (attributes[SESSION_CONTEXT_ATTRIBUTE] as? RequestContext)?.identity
+                        if (identity !is RequestIdentity.Tenant) {
+                            throw SecurityException("Tenant identity is required for realtime WebSocket sessions.")
+                        }
+                        if (attributes.putIfAbsent(SESSION_COUNTED_ATTRIBUTE, true) == null) {
+                            activeConnections.incrementAndGet()
+                        }
                         meterRegistry.counter("realtime.websocket.connect_attempts").increment()
                     }
                     StompCommand.DISCONNECT -> {
-                        activeConnections.decrementAndGet()
+                        val attributes = accessor.sessionAttributes
+                        if (attributes?.remove(SESSION_COUNTED_ATTRIBUTE) == true) {
+                            activeConnections.updateAndGet { current -> (current - 1).coerceAtLeast(0) }
+                        }
                     }
                     StompCommand.SUBSCRIBE -> {
                         val destination = accessor.destination ?: throw IllegalStateException("No channel destination provided.")
                         val match = STREAM_DESTINATION_PATTERN.matchEntire(destination) ?: return message
                         val targetTenantId = UUID.fromString(match.groupValues[1])
                         val targetPropertyId = UUID.fromString(match.groupValues[2])
-                        val identity = requestContextHolder.current().identity
+                        val context = accessor.sessionAttributes
+                            ?.get(SESSION_CONTEXT_ATTRIBUTE) as? RequestContext
+                            ?: throw SecurityException("Authenticated WebSocket session is required.")
+                        val identity = context.identity
 
                         if (!subscriptionAuthorizer.canSubscribe(identity, targetTenantId, targetPropertyId)) {
-                            recordDeniedSubscription(identity, targetTenantId, targetPropertyId, destination)
+                            recordDeniedSubscription(context, targetTenantId, targetPropertyId, destination)
                             throw SecurityException("Access denied for realtime property stream.")
                         }
 
@@ -96,35 +138,62 @@ class WebSocketConfig(
     }
 
     private fun recordDeniedSubscription(
-        identity: RequestIdentity,
+        context: RequestContext,
         targetTenantId: UUID,
         targetPropertyId: UUID,
         destination: String,
     ) {
         meterRegistry.counter("realtime.security.violations").increment()
-        if (identity is RequestIdentity.Tenant) {
-            auditPort.recordTenantEvent(
-                TenantAuditEvent(
-                    tenantId = identity.tenantId,
-                    action = "realtime.subscription_denied",
-                    resource = AuditResource("realtime_stream", targetPropertyId),
-                    outcome = AuditOutcome.FAILURE,
-                    after = mapOf(
-                        "attempted_destination" to destination,
-                        "target_tenant_id" to targetTenantId,
-                        "target_property_id" to targetPropertyId,
-                    ),
-                ),
-            )
-        }
+        securityAuditService.recordDeniedSubscription(
+            context = context,
+            targetTenantId = targetTenantId,
+            targetPropertyId = targetPropertyId,
+            destination = destination,
+        )
     }
 
     private companion object {
         val STREAM_DESTINATION_PATTERN = Regex("^/topic/tenants/([^/]+)/properties/([^/]+)/stream$")
+        const val SESSION_CONTEXT_ATTRIBUTE = "peak.realtime.request-context"
+        const val SESSION_COUNTED_ATTRIBUTE = "peak.realtime.connection-counted"
+    }
+}
+
+@Component
+class WebSocketHandshakeContextResolver(
+    private val requestContextResolver: RequestContextResolver,
+    private val meterRegistry: MeterRegistry,
+) {
+    fun resolve(request: ServerHttpRequest): RequestContext? {
+        val servletRequest = (request as? ServletServerHttpRequest)?.servletRequest
+            ?: return reject("unsupported_request")
+        val authentication = SecurityContextHolder.getContext().authentication
+            ?: request.principal as? Authentication
+            ?: return reject("authentication_required")
+        val context = try {
+            requestContextResolver.resolve(servletRequest, authentication)
+        } catch (_: RequestContextException) {
+            return reject("invalid_request_context")
+        }
+        return if (context.identity is RequestIdentity.Tenant) {
+            context
+        } else {
+            reject("tenant_identity_required")
+        }
+    }
+
+    private fun reject(reason: String): Nothing? {
+        meterRegistry.counter(
+            "realtime.websocket.handshakes.rejected",
+            "reason",
+            reason,
+        ).increment()
+        return null
     }
 }
 
 @Configuration
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 class RealtimeBrokerSchedulerConfiguration {
     @Bean
     fun realtimeBrokerTaskScheduler(): TaskScheduler {

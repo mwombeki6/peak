@@ -2,12 +2,14 @@ package com.mwombeki.peak.realtime.internal
 
 import com.mwombeki.peak.realtime.api.BroadcastEventRequest
 import com.mwombeki.peak.realtime.api.RealtimePort
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication
 import org.springframework.messaging.simp.SimpMessagingTemplate
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 
 @Service
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 class RealtimeStreamService(
     private val messagingTemplate: SimpMessagingTemplate,
     private val sseRegistry: SseRegistry

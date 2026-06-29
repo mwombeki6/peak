@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.context.request.async.AsyncRequestTimeoutException
 import org.springframework.web.server.ResponseStatusException
 import java.util.UUID
 
@@ -112,6 +113,14 @@ class GlobalExceptionHandler {
             detail = ex.message ?: "Request cannot be completed in the current state",
             request = request,
         )
+    }
+
+    @ExceptionHandler(AsyncRequestTimeoutException::class)
+    fun handleAsyncRequestTimeout(
+        request: HttpServletRequest,
+    ): ResponseEntity<Void> {
+        log.debug("Async request completed after timeout [Trace: {}]", traceId(request))
+        return ResponseEntity.noContent().build()
     }
 
     /**

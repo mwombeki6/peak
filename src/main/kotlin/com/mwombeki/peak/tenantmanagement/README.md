@@ -11,8 +11,12 @@ These routes require a platform identity and the corresponding platform tenant p
 | `POST` | `/api/v1/platform/tenants` | Register a tenant and canonical business profile. |
 | `GET` | `/api/v1/platform/tenants/{id}` | View tenant account and profile state. |
 | `PATCH` | `/api/v1/platform/tenants/{id}/status` | Change tenant lifecycle status. |
+| `POST` | `/api/v1/platform/tenants/{id}/administrators` | Provision the first tenant administrator and OIDC identity. |
+| `POST` | `/api/v1/platform/tenants/{id}/profile/verify` | Mark a reviewed business profile as verified. |
 
 The platform routes are covered by the canonical `module_access_matrix` pattern `/api/platform/tenants*` after API version normalization.
+
+Tenant registration and administrator provisioning are separate idempotent operations. Provisioning creates the active tenant user, immutable `tenant_admin` role, complete tenant permission grant, role assignment, `tenant_admin` module enablement, and DB-backed OIDC link atomically.
 
 ## Tenant Administration API
 
@@ -42,6 +46,8 @@ Tenant readiness is computed from real state. A tenant is ready only when:
 The controllers rely on the request-context and route-guard pipeline. Platform services require a platform or support identity. Tenant administration services require a tenant identity whose tenant id matches the route, then bind `DatabaseSessionContext` before RLS-protected database access.
 
 Tenant module changes are idempotent, audited, and outbox-backed. Module ids are validated against active `module_catalog` rows, and disabled or mismatched tenant identities are rejected before mutation.
+
+Normal onboarding requires no SQL. A platform operator registers the tenant, provisions its administrator, verifies the reviewed profile, and the tenant administrator completes modules, contacts, consent, report recipients, and property setup through APIs.
 
 ## Database Tables
 

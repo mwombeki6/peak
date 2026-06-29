@@ -39,6 +39,7 @@ import org.testcontainers.junit.jupiter.Testcontainers
         "peak.reliability.outbox.worker.max-parallelism=2",
         "peak.reliability.outbox.worker.retry-initial-delay=1s",
         "peak.reliability.outbox.worker.retry-max-delay=5s",
+        "peak.reliability.outbox.platform-operations.enabled=false",
     ],
 )
 @Testcontainers(disabledWithoutDocker = true)

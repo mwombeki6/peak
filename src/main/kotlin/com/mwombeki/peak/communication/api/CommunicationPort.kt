@@ -1,6 +1,7 @@
 package com.mwombeki.peak.communication.api
 
 import java.time.OffsetDateTime
+import java.time.LocalTime
 import java.util.UUID
 
 data class EnqueueNotificationRequest(
@@ -15,6 +16,14 @@ interface CommunicationPort {
     fun enqueue(request: EnqueueNotificationRequest): NotificationEnqueueReceipt
     fun createContact(request: CreateContactRequest): ContactMutationReceipt
     fun listContacts(): List<ContactResponse>
+    fun assignContactRole(contactId: UUID, request: AssignContactRoleRequest): ContactRoleMutationReceipt
+    fun recordConsent(
+        contactId: UUID,
+        channelId: UUID,
+        request: RecordCommunicationConsentRequest,
+    ): CommunicationConsentReceipt
+    fun configureReportRecipient(request: ConfigureReportRecipientRequest): ReportRecipientMutationReceipt
+    fun listReportRecipients(): List<ReportRecipientResponse>
     fun createTemplate(request: CreateTemplateRequest): TemplateMutationReceipt
     fun verifyChannel(channelId: UUID, token: String): ChannelVerificationReceipt
     fun requestChannelVerification(channelId: UUID): ChannelVerificationRequestReceipt
@@ -39,6 +48,8 @@ data class ContactResponse(
     val status: String,
     val isPrimary: Boolean,
     val channels: List<ContactChannelResponse> = emptyList(),
+    val roles: List<ContactRoleResponse> = emptyList(),
+    val consents: List<ContactConsentResponse> = emptyList(),
 )
 
 data class ContactChannelResponse(
@@ -47,6 +58,48 @@ data class ContactChannelResponse(
     val address: String,
     val verificationStatus: String,
     val isPrimary: Boolean,
+)
+
+data class AssignContactRoleRequest(
+    val roleCode: String,
+    val propertyId: UUID? = null,
+    val primary: Boolean = false,
+)
+
+data class ContactRoleResponse(
+    val id: UUID,
+    val roleCode: String,
+    val propertyId: UUID?,
+    val primary: Boolean,
+)
+
+data class ContactConsentResponse(
+    val id: UUID,
+    val channelId: UUID,
+    val purpose: String,
+    val status: String,
+    val policyVersion: String,
+    val capturedAt: OffsetDateTime,
+    val expiresAt: OffsetDateTime?,
+)
+
+data class RecordCommunicationConsentRequest(
+    val purpose: String,
+    val policyVersion: String,
+    val status: String = "active",
+    val expiresAt: OffsetDateTime? = null,
+)
+
+data class ConfigureReportRecipientRequest(
+    val contactId: UUID,
+    val channelId: UUID,
+    val reportCode: String = "monthly_executive_summary",
+    val subscriptionName: String,
+    val propertyId: UUID? = null,
+    val frequency: String = "monthly",
+    val scheduleTime: LocalTime? = null,
+    val timezone: String = "Africa/Dar_es_Salaam",
+    val deliveryFormat: String = "pdf",
 )
 
 data class CreateTemplateRequest(
@@ -66,6 +119,52 @@ data class ContactMutationReceipt(
     val contactId: UUID,
     val channelIds: List<UUID>,
     val replayed: Boolean,
+)
+
+data class ContactRoleMutationReceipt(
+    val contactId: UUID,
+    val roleAssignmentId: UUID,
+    val roleCode: String,
+    val propertyId: UUID?,
+    val primary: Boolean,
+    val changed: Boolean,
+    val replayed: Boolean,
+)
+
+data class CommunicationConsentReceipt(
+    val consentId: UUID,
+    val contactId: UUID,
+    val channelId: UUID,
+    val purpose: String,
+    val status: String,
+    val replayed: Boolean,
+)
+
+data class ReportRecipientMutationReceipt(
+    val subscriptionId: UUID,
+    val recipientId: UUID,
+    val contactId: UUID,
+    val channelId: UUID,
+    val changed: Boolean,
+    val replayed: Boolean,
+)
+
+data class ReportRecipientResponse(
+    val subscriptionId: UUID,
+    val recipientId: UUID,
+    val reportCode: String,
+    val subscriptionName: String,
+    val propertyId: UUID?,
+    val frequency: String,
+    val timezone: String,
+    val contactId: UUID,
+    val contactName: String,
+    val channelId: UUID,
+    val channelType: String,
+    val maskedAddress: String,
+    val deliveryFormat: String,
+    val enabled: Boolean,
+    val hasActiveConsent: Boolean,
 )
 
 data class TemplateMutationReceipt(

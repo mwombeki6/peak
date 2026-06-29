@@ -3,8 +3,11 @@ package com.mwombeki.peak.communication.internal.web
 import com.mwombeki.peak.communication.api.ChannelVerificationReceipt
 import com.mwombeki.peak.communication.api.ChannelVerificationRequestReceipt
 import com.mwombeki.peak.communication.api.CommunicationPort
+import com.mwombeki.peak.communication.api.CommunicationConsentReceipt
+import com.mwombeki.peak.communication.api.ConfigureReportRecipientRequest
 import com.mwombeki.peak.communication.api.ContactMutationReceipt
 import com.mwombeki.peak.communication.api.ContactResponse
+import com.mwombeki.peak.communication.api.ContactRoleMutationReceipt
 import com.mwombeki.peak.communication.api.CreateContactRequest
 import com.mwombeki.peak.communication.api.CreateTemplateRequest
 import com.mwombeki.peak.communication.api.DeliveryAttemptResponse
@@ -12,6 +15,10 @@ import com.mwombeki.peak.communication.api.DeliveryRequestResponse
 import com.mwombeki.peak.communication.api.DeliveryRetryReceipt
 import com.mwombeki.peak.communication.api.EnqueueNotificationRequest
 import com.mwombeki.peak.communication.api.NotificationEnqueueReceipt
+import com.mwombeki.peak.communication.api.RecordCommunicationConsentRequest
+import com.mwombeki.peak.communication.api.ReportRecipientMutationReceipt
+import com.mwombeki.peak.communication.api.ReportRecipientResponse
+import com.mwombeki.peak.communication.api.AssignContactRoleRequest
 import com.mwombeki.peak.communication.api.TemplateMutationReceipt
 import java.util.UUID
 import org.springframework.http.HttpStatus
@@ -48,6 +55,35 @@ class CommunicationController(
     @GetMapping("/contacts")
     fun listContacts(): List<ContactResponse> {
         return communicationPort.listContacts()
+    }
+
+    @PostMapping("/contacts/{contactId}/roles")
+    fun assignContactRole(
+        @PathVariable contactId: UUID,
+        @RequestBody request: AssignContactRoleRequest,
+    ): ContactRoleMutationReceipt {
+        return communicationPort.assignContactRole(contactId, request)
+    }
+
+    @PostMapping("/contacts/{contactId}/channels/{channelId}/consents")
+    fun recordConsent(
+        @PathVariable contactId: UUID,
+        @PathVariable channelId: UUID,
+        @RequestBody request: RecordCommunicationConsentRequest,
+    ): CommunicationConsentReceipt {
+        return communicationPort.recordConsent(contactId, channelId, request)
+    }
+
+    @PostMapping("/report-recipients")
+    fun configureReportRecipient(
+        @RequestBody request: ConfigureReportRecipientRequest,
+    ): ReportRecipientMutationReceipt {
+        return communicationPort.configureReportRecipient(request)
+    }
+
+    @GetMapping("/report-recipients")
+    fun listReportRecipients(): List<ReportRecipientResponse> {
+        return communicationPort.listReportRecipients()
     }
 
     @PostMapping("/templates")

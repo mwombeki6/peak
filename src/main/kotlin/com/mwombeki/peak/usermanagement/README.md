@@ -45,8 +45,12 @@ All routes below are platform-scoped, require `platform.security.manage`, and ar
 | `PUT` | `/api/v1/platform/roles/{platformRoleId}` | Update a dynamic platform role and its permissions. |
 | `DELETE` | `/api/v1/platform/roles/{platformRoleId}` | Deactivate a dynamic platform role. |
 | `GET` | `/api/v1/platform/permissions` | List immutable platform permissions. |
+| `POST` | `/api/v1/platform/tenants/{tenantId}/administrators` | Provision the tenant's first administrator, immutable system role, permissions, and OIDC link. |
+| `POST` | `/api/v1/platform/tenants/{tenantId}/profile/verify` | Verify the tenant business profile after platform review. |
 
 Mutating platform administration routes require `Idempotency-Key`. Successful changes write a `platform_audit_logs` record and enqueue a platform outbox event. System platform roles cannot be modified, and an operator cannot lock, disable, assign roles to, or revoke roles from themselves.
+
+The initial platform root is created once with the non-web `bootstrap` runtime. It requires a real Keycloak issuer/subject, writes an audit event, and closes after a platform user exists. Run `ops/scripts/bootstrap-platform.sh`; never seed platform identities with application SQL.
 
 Metrics:
 

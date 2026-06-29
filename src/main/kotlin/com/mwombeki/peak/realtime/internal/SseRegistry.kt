@@ -2,6 +2,7 @@ package com.mwombeki.peak.realtime.internal
 
 import io.micrometer.core.instrument.MeterRegistry
 import java.util.UUID
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication
 import org.springframework.stereotype.Component
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.util.ArrayDeque
@@ -11,6 +12,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
 @Component
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 class SseRegistry {
     private val emitters = ConcurrentHashMap<UUID, ConcurrentHashMap<UUID, CopyOnWriteArrayList<SseEmitter>>>()
     private val replayBuffers = ConcurrentHashMap<UUID, ConcurrentHashMap<UUID, ArrayDeque<StoredSseEvent>>>()
@@ -40,7 +42,10 @@ class SseRegistry {
         }
 
         emitter.onCompletion { remove(tenantId, propertyId, emitter, "completion") }
-        emitter.onTimeout { remove(tenantId, propertyId, emitter, "timeout") }
+        emitter.onTimeout {
+            remove(tenantId, propertyId, emitter, "timeout")
+            emitter.complete()
+        }
         emitter.onError { remove(tenantId, propertyId, emitter, "error") }
         return true
     }

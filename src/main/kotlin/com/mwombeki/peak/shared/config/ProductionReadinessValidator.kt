@@ -72,7 +72,11 @@ class ProductionReadinessValidator(
             "spring.datasource.password must not use the local development default in prod"
         }
 
-        if (runtimeProperties.mode != PeakRuntimeMode.MIGRATION) {
+        if (runtimeProperties.mode !in setOf(
+                PeakRuntimeMode.MIGRATION,
+                PeakRuntimeMode.BOOTSTRAP,
+            )
+        ) {
             requireTrue(username != LOCAL_MIGRATOR_USER) {
                 "API/worker runtime must not use the migrator database role in prod"
             }
@@ -81,12 +85,11 @@ class ProductionReadinessValidator(
 
     private fun MutableList<String>.validateFlyway() {
         val flywayEnabled = environment.getProperty("spring.flyway.enabled", Boolean::class.java, true)
-        if (runtimeProperties.mode == PeakRuntimeMode.MIGRATION) {
-            requireTrue(flywayEnabled) {
+        when (runtimeProperties.mode) {
+            PeakRuntimeMode.MIGRATION -> requireTrue(flywayEnabled) {
                 "spring.flyway.enabled must be true for migration runtime in prod"
             }
-        } else {
-            requireTrue(!flywayEnabled) {
+            else -> requireTrue(!flywayEnabled) {
                 "spring.flyway.enabled must be false for API/worker runtime in prod"
             }
         }
@@ -130,6 +133,34 @@ class ProductionReadinessValidator(
                     "spring.main.web-application-type must be none for migration runtime in prod"
                 }
             }
+
+            PeakRuntimeMode.BOOTSTRAP -> {
+                requireTrue(!outboxWorkerEnabled) {
+                    "peak.reliability.outbox.worker.enabled must be false for bootstrap runtime in prod"
+                }
+                requireTrue(webApplicationType == WEB_APPLICATION_TYPE_NONE) {
+                    "spring.main.web-application-type must be none for bootstrap runtime in prod"
+                }
+                requireTrue(
+                    environment.getProperty(
+                        "peak.bootstrap.platform.enabled",
+                        Boolean::class.java,
+                        false,
+                    ),
+                ) {
+                    "peak.bootstrap.platform.enabled must be true for bootstrap runtime"
+                }
+                listOf(
+                    "peak.bootstrap.platform.full-name",
+                    "peak.bootstrap.platform.email",
+                    "peak.bootstrap.platform.issuer",
+                    "peak.bootstrap.platform.subject",
+                ).forEach { property ->
+                    requirePresent(environment.getProperty(property)) {
+                        "$property is required for bootstrap runtime"
+                    }
+                }
+            }
         }
     }
 
@@ -151,6 +182,35 @@ class ProductionReadinessValidator(
         )
         requireTrue(!localProviderEnabled) {
             "peak.communication.delivery.local-provider.enabled must be false in prod"
+        }
+
+        if (runtimeProperties.mode != PeakRuntimeMode.WORKER) {
+            return
+        }
+
+        val httpProviderEnabled = environment.getProperty(
+            "peak.communication.delivery.http-provider.enabled",
+            Boolean::class.java,
+            false,
+        )
+        val baseUrl = environment.getProperty("peak.communication.delivery.http-provider.base-url")
+        val apiKey = environment.getProperty("peak.communication.delivery.http-provider.api-key")
+        val acceptanceProfile = environment.activeProfiles.contains(ACCEPTANCE_PROFILE)
+
+        requireTrue(httpProviderEnabled) {
+            "peak.communication.delivery.http-provider.enabled must be true for prod worker runtime"
+        }
+        requirePresent(baseUrl) {
+            "peak.communication.delivery.http-provider.base-url is required for prod worker runtime"
+        }
+        requireTrue(baseUrl?.startsWith("https://") == true || acceptanceProfile) {
+            "peak.communication.delivery.http-provider.base-url must use https in prod"
+        }
+        requirePresent(apiKey) {
+            "peak.communication.delivery.http-provider.api-key is required for prod worker runtime"
+        }
+        requireTrue(apiKey != "change-me" && apiKey?.contains("CHANGE_ME") != true) {
+            "peak.communication.delivery.http-provider.api-key must not use a placeholder"
         }
     }
 
@@ -192,6 +252,7 @@ class ProductionReadinessValidator(
 
     private companion object {
         const val PROD_PROFILE = "prod"
+        const val ACCEPTANCE_PROFILE = "acceptance"
         const val LOCAL_MIGRATOR_USER = "peak_migrator"
         const val WEB_APPLICATION_TYPE_NONE = "none"
     }

@@ -1,0 +1,4 @@
+services:
+  peak-worker:
+    environment:
+      SPRING_PROFILES_ACTIVE: prod,worker,acceptance
