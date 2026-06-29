@@ -23,6 +23,7 @@ We support two ways for clients to receive data:
 1.  **WebSockets (STOMP)**: 
     -   Best for interactive, two-way communication.
     -   Endpoint: `/ws-connect`
+    -   The HTTP upgrade request must include `Authorization: Bearer <JWT>`.
     -   Subscription Path: `/topic/tenants/{tenantId}/properties/{propertyId}/stream`
     -   Includes heartbeats every 10 seconds to keep the connection alive.
 
@@ -35,6 +36,8 @@ We support two ways for clients to receive data:
 
 ## Security & Isolation
 -   **Tenant and Property Authorization**: SSE routes are covered by `module_access_matrix`; WebSocket subscriptions call `can_access_module` directly. A user needs the `realtime.stream` permission and enabled `realtime` module for the target property.
+-   **Session-bound identity**: The authenticated, DB-resolved request identity is copied into the WebSocket session during the HTTP handshake. STOMP headers and trusted identity headers cannot replace it.
+-   **Audited denials**: Cross-tenant/property subscription attempts are denied first, then audited in a tenant-scoped transaction using the handshake correlation ID.
 -   **Origin Control**: WebSocket origins are configured with `peak.realtime.websocket.allowed-origins`. Wildcard origins are rejected.
 -   **No Platform Bypass**: Platform users do not bypass tenant/property realtime permissions.
 
@@ -52,6 +55,7 @@ The module tracks its own health using professional metrics:
 -   `realtime.websocket.connect_attempts`: WebSocket connection attempts.
 -   `realtime.websocket.subscriptions`: accepted WebSocket subscriptions.
 -   `realtime.security.violations`: blocked realtime subscription attempts.
+-   `realtime.security.audit_failures`: denied-subscription audit writes that failed after access was already blocked.
 
 ## For Developers: Adding New Events
 To broadcast a new type of event from another module:

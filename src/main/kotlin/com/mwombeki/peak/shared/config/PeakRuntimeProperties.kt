@@ -11,4 +11,5 @@ enum class PeakRuntimeMode {
     API,
     WORKER,
     MIGRATION,
+    BOOTSTRAP,
 }

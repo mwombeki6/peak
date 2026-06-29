@@ -3,6 +3,7 @@ package com.mwombeki.peak.shared.security
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication
 import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
@@ -18,6 +19,7 @@ import org.springframework.web.cors.CorsConfigurationSource
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource
 
 @Configuration
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 class HttpSecurityConfiguration(
     private val properties: HttpSecurityProperties,
     private val problemWriter: SecurityProblemWriter,
@@ -87,6 +89,7 @@ class HttpSecurityConfiguration(
                 requests
                     .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                     .requestMatchers(*properties.publicPaths.toTypedArray()).permitAll()
+                    .requestMatchers("/ws-connect", "/ws-connect/**").authenticated()
                     .requestMatchers("/api/**").permitAll()
                     .anyRequest().denyAll()
             }

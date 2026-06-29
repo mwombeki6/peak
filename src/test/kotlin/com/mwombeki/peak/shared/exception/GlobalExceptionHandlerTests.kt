@@ -66,4 +66,13 @@ class GlobalExceptionHandlerTests {
         assertEquals("corr-problem", problem.properties?.get("traceId"))
         assertEquals("/api/missing", problem.properties?.get("path"))
     }
+
+    @Test
+    fun treatsAsyncRequestTimeoutAsNormalCompletion() {
+        val request = MockHttpServletRequest("GET", "/api/v1/realtime/stream")
+
+        val response = handler.handleAsyncRequestTimeout(request)
+
+        assertEquals(HttpStatus.NO_CONTENT, response.statusCode)
+    }
 }

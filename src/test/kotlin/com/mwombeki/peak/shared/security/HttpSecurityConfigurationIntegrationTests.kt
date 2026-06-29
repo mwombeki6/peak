@@ -66,4 +66,18 @@ class HttpSecurityConfigurationIntegrationTests {
             .andExpect(content().contentType("application/problem+json"))
             .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, nullValue()))
     }
+
+    @Test
+    fun rejectsUnauthenticatedWebSocketHandshake() {
+        mockMvc.perform(
+            get("/ws-connect")
+                .header(HttpHeaders.UPGRADE, "websocket")
+                .header(HttpHeaders.CONNECTION, "Upgrade")
+                .header("Sec-WebSocket-Version", "13")
+                .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+                .secure(true),
+        )
+            .andExpect(status().isUnauthorized)
+            .andExpect(content().contentType("application/problem+json"))
+    }
 }

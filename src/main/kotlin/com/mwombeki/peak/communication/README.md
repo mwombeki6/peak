@@ -18,6 +18,10 @@ The Communication Module provides infrastructure for multi-channel tenant notifi
 |--------|----------|-------------|-------|
 | POST | `/api/v1/communication/contacts` | Create a contact and email/phone/WhatsApp channels | `communications.manage` |
 | GET | `/api/v1/communication/contacts` | List contacts and channel verification state | `communications.view` |
+| POST | `/api/v1/communication/contacts/{contactId}/roles` | Assign a readiness/business role to a contact | `communications.manage` |
+| POST | `/api/v1/communication/contacts/{contactId}/channels/{channelId}/consents` | Record the latest purpose-specific consent decision | `communications.manage` |
+| POST | `/api/v1/communication/report-recipients` | Configure a consent-aware operational report recipient | `communications.manage` |
+| GET | `/api/v1/communication/report-recipients` | List operational report recipients with masked channel data | `communications.view` |
 
 ### Channel Verification
 | Method | Endpoint | Description | Roles |
@@ -49,6 +53,8 @@ The module stages notifications through the shared `reliability::api` `OutboxPor
 4. **Completion**: The Reliability module owns claim locking, retry, timeout, metrics, and dead-letter state transitions.
 5. **Provider adapters**: `NotificationDeliveryProvider` isolates provider integrations from delivery state management. The default local provider accepts messages for development and tests; production providers should be configured without placing credentials in YAML defaults.
 
+Production uses the HTTP provider adapter with credentials supplied through secrets/environment configuration. The local provider is rejected by production validation. Provider payloads, raw addresses, message bodies, and verification tokens are excluded from platform-operation logs.
+
 ## Data Model
 - **Tenant Contact**: Individual people associated with a tenant.
 - **Contact Channel**: Specific addresses (email, phone number) for a contact.
@@ -67,6 +73,7 @@ The module stages notifications through the shared `reliability::api` `OutboxPor
 - Permissions are enforced through `module_access_matrix` route contracts and tenant RBAC permissions: `communications.view`, `communications.manage`, and `communications.send`.
 - Verification tokens are stored only as SHA-256 hashes and checked with constant-time comparison.
 - Verification tokens are delivered through outbox payloads and are not returned by the request API.
+- Contact consent is append-only by decision time; report readiness requires a verified channel with active `operational_reports` consent.
 - Property-scoped notifications validate tenant ownership before enqueue.
 - Communication audit entries avoid storing raw recipient addresses or message content.
 - Delivery status rows store recipient and content fingerprints for lookup and diagnostics without duplicating raw message content.

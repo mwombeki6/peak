@@ -182,6 +182,90 @@ class PlatformAdministrationControllerIntegrationTests {
             .andExpect(jsonPath("$.detail").value("Platform operator cannot change own lifecycle state"))
     }
 
+    @Test
+    fun provisionsFirstTenantAdministratorAndVerifiesProfileWithoutManualTenantSql() {
+        val actorId = insertPlatformActorWithPermissions(
+            "platform.security.manage",
+            "platform.tenants.manage",
+            "platform.tenants.verify",
+        )
+        val tenantId = insertTenantForProvisioning()
+        val subject = "tenant-admin-${UUID.randomUUID()}"
+        val requestBody = """
+            {
+              "fullName": "Initial Tenant Administrator",
+              "email": "initial-admin-$tenantId@example.com",
+              "issuer": "https://keycloak.example.com/realms/peak",
+              "subject": "$subject"
+            }
+        """.trimIndent()
+
+        val provisionResult = mockMvc.perform(
+            post("/api/v1/platform/tenants/$tenantId/administrators")
+                .platform(actorId, "corr-tenant-admin-provision", "idem-tenant-admin-provision")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(requestBody),
+        )
+            .andExpect(status().isCreated)
+            .andExpect(jsonPath("$.tenantId").value(tenantId.toString()))
+            .andExpect(jsonPath("$.changed").value(true))
+            .andExpect(jsonPath("$.replayed").value(false))
+            .andReturn()
+
+        val tenantUserId = UUID.fromString(
+            JsonPath.read(provisionResult.response.contentAsString, "$.tenantUserId"),
+        )
+
+        mockMvc.perform(
+            post("/api/v1/platform/tenants/$tenantId/administrators")
+                .platform(actorId, "corr-tenant-admin-provision-replay", "idem-tenant-admin-provision")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(requestBody),
+        )
+            .andExpect(status().isCreated)
+            .andExpect(jsonPath("$.tenantUserId").value(tenantUserId.toString()))
+            .andExpect(jsonPath("$.replayed").value(true))
+
+        val provisionedPermissionCount = jdbcTemplate.queryForObject(
+            """
+            SELECT count(*)
+            FROM tenant_role_permissions trp
+            JOIN tenant_roles tr ON tr.id = trp.tenant_role_id
+            JOIN permissions p ON p.id = trp.permission_id
+            WHERE tr.tenant_id = ?
+              AND tr.code = 'tenant_admin'
+              AND tr.is_system = true
+              AND p.tenant_id = ?
+            """.trimIndent(),
+            Int::class.java,
+            tenantId,
+            tenantId,
+        )
+        val catalogPermissionCount = jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM permission_catalog WHERE is_tenant_permission = true",
+            Int::class.java,
+        )
+        check(provisionedPermissionCount == catalogPermissionCount) {
+            "Tenant administrator must receive every immutable tenant permission"
+        }
+
+        mockMvc.perform(
+            post("/api/v1/platform/tenants/$tenantId/profile/verify")
+                .platform(actorId, "corr-tenant-profile-verify", "idem-tenant-profile-verify"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.tenantId").value(tenantId.toString()))
+            .andExpect(jsonPath("$.verificationStatus").value("verified"))
+            .andExpect(jsonPath("$.changed").value(true))
+
+        val verificationStatus = jdbcTemplate.queryForObject(
+            "SELECT verification_status FROM tenant_profiles WHERE tenant_id = ?",
+            String::class.java,
+            tenantId,
+        )
+        check(verificationStatus == "verified")
+    }
+
     private fun insertPlatformSecurityActor(): UUID {
         val platformUserId = insertPlatformUser()
         val roleId = UUID.randomUUID()
@@ -230,6 +314,83 @@ class PlatformAdministrationControllerIntegrationTests {
             "platform-${platformUserId.toString().take(8)}@example.com",
         )
         return platformUserId
+    }
+
+    private fun insertPlatformActorWithPermissions(vararg permissionCodes: String): UUID {
+        val platformUserId = insertPlatformUser()
+        val roleId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO platform_roles (id, code, name, is_system, is_active)
+            VALUES (?, ?, ?, false, true)
+            """.trimIndent(),
+            roleId,
+            "tenant-bootstrap-${roleId.toString().take(8)}",
+            "Tenant Bootstrap Operator",
+        )
+        permissionCodes.forEach { permissionCode ->
+            val permissionId = jdbcTemplate.queryForObject(
+                "SELECT id FROM platform_permissions WHERE code = ?",
+                UUID::class.java,
+                permissionCode,
+            )
+            jdbcTemplate.update(
+                """
+                INSERT INTO platform_role_permissions (platform_role_id, platform_permission_id)
+                VALUES (?, ?)
+                """.trimIndent(),
+                roleId,
+                permissionId,
+            )
+        }
+        jdbcTemplate.update(
+            """
+            INSERT INTO platform_user_roles (platform_user_id, platform_role_id, assigned_by)
+            VALUES (?, ?, ?)
+            """.trimIndent(),
+            platformUserId,
+            roleId,
+            platformUserId,
+        )
+        return platformUserId
+    }
+
+    private fun insertTenantForProvisioning(): UUID {
+        val planId = UUID.randomUUID()
+        val tenantId = UUID.randomUUID()
+        jdbcTemplate.update(
+            "INSERT INTO plans (id, name, code) VALUES (?, ?, ?)",
+            planId,
+            "Tenant Provisioning Plan $planId",
+            "tenant-provisioning-$planId",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenants (id, name, slug, schema_name, plan_id, status)
+            VALUES (?, ?, ?, ?, ?, 'trial')
+            """.trimIndent(),
+            tenantId,
+            "Provisioned Tenant $tenantId",
+            "provisioned-$tenantId",
+            "tenant_${tenantId.toString().replace("-", "")}",
+            planId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_profiles (
+                tenant_id,
+                legal_name,
+                entity_type,
+                business_phone,
+                business_email
+            )
+            VALUES (?, ?, 'limited_company', '+255712345678', ?)
+            """.trimIndent(),
+            tenantId,
+            "Provisioned Tenant Limited",
+            "business-$tenantId@example.com",
+        )
+        return tenantId
     }
 
     private fun assertPlatformAuditAndOutboxWereRecorded(platformUserId: UUID) {

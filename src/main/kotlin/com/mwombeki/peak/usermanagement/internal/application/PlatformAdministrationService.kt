@@ -30,10 +30,14 @@ import com.mwombeki.peak.usermanagement.api.PlatformUserLifecycleCommand
 import com.mwombeki.peak.usermanagement.api.PlatformUserMutationReceipt
 import com.mwombeki.peak.usermanagement.api.PlatformUserRoleMutationReceipt
 import com.mwombeki.peak.usermanagement.api.PlatformUserSummary
+import com.mwombeki.peak.usermanagement.api.ProvisionTenantAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.RevokePlatformOidcIdentityCommand
 import com.mwombeki.peak.usermanagement.api.RevokePlatformUserRoleCommand
+import com.mwombeki.peak.usermanagement.api.TenantAdministratorProvisioningReceipt
+import com.mwombeki.peak.usermanagement.api.TenantProfileVerificationReceipt
 import com.mwombeki.peak.usermanagement.api.UpdatePlatformRoleCommand
 import com.mwombeki.peak.usermanagement.api.UpdatePlatformUserCommand
+import com.mwombeki.peak.usermanagement.api.VerifyTenantBusinessProfileCommand
 import io.micrometer.core.instrument.MeterRegistry
 import java.sql.Array
 import java.sql.ResultSet
@@ -642,6 +646,96 @@ class PlatformAdministrationService(
         }
     }
 
+    override fun provisionTenantAdministrator(
+        command: ProvisionTenantAdministratorCommand,
+    ): TenantAdministratorProvisioningReceipt {
+        return mutate(
+            operationType = "platform.tenant.administrator.provision",
+            requestPayload = command,
+            resourceType = "users",
+            replayType = TenantAdministratorProvisioningReceipt::class.java,
+        ) { reservationId ->
+            val row = jdbcTemplate.query(
+                """
+                SELECT user_id, tenant_role_id, identity_link_id, changed
+                FROM provision_tenant_administrator(?, ?, ?, ?, ?)
+                """.trimIndent(),
+                { rs, _ ->
+                    TenantAdministratorProvisioningReceipt(
+                        tenantId = command.tenantId,
+                        tenantUserId = rs.getObject("user_id", UUID::class.java),
+                        tenantRoleId = rs.getObject("tenant_role_id", UUID::class.java),
+                        identityLinkId = rs.getObject("identity_link_id", UUID::class.java),
+                        changed = rs.getBoolean("changed"),
+                        replayed = false,
+                    )
+                },
+                command.tenantId,
+                command.fullName.normalizedRequired("fullName"),
+                command.email.normalizedEmail(),
+                command.issuer.normalizedRequired("issuer"),
+                command.subject.normalizedRequired("subject"),
+            ).single()
+
+            if (row.changed) {
+                recordPlatformSideEffects(
+                    action = "platform.tenants.administrator.provisioned",
+                    resourceType = "users",
+                    resourceId = row.tenantUserId,
+                    payload = mapOf(
+                        "tenantId" to row.tenantId,
+                        "tenantUserId" to row.tenantUserId,
+                        "tenantRoleId" to row.tenantRoleId,
+                        "identityLinkId" to row.identityLinkId,
+                    ),
+                    idempotencyKeyId = reservationId,
+                )
+            }
+            row
+        }
+    }
+
+    override fun verifyTenantBusinessProfile(
+        command: VerifyTenantBusinessProfileCommand,
+    ): TenantProfileVerificationReceipt {
+        return mutate(
+            operationType = "platform.tenant.profile.verify",
+            requestPayload = command,
+            resourceType = "tenant_profiles",
+            replayType = TenantProfileVerificationReceipt::class.java,
+        ) { reservationId ->
+            val row = jdbcTemplate.query(
+                """
+                SELECT verification_status, changed
+                FROM verify_tenant_business_profile(?)
+                """.trimIndent(),
+                { rs, _ ->
+                    TenantProfileVerificationReceipt(
+                        tenantId = command.tenantId,
+                        verificationStatus = rs.getString("verification_status"),
+                        changed = rs.getBoolean("changed"),
+                        replayed = false,
+                    )
+                },
+                command.tenantId,
+            ).single()
+
+            if (row.changed) {
+                recordPlatformSideEffects(
+                    action = "platform.tenants.profile.verified",
+                    resourceType = "tenant_profiles",
+                    resourceId = row.tenantId,
+                    payload = mapOf(
+                        "tenantId" to row.tenantId,
+                        "verificationStatus" to row.verificationStatus,
+                    ),
+                    idempotencyKeyId = reservationId,
+                )
+            }
+            row
+        }
+    }
+
     private fun <T : Any> mutate(
         operationType: String,
         requestPayload: Any,
@@ -719,6 +813,8 @@ class PlatformAdministrationService(
             is PlatformRoleMutationReceipt -> receipt.platformRoleId
             is PlatformUserRoleMutationReceipt -> receipt.platformUserId
             is PlatformIdentityLinkReceipt -> receipt.identityLinkId
+            is TenantAdministratorProvisioningReceipt -> receipt.tenantUserId
+            is TenantProfileVerificationReceipt -> receipt.tenantId
             else -> null
         }
     }
@@ -730,6 +826,8 @@ class PlatformAdministrationService(
             is PlatformRoleMutationReceipt -> copy(replayed = true) as T
             is PlatformUserRoleMutationReceipt -> copy(replayed = true) as T
             is PlatformIdentityLinkReceipt -> copy(replayed = true) as T
+            is TenantAdministratorProvisioningReceipt -> copy(replayed = true) as T
+            is TenantProfileVerificationReceipt -> copy(replayed = true) as T
             else -> this
         }
     }

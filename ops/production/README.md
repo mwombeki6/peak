@@ -1,10 +1,10 @@
 # Production Operations
 
-This directory contains the Podman Compose deployment baseline for Peak phase 1.
+This directory contains the Podman Compose deployment baseline for Peak.
 
 ## Files
 
-- `compose.yaml`: PostgreSQL, Keycloak, migration, API, and worker services.
+- `compose.yaml`: PostgreSQL, Keycloak, migration, one-shot platform bootstrap, API, and worker services.
 - `.env.example`: required environment variables without real secrets.
 - `role-bootstrap.sql`: creates production login roles and grants them membership in Flyway-managed no-login roles.
 - `../keycloak/peak-realm.json`: Keycloak realm export imported by the Keycloak container on first startup.
@@ -18,9 +18,10 @@ This directory contains the Podman Compose deployment baseline for Peak phase 1.
 4. Start PostgreSQL and Keycloak: `podman compose --env-file ops/production/.env -f ops/production/compose.yaml up -d postgres keycloak-db keycloak`.
 5. Verify the imported Keycloak realm: `set -a; . ops/production/.env; set +a; KEYCLOAK_BASE_URL=http://localhost:8081 ops/scripts/verify-keycloak-realm.sh`.
 6. Bootstrap production login roles: `ops/scripts/bootstrap-db-roles.sh`.
-7. Run Flyway through the migration profile: `podman compose --env-file ops/production/.env -f ops/production/compose.yaml --profile migration run --rm peak-migration`.
-8. Start API and worker: `podman compose --env-file ops/production/.env -f ops/production/compose.yaml up -d peak-api peak-worker`.
-9. Verify the deployment: `ops/scripts/smoke-test.sh http://localhost:8080 http://localhost:8081`.
+7. Start PostgreSQL and wait for its health check, then run Flyway through the migration profile: `podman compose --env-file ops/production/.env -f ops/production/compose.yaml --profile migration run --rm --no-deps peak-migration`. The `--no-deps` flag is required with Podman Compose so a one-shot migration does not reconcile or replace already-running services.
+8. On the first installation only, create the initial operator in Keycloak, set `PEAK_PLATFORM_BOOTSTRAP_ENABLED=true` plus the operator name, email, exact issuer, and Keycloak subject, then run `ops/scripts/bootstrap-platform.sh`. Immediately set the flag back to `false` and clear the four bootstrap identity values. The command refuses to create a different root after platform initialization.
+9. Start API and worker: `podman compose --env-file ops/production/.env -f ops/production/compose.yaml up -d peak-api peak-worker`.
+10. Verify the deployment: `ops/scripts/smoke-test.sh http://localhost:8080 http://localhost:8081`.
 
 The standard deploy script performs steps 3, 7, 8, and 9:
 
@@ -32,10 +33,15 @@ ops/scripts/deploy.sh
 
 - Never run API or worker as the migration login.
 - Keep Flyway disabled for API and worker; only `peak-migration` runs migrations.
+- Keep the one-shot `peak-bootstrap` service disabled after the initial platform operator is linked. Routine operator, tenant, and tenant-admin provisioning must use authenticated APIs.
 - Keep `PEAK_ALLOW_HEADER_IDENTITY=false` in production.
 - Keep `PEAK_ALLOW_TRUSTED_JWT_IDENTITY_CLAIMS=false` in production.
+- Keep `PEAK_COMMUNICATION_DELIVERY_LOCAL_PROVIDER_ENABLED=false` in production.
+- Configure the worker HTTP communication gateway with an HTTPS base URL and a
+  secret API key. The provider contract is `POST /v1/messages`.
 - Keep SpringDoc disabled in production.
 - Keep CORS origins explicit.
+- Keep realtime WebSocket origins explicit and free of wildcards.
 - Import and verify the Keycloak realm before allowing tenant users to authenticate.
 - Keep `PEAK_SECURITY_JWT_ISSUER_URI` equal to the Keycloak realm issuer and `PEAK_SECURITY_JWT_AUDIENCE=peak-api`.
 - Resolve tenant and platform users through active OIDC `identity_links`; do not rely on client-editable user attributes for authorization.
@@ -53,9 +59,15 @@ ops/scripts/deploy.sh
 The schema grants are owned by Flyway migrations. Add privilege changes as migrations, not manual grants.
 Runtime grants and role-scoped RLS policies are validated by `RuntimeDatabaseRoleIntegrationTests`.
 
+PostgreSQL 18 data volumes are mounted at `/var/lib/postgresql`, which preserves
+the image's major-version-specific data layout. Upgrades across PostgreSQL major
+versions require an explicit `pg_upgrade` or backup/restore procedure.
+
 ## Runtime Sizing
 
 - API pool defaults: `PEAK_DB_POOL_MAX_SIZE=20`, `PEAK_DB_POOL_MIN_IDLE=5`.
+- Hikari timeout values are milliseconds: connection `5000`, validation `2000`,
+  idle `600000`, and max lifetime `1800000`.
 - Worker pool defaults: `PEAK_WORKER_DB_POOL_MAX_SIZE=10`, `PEAK_WORKER_DB_POOL_MIN_IDLE=2`.
 - Migration pool defaults: `PEAK_MIGRATION_DB_POOL_MAX_SIZE=2`, `PEAK_MIGRATION_DB_POOL_MIN_IDLE=0`.
 - Outbox worker defaults: `PEAK_OUTBOX_WORKER_BATCH_SIZE=50`, `PEAK_OUTBOX_WORKER_MAX_PARALLELISM=4`.

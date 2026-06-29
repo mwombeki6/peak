@@ -18,10 +18,14 @@ import com.mwombeki.peak.usermanagement.api.PlatformUserLifecycleCommand
 import com.mwombeki.peak.usermanagement.api.PlatformUserMutationReceipt
 import com.mwombeki.peak.usermanagement.api.PlatformUserRoleMutationReceipt
 import com.mwombeki.peak.usermanagement.api.PlatformUserSummary
+import com.mwombeki.peak.usermanagement.api.ProvisionTenantAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.RevokePlatformOidcIdentityCommand
 import com.mwombeki.peak.usermanagement.api.RevokePlatformUserRoleCommand
+import com.mwombeki.peak.usermanagement.api.TenantAdministratorProvisioningReceipt
+import com.mwombeki.peak.usermanagement.api.TenantProfileVerificationReceipt
 import com.mwombeki.peak.usermanagement.api.UpdatePlatformRoleCommand
 import com.mwombeki.peak.usermanagement.api.UpdatePlatformUserCommand
+import com.mwombeki.peak.usermanagement.api.VerifyTenantBusinessProfileCommand
 import jakarta.validation.Valid
 import jakarta.validation.constraints.Email
 import jakarta.validation.constraints.NotBlank
@@ -233,6 +237,34 @@ class PlatformAdministrationController(
             .map { it.toHttpResponse() }
     }
 
+    @PostMapping("/tenants/{tenantId}/administrators")
+    fun provisionTenantAdministrator(
+        @PathVariable tenantId: UUID,
+        @Valid @RequestBody request: ProvisionTenantAdministratorHttpRequest,
+    ): ResponseEntity<TenantAdministratorProvisioningHttpResponse> {
+        val receipt = platformAdministrationPort.provisionTenantAdministrator(
+            ProvisionTenantAdministratorCommand(
+                tenantId = tenantId,
+                fullName = request.fullName,
+                email = request.email,
+                issuer = request.issuer,
+                subject = request.subject,
+            ),
+        )
+        return ResponseEntity
+            .created(URI.create("/api/v1/tenants/$tenantId/users/${receipt.tenantUserId}"))
+            .body(receipt.toHttpResponse())
+    }
+
+    @PostMapping("/tenants/{tenantId}/profile/verify")
+    fun verifyTenantBusinessProfile(
+        @PathVariable tenantId: UUID,
+    ): TenantProfileVerificationHttpResponse {
+        return platformAdministrationPort.verifyTenantBusinessProfile(
+            VerifyTenantBusinessProfileCommand(tenantId),
+        ).toHttpResponse()
+    }
+
     @ExceptionHandler(PlatformAdministrationNotFoundException::class)
     fun handleNotFound(
         ex: PlatformAdministrationNotFoundException,
@@ -349,6 +381,28 @@ class PlatformAdministrationController(
             replayed = replayed,
         )
     }
+
+    private fun TenantAdministratorProvisioningReceipt.toHttpResponse():
+            TenantAdministratorProvisioningHttpResponse {
+        return TenantAdministratorProvisioningHttpResponse(
+            tenantId = tenantId,
+            tenantUserId = tenantUserId,
+            tenantRoleId = tenantRoleId,
+            identityLinkId = identityLinkId,
+            changed = changed,
+            replayed = replayed,
+        )
+    }
+
+    private fun TenantProfileVerificationReceipt.toHttpResponse():
+            TenantProfileVerificationHttpResponse {
+        return TenantProfileVerificationHttpResponse(
+            tenantId = tenantId,
+            verificationStatus = verificationStatus,
+            changed = changed,
+            replayed = replayed,
+        )
+    }
 }
 
 data class CreatePlatformUserHttpRequest(
@@ -389,6 +443,18 @@ data class LinkPlatformOidcIdentityHttpRequest(
     val subject: String,
     @field:Email
     val email: String? = null,
+)
+
+data class ProvisionTenantAdministratorHttpRequest(
+    @field:NotBlank
+    val fullName: String,
+    @field:NotBlank
+    @field:Email
+    val email: String,
+    @field:NotBlank
+    val issuer: String,
+    @field:NotBlank
+    val subject: String,
 )
 
 data class PlatformUserHttpResponse(
@@ -444,6 +510,22 @@ data class PlatformIdentityLinkHttpResponse(
     val platformUserId: UUID,
     val identityLinkId: UUID,
     val revokedAt: Instant?,
+    val changed: Boolean,
+    val replayed: Boolean,
+)
+
+data class TenantAdministratorProvisioningHttpResponse(
+    val tenantId: UUID,
+    val tenantUserId: UUID,
+    val tenantRoleId: UUID,
+    val identityLinkId: UUID,
+    val changed: Boolean,
+    val replayed: Boolean,
+)
+
+data class TenantProfileVerificationHttpResponse(
+    val tenantId: UUID,
+    val verificationStatus: String,
     val changed: Boolean,
     val replayed: Boolean,
 )

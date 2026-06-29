@@ -8,10 +8,10 @@ spring:
     hikari:
       maximum-pool-size: ${PEAK_DB_POOL_MAX_SIZE:20}
       minimum-idle: ${PEAK_DB_POOL_MIN_IDLE:5}
-      connection-timeout: ${PEAK_DB_CONNECTION_TIMEOUT:5s}
-      validation-timeout: ${PEAK_DB_VALIDATION_TIMEOUT:2s}
-      idle-timeout: ${PEAK_DB_IDLE_TIMEOUT:10m}
-      max-lifetime: ${PEAK_DB_MAX_LIFETIME:30m}
+      connection-timeout: ${PEAK_DB_CONNECTION_TIMEOUT:5000}
+      validation-timeout: ${PEAK_DB_VALIDATION_TIMEOUT:2000}
+      idle-timeout: ${PEAK_DB_IDLE_TIMEOUT:600000}
+      max-lifetime: ${PEAK_DB_MAX_LIFETIME:1800000}
   devtools:
     add-properties: false
 

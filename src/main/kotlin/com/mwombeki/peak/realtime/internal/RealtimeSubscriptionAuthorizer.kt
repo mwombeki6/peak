@@ -3,11 +3,13 @@ package com.mwombeki.peak.realtime.internal
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestIdentity
 import java.util.UUID
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
 import org.springframework.transaction.support.TransactionTemplate
 
 @Component
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 class RealtimeSubscriptionAuthorizer(
     private val jdbcTemplate: JdbcTemplate,
     private val databaseSessionContext: DatabaseSessionContext,

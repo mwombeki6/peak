@@ -89,6 +89,58 @@ class RuntimeDatabaseRoleIntegrationTests {
     }
 
     @Test
+    fun apiRoleCanPersistPhase2TenantPropertyAndCommunicationState() {
+        val tenantFixture = insertTenantFixture(status = "active")
+        val tenantRoleId = UUID.randomUUID()
+        val propertyId = UUID.randomUUID()
+        val contactId = UUID.randomUUID()
+
+        inTransaction {
+            setRole(API_ROLE)
+            bindTenant(tenantFixture.tenantId)
+
+            assertEquals(
+                1,
+                jdbcTemplate.update(
+                    """
+                    INSERT INTO tenant_roles (id, tenant_id, name, code, is_system, is_active)
+                    VALUES (?, ?, ?, ?, false, true)
+                    """.trimIndent(),
+                    tenantRoleId,
+                    tenantFixture.tenantId,
+                    "Runtime Tenant Role $tenantRoleId",
+                    "runtime-tenant-role-$tenantRoleId",
+                ),
+            )
+            assertEquals(
+                1,
+                jdbcTemplate.update(
+                    """
+                    INSERT INTO properties (id, tenant_id, name, code, status, is_active)
+                    VALUES (?, ?, ?, ?, 'draft', false)
+                    """.trimIndent(),
+                    propertyId,
+                    tenantFixture.tenantId,
+                    "Runtime Property $propertyId",
+                    "R${propertyId.toString().take(8)}",
+                ),
+            )
+            assertEquals(
+                1,
+                jdbcTemplate.update(
+                    """
+                    INSERT INTO tenant_contacts (id, tenant_id, full_name, status)
+                    VALUES (?, ?, ?, 'active')
+                    """.trimIndent(),
+                    contactId,
+                    tenantFixture.tenantId,
+                    "Runtime Contact $contactId",
+                ),
+            )
+        }
+    }
+
+    @Test
     fun platformRoleCanManageTenantsOnlyWithPlatformContextAndPermission() {
         val platformFixture = insertPlatformFixture()
         val tenantFixture = insertTenantFixture(status = "trial")
@@ -128,6 +180,81 @@ class RuntimeDatabaseRoleIntegrationTests {
                     """.trimIndent(),
                     tenantFixture.tenantId,
                     platformFixture.platformUserId,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun platformRoleCanPersistAdministrationReliabilitySideEffects() {
+        val platformFixture = insertPlatformFixture()
+        val idempotencyId = UUID.randomUUID()
+        val targetUserId = UUID.randomUUID()
+        val outboxEventId = UUID.randomUUID()
+
+        inTransaction {
+            setRole(PLATFORM_ROLE)
+            bindPlatform(platformFixture.platformUserId)
+
+            assertEquals(
+                1,
+                jdbcTemplate.update(
+                    """
+                    INSERT INTO idempotency_keys (
+                        id,
+                        idempotency_key,
+                        request_method,
+                        request_path,
+                        request_hash,
+                        actor_type,
+                        actor_id,
+                        operation_type,
+                        resource_type,
+                        status,
+                        expires_at
+                    )
+                    VALUES (?, ?, 'POST', '/api/v1/platform/users', ?, 'platform_user', ?, ?, ?, 'processing', now() + interval '1 day')
+                    """.trimIndent(),
+                    idempotencyId,
+                    "runtime-platform-${UUID.randomUUID()}",
+                    "runtime-request-hash",
+                    platformFixture.platformUserId,
+                    "platform.user.create",
+                    "platform_users",
+                ),
+            )
+            assertEquals(
+                1,
+                jdbcTemplate.update(
+                    """
+                    INSERT INTO platform_users (id, full_name, email, status)
+                    VALUES (?, ?, ?, 'active')
+                    """.trimIndent(),
+                    targetUserId,
+                    "Runtime Target $targetUserId",
+                    "runtime-target-$targetUserId@example.com",
+                ),
+            )
+            assertEquals(
+                1,
+                jdbcTemplate.update(
+                    """
+                    INSERT INTO outbox_events (
+                        id,
+                        aggregate_type,
+                        aggregate_id,
+                        event_type,
+                        destination,
+                        payload,
+                        correlation_id,
+                        idempotency_key_id
+                    )
+                    VALUES (?, 'platform_users', ?, 'platform.users.created', 'platform', '{}'::jsonb, ?, ?)
+                    """.trimIndent(),
+                    outboxEventId,
+                    targetUserId,
+                    UUID.randomUUID(),
+                    idempotencyId,
                 ),
             )
         }

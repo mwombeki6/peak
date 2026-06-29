@@ -2,6 +2,7 @@ package com.mwombeki.peak.shared.config
 
 import com.mwombeki.peak.shared.context.RequestContextProperties
 import com.mwombeki.peak.shared.security.HttpSecurityProperties
+import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
@@ -105,6 +106,32 @@ class ProductionReadinessValidatorTests {
     }
 
     @Test
+    fun rejectsInsecureCommunicationGatewayForProductionWorker() {
+        val error = assertFailsWith<IllegalStateException> {
+            validator(
+                environment = secureProdEnvironment()
+                    .withProperty("spring.datasource.username", "peak_worker")
+                    .withProperty("spring.datasource.password", "not-local-secret")
+                    .withProperty("spring.flyway.enabled", "false")
+                    .withProperty("spring.main.web-application-type", "none")
+                    .withProperty("peak.reliability.outbox.worker.enabled", "true")
+                    .withProperty(
+                        "peak.communication.delivery.http-provider.base-url",
+                        "http://communications.internal",
+                    ),
+                runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.WORKER),
+                httpSecurityProperties = secureHttpProperties(),
+                requestContextProperties = secureRequestContextProperties(),
+            ).afterSingletonsInstantiated()
+        }
+
+        assertTrue(
+            requireNotNull(error.message)
+                .contains("communication.delivery.http-provider.base-url must use https"),
+        )
+    }
+
+    @Test
     fun allowsProductionApiRuntimeOnlyWhenFlywayIsDisabled() {
         validator(
             environment = prodEnvironment()
@@ -122,6 +149,48 @@ class ProductionReadinessValidatorTests {
                 allowTrustedJwtIdentityClaims = false,
             ),
         ).afterSingletonsInstantiated()
+    }
+
+    @Test
+    fun allowsOneShotProductionBootstrapWithExplicitIdentity() {
+        validator(
+            environment = secureProdEnvironment()
+                .withProperty("spring.datasource.username", "peak_migrator")
+                .withProperty("spring.datasource.password", "not-local-secret")
+                .withProperty("spring.flyway.enabled", "false")
+                .withProperty("spring.main.web-application-type", "none")
+                .withProperty("peak.bootstrap.platform.enabled", "true")
+                .withProperty("peak.bootstrap.platform.full-name", "Platform Root")
+                .withProperty("peak.bootstrap.platform.email", "root@peak.example.com")
+                .withProperty(
+                    "peak.bootstrap.platform.issuer",
+                    "https://auth.peak.example.com/realms/peak",
+                )
+                .withProperty("peak.bootstrap.platform.subject", UUID.randomUUID().toString()),
+            runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.BOOTSTRAP),
+            httpSecurityProperties = secureHttpProperties(),
+            requestContextProperties = secureRequestContextProperties(),
+        ).afterSingletonsInstantiated()
+    }
+
+    @Test
+    fun rejectsBootstrapRuntimeWithoutExplicitIdentity() {
+        val error = assertFailsWith<IllegalStateException> {
+            validator(
+                environment = secureProdEnvironment()
+                    .withProperty("spring.datasource.username", "peak_migrator")
+                    .withProperty("spring.datasource.password", "not-local-secret")
+                    .withProperty("spring.flyway.enabled", "false")
+                    .withProperty("spring.main.web-application-type", "none")
+                    .withProperty("peak.bootstrap.platform.enabled", "false"),
+                runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.BOOTSTRAP),
+                httpSecurityProperties = secureHttpProperties(),
+                requestContextProperties = secureRequestContextProperties(),
+            ).afterSingletonsInstantiated()
+        }
+
+        assertTrue(requireNotNull(error.message).contains("bootstrap.platform.enabled must be true"))
+        assertTrue(requireNotNull(error.message).contains("bootstrap.platform.subject is required"))
     }
 
     private fun validator(
@@ -173,5 +242,14 @@ class ProductionReadinessValidatorTests {
             .withProperty("springdoc.swagger-ui.enabled", "false")
             .withProperty("peak.realtime.websocket.allowed-origins[0]", "https://app.peak.example.com")
             .withProperty("peak.communication.delivery.local-provider.enabled", "false")
+            .withProperty("peak.communication.delivery.http-provider.enabled", "true")
+            .withProperty(
+                "peak.communication.delivery.http-provider.base-url",
+                "https://communications.peak.example.com",
+            )
+            .withProperty(
+                "peak.communication.delivery.http-provider.api-key",
+                "secure-communication-provider-key",
+            )
     }
 }

@@ -1,5 +1,6 @@
 package com.mwombeki.peak.communication.internal.web
 
+import com.jayway.jsonpath.JsonPath
 import com.mwombeki.peak.TestcontainersConfiguration
 import com.mwombeki.peak.communication.api.ChannelVerificationReceipt
 import com.mwombeki.peak.communication.api.ChannelVerificationRequestReceipt
@@ -446,6 +447,163 @@ class CommunicationControllerIntegrationTests {
             .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
     }
 
+    @Test
+    fun configuresConsentAwareBusinessContactAndCompletesTenantReadiness() {
+        val fixture = communicationFixture()
+        insertAuthorizedFixture(fixture)
+        grantPermissionToActor(fixture, "tenant.profile.view")
+        insertTenantReadinessPrerequisites(fixture)
+
+        val createResult = mockMvc.perform(
+            post("/api/v1/communication/contacts")
+                .secure(true)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "fullName": "Managing Director",
+                      "jobTitle": "Managing Director",
+                      "email": "director-${fixture.tenantId}@example.com"
+                    }
+                    """.trimIndent(),
+                )
+                .headersFor(fixture, "corr-readiness-contact", "idem-readiness-contact"),
+        )
+            .andExpect(status().isOk)
+            .andReturn()
+        val contact = objectMapper.readValue(
+            createResult.response.contentAsString,
+            ContactMutationReceipt::class.java,
+        )
+        val channelId = contact.channelIds.single()
+
+        jdbcTemplate.update(
+            """
+            UPDATE contact_channels
+            SET verification_status = 'verified',
+                verified_at = now(),
+                verification_method = 'test-fixture'
+            WHERE id = ?
+            """.trimIndent(),
+            channelId,
+        )
+
+        mockMvc.perform(
+            post("/api/v1/communication/contacts/${contact.contactId}/roles")
+                .secure(true)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "roleCode": "owner_managing_director",
+                      "primary": true
+                    }
+                    """.trimIndent(),
+                )
+                .headersFor(fixture, "corr-contact-role", "idem-contact-role"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.roleCode").value("owner_managing_director"))
+            .andExpect(jsonPath("$.primary").value(true))
+            .andExpect(jsonPath("$.changed").value(true))
+
+        mockMvc.perform(
+            post("/api/v1/communication/contacts/${contact.contactId}/channels/$channelId/consents")
+                .secure(true)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "purpose": "operational_reports",
+                      "policyVersion": "phase2-v1",
+                      "status": "active"
+                    }
+                    """.trimIndent(),
+                )
+                .headersFor(fixture, "corr-contact-consent", "idem-contact-consent"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.purpose").value("operational_reports"))
+            .andExpect(jsonPath("$.status").value("active"))
+
+        val reportRequest = """
+            {
+              "contactId": "${contact.contactId}",
+              "channelId": "$channelId",
+              "reportCode": "monthly_executive_summary",
+              "subscriptionName": "Executive Management Pack",
+              "frequency": "monthly",
+              "timezone": "Africa/Dar_es_Salaam",
+              "deliveryFormat": "pdf"
+            }
+        """.trimIndent()
+        val reportResult = mockMvc.perform(
+            post("/api/v1/communication/report-recipients")
+                .secure(true)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(reportRequest)
+                .headersFor(fixture, "corr-report-recipient", "idem-report-recipient"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.changed").value(true))
+            .andExpect(jsonPath("$.replayed").value(false))
+            .andReturn()
+
+        val recipientId: String = JsonPath.read(
+            reportResult.response.contentAsString,
+            "$.recipientId",
+        )
+
+        mockMvc.perform(
+            post("/api/v1/communication/report-recipients")
+                .secure(true)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(reportRequest)
+                .headersFor(fixture, "corr-report-recipient-replay", "idem-report-recipient"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.recipientId").value(recipientId))
+            .andExpect(jsonPath("$.replayed").value(true))
+
+        mockMvc.perform(
+            get("/api/v1/communication/contacts")
+                .secure(true)
+                .headersFor(fixture, "corr-readiness-contacts-list"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(
+                jsonPath(
+                    "$[?(@.id == '${contact.contactId}')].roles[*].roleCode",
+                    hasItem("owner_managing_director"),
+                ),
+            )
+            .andExpect(
+                jsonPath(
+                    "$[?(@.id == '${contact.contactId}')].consents[*].purpose",
+                    hasItem("operational_reports"),
+                ),
+            )
+
+        mockMvc.perform(
+            get("/api/v1/communication/report-recipients")
+                .secure(true)
+                .headersFor(fixture, "corr-report-recipients-list"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$[0].recipientId").value(recipientId))
+            .andExpect(jsonPath("$[0].hasActiveConsent").value(true))
+            .andExpect(jsonPath("$[0].maskedAddress").exists())
+
+        mockMvc.perform(
+            get("/api/v1/tenants/${fixture.tenantId}/readiness")
+                .secure(true)
+                .headersFor(fixture, "corr-tenant-readiness-complete"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.isReady").value(true))
+            .andExpect(jsonPath("$.missingRequirements", hasSize<Any>(0)))
+    }
+
     private fun communicationFixture(): CommunicationFixture {
         return CommunicationFixture(
             planId = UUID.randomUUID(),
@@ -557,6 +715,51 @@ class CommunicationControllerIntegrationTests {
             fixture.tenantId,
             "Communication Property ${fixture.propertyId}",
             "COM-${fixture.propertyId.toString().take(8)}",
+        )
+    }
+
+    private fun insertTenantReadinessPrerequisites(fixture: CommunicationFixture) {
+        val platformUserId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO platform_users (id, full_name, email, status)
+            VALUES (?, 'Readiness Verifier', ?, 'active')
+            """.trimIndent(),
+            platformUserId,
+            "readiness-verifier-$platformUserId@example.com",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_profiles (
+                tenant_id,
+                legal_name,
+                entity_type,
+                business_phone,
+                business_email,
+                verification_status,
+                verified_at,
+                verified_by_platform_user_id
+            )
+            VALUES (?, ?, 'limited_company', '+255712345678', ?, 'verified', now(), ?)
+            """.trimIndent(),
+            fixture.tenantId,
+            "Communication Tenant Limited",
+            "business-${fixture.tenantId}@example.com",
+            platformUserId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_modules (
+                tenant_id,
+                module_id,
+                is_enabled,
+                is_configured,
+                source,
+                configured_at
+            )
+            VALUES (?, 'tenant_admin', true, true, 'system', now())
+            """.trimIndent(),
+            fixture.tenantId,
         )
     }
 

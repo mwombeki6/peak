@@ -3,6 +3,7 @@ package com.mwombeki.peak.realtime.internal.web
 import com.mwombeki.peak.realtime.internal.SseRegistry
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.GetMapping
@@ -16,6 +17,7 @@ import java.util.UUID
 
 @RestController
 @RequestMapping("/api/v1/realtime")
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 class RealtimeController(
     private val sseRegistry: SseRegistry,
     private val requestContextHolder: RequestContextHolder

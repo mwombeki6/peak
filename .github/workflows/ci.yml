@@ -52,6 +52,7 @@ jobs:
           KEYCLOAK_DB_PASSWORD=ci-keycloak-db-password-1234
           PEAK_PAYMENT_VODACOM_MPESA_API_KEY=ci-vodacom-api-key-1234
           PEAK_PAYMENT_VODACOM_MPESA_API_SECRET=ci-vodacom-api-secret-1234
+          PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=ci-communication-provider-key-1234
           EOF
           sed -i 's/^          //' "$tmp"
           ops/scripts/validate-production-env.sh "$tmp"
