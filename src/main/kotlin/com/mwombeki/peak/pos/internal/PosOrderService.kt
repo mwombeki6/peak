@@ -1,5 +1,7 @@
 package com.mwombeki.peak.pos.internal
 
+import com.mwombeki.peak.billing.api.BillingPort
+import com.mwombeki.peak.billing.api.PostChargeRequest
 import com.mwombeki.peak.pos.api.*
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
@@ -13,6 +15,7 @@ import java.util.*
 class PosOrderService(
     private val jdbcTemplate: JdbcTemplate,
     private val requestContextHolder: RequestContextHolder,
+    private val billingPort: BillingPort,
 ) {
     private fun resolveTenant(): UUID {
         val context = requestContextHolder.current()
@@ -86,7 +89,7 @@ class PosOrderService(
 
         // 1. Get order details
         val order = jdbcTemplate.queryForMap(
-            "SELECT status, total_amount, session_id FROM pos_orders WHERE id = ? AND tenant_id = ?",
+            "SELECT id, property_id, status, total_amount, session_id FROM pos_orders WHERE id = ? AND tenant_id = ?",
             orderId, tenantId
         )
 
@@ -95,23 +98,49 @@ class PosOrderService(
         }
 
         val totalAmount = order["total_amount"] as BigDecimal
+        val propertyId = order["property_id"] as UUID
+        
         if (request.amount < totalAmount) {
             throw IllegalArgumentException("Insufficient payment amount.")
         }
 
-        // 2. Validate Payment Method (Phase 3: CASH, MOBILE_MONEY)
+        // 2. Handle Folio Transfer vs direct settlement
+        if (request.paymentMethod == "ROOM_CHARGE") {
+            requireNotNull(request.folioId) { "folioId is required for ROOM_CHARGE" }
+            
+            // Transfer items to Billing
+            billingPort.postCharge(
+                propertyId = propertyId,
+                folioId = request.folioId!!,
+                request = PostChargeRequest(
+                    chargeType = "F&B",
+                    description = "POS Order ${order["order_number"] ?: orderId}",
+                    unitPrice = totalAmount,
+                    quantity = BigDecimal.ONE,
+                    sourceType = "POS",
+                    sourceId = orderId
+                )
+            )
+            
+            jdbcTemplate.update(
+                "UPDATE pos_orders SET status = 'TRANSFERRED', folio_id = ?, updated_at = NOW() WHERE id = ?",
+                request.folioId, orderId
+            )
+            println(" [POS Settlement] Order $orderId transferred to Folio ${request.folioId}")
+            return
+        }
+
+        // 3. Validate Payment Method (Phase 3: CASH, MOBILE_MONEY)
         if (request.paymentMethod !in listOf("CASH", "MOBILE_MONEY")) {
             throw IllegalArgumentException("Unsupported payment method: ${request.paymentMethod}")
         }
 
-        // 3. Update Order Status
+        // 4. Update Order Status
         jdbcTemplate.update(
             "UPDATE pos_orders SET status = 'PAID', updated_at = NOW() WHERE id = ?",
             orderId
         )
 
-        // 4. Record Payment (In a real scenario, this would call payments.api)
-        // For now, we just log it or update session totals if needed
         println(" [POS Settlement] Order $orderId settled via ${request.paymentMethod}. Amount: ${request.amount}")
     }
 
