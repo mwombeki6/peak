@@ -628,7 +628,7 @@ class PropertyManagementService(
             val roomTypeId = UUID.randomUUID()
             val maxAdults = request.maxAdults.requirePositive("maxAdults")
             val maxChildren = request.maxChildren.requireNonNegative("maxChildren")
-            val maxOccupancy = (request.maxOccupancy ?: maxAdults + maxChildren).coerceAtLeast(maxAdults)
+            val maxOccupancy = (request.maxOccupancy ?: (maxAdults + maxChildren)).coerceAtLeast(maxAdults)
             try {
                 jdbcTemplate.update(
                     """
