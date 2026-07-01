@@ -3,6 +3,7 @@ package com.mwombeki.peak.nightaudit.internal
 import com.mwombeki.peak.audit.api.AuditPort
 import com.mwombeki.peak.audit.api.AuditResource
 import com.mwombeki.peak.audit.api.TenantAuditEvent
+import com.mwombeki.peak.billing.api.BillingPort
 import com.mwombeki.peak.nightaudit.api.NightAuditConflictException
 import com.mwombeki.peak.nightaudit.api.NightAuditInProgressException
 import com.mwombeki.peak.nightaudit.api.NightAuditIssueResponse
@@ -31,6 +32,7 @@ import tools.jackson.databind.ObjectMapper
 @Service
 class NightAuditService(
     private val jdbcTemplate: JdbcTemplate,
+    private val billingPort: BillingPort,
     private val tenantRequestContext: TenantRequestContext,
     private val idempotencyPort: IdempotencyPort,
     private val auditPort: AuditPort,
@@ -51,9 +53,20 @@ class NightAuditService(
             resourceType = NIGHT_AUDIT_RUNS,
             replayType = NightAuditRunResponse::class.java,
         ) { actor, idempotencyKeyId ->
-            val auditDate = request.auditDate ?: LocalDate.now()
+            val auditDate = request.auditDate ?: jdbcTemplate.queryForObject(
+                "SELECT business_date FROM properties WHERE tenant_id = ? AND id = ?",
+                LocalDate::class.java,
+                actor.tenantId,
+                propertyId,
+            ) ?: LocalDate.now()
+
             val runId = upsertRun(actor, propertyId, auditDate)
             jdbcTemplate.update("DELETE FROM night_audit_issues WHERE tenant_id = ? AND run_id = ?", actor.tenantId, runId)
+            
+            // 1. Post room charges for all guests staying tonight
+            postRecurringRoomCharges(actor, propertyId, auditDate, idempotencyKeyId)
+
+            // 2. Collect remaining issues after charges are posted
             val issues = collectIssues(actor.tenantId, propertyId, runId)
             issues.forEach { issue ->
                 jdbcTemplate.update(
@@ -83,6 +96,22 @@ class NightAuditService(
                 "issueCodes" to issues.map { it.issueCode }.distinct().sorted(),
             )
             val status = if (blockingCount == 0) "completed" else "failed"
+            
+            if (status == "completed") {
+                // 3. Close the business day and increment business date
+                jdbcTemplate.update(
+                    """
+                    UPDATE properties 
+                    SET business_date = business_date + 1,
+                        last_night_audit_at = now(),
+                        updated_at = now()
+                    WHERE tenant_id = ? AND id = ?
+                    """.trimIndent(),
+                    actor.tenantId,
+                    propertyId,
+                )
+            }
+
             jdbcTemplate.update(
                 """
                 UPDATE night_audit_runs
@@ -511,6 +540,49 @@ class NightAuditService(
         return when (response) {
             is NightAuditRunResponse -> response.id
             else -> null
+        }
+    }
+
+    private fun postRecurringRoomCharges(
+        actor: TenantActor,
+        propertyId: UUID,
+        auditDate: LocalDate,
+        runIdempotencyKeyId: UUID,
+    ) {
+        val activeStays = jdbcTemplate.query(
+            """
+            SELECT s.reservation_id
+            FROM stays s
+            JOIN reservations r ON r.tenant_id = s.tenant_id AND r.id = s.reservation_id
+            WHERE s.tenant_id = ?
+              AND r.property_id = ?
+              AND s.status = 'checked_in'
+              AND r.check_in_date <= ?
+              AND r.check_out_date > ?
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("reservation_id", UUID::class.java) },
+            actor.tenantId,
+            propertyId,
+            auditDate,
+            auditDate,
+        )
+
+        activeStays.forEach { reservationId ->
+            try {
+                // We use a deterministic idempotency key for room charges for this audit run
+                val chargeIdempotencyKeyId = UUID.nameUUIDFromBytes(
+                    (runIdempotencyKeyId.toString() + reservationId.toString() + auditDate.toString()).toByteArray(),
+                )
+                billingPort.postRoomChargeForReservation(
+                    tenantId = actor.tenantId,
+                    propertyId = propertyId,
+                    reservationId = reservationId,
+                    idempotencyKeyId = chargeIdempotencyKeyId,
+                )
+            } catch (e: Exception) {
+                // Log and continue, Night Audit will catch unpaid folios or other issues
+                meterRegistry.counter("peak.night_audit.charge_posting_error", "property", propertyId.toString()).increment()
+            }
         }
     }
 

@@ -77,6 +77,9 @@ peak:
       enabled: ${PEAK_ROUTE_GUARD_ENABLED:true}
       deny-unregistered-api-routes: ${PEAK_ROUTE_GUARD_DENY_UNREGISTERED:true}
       rule-cache-ttl: ${PEAK_ROUTE_GUARD_RULE_CACHE_TTL:30s}
+  fiscal:
+    simulator:
+      enabled: ${PEAK_FISCAL_SIMULATOR_ENABLED:true}
 management:
   otlp:
     metrics:
