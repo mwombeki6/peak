@@ -11,6 +11,7 @@ class AuditPayloadSanitizerTests {
             mapOf(
                 "name" to "Peak",
                 "password" to "plain",
+                "documentNumber" to "19900101123456789000",
                 "nested" to mapOf(
                     "apiToken" to "secret-token",
                     "visible" to "value",
@@ -26,6 +27,7 @@ class AuditPayloadSanitizerTests {
 
         assertEquals("Peak", sanitized?.get("name"))
         assertEquals("[REDACTED]", sanitized?.get("password"))
+        assertEquals("[REDACTED]", sanitized?.get("documentNumber"))
 
         val nested = sanitized?.get("nested") as Map<*, *>
         assertEquals("[REDACTED]", nested["apiToken"])

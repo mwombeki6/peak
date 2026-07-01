@@ -21,6 +21,19 @@ spring:
 peak:
   runtime:
     mode: ${PEAK_RUNTIME_MODE:api}
+  guest-identity:
+    hash-key: ${PEAK_GUEST_IDENTITY_HASH_KEY:local-development-identity-hmac-key}
+    hash-key-version: ${PEAK_GUEST_IDENTITY_HASH_KEY_VERSION:v1}
+    previous-hash-key: ${PEAK_GUEST_IDENTITY_PREVIOUS_HASH_KEY:}
+    previous-hash-key-version: ${PEAK_GUEST_IDENTITY_PREVIOUS_HASH_KEY_VERSION:}
+  integrations:
+    nida:
+      mode: ${PEAK_NIDA_MODE:disabled}
+      base-url: ${PEAK_NIDA_BASE_URL:}
+      client-id: ${PEAK_NIDA_CLIENT_ID:}
+      client-secret: ${PEAK_NIDA_CLIENT_SECRET:}
+      connect-timeout: ${PEAK_NIDA_CONNECT_TIMEOUT:3s}
+      read-timeout: ${PEAK_NIDA_READ_TIMEOUT:8s}
   realtime:
     websocket:
       allowed-origins: ${PEAK_REALTIME_WEBSOCKET_ALLOWED_ORIGINS:}

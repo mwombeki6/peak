@@ -16,6 +16,11 @@ spring:
     add-properties: false
 
 peak:
+  guest-identity:
+    hash-key: ${PEAK_GUEST_IDENTITY_HASH_KEY:}
+    hash-key-version: ${PEAK_GUEST_IDENTITY_HASH_KEY_VERSION:v1}
+    previous-hash-key: ${PEAK_GUEST_IDENTITY_PREVIOUS_HASH_KEY:}
+    previous-hash-key-version: ${PEAK_GUEST_IDENTITY_PREVIOUS_HASH_KEY_VERSION:}
   realtime:
     websocket:
       allowed-origins: ${PEAK_REALTIME_WEBSOCKET_ALLOWED_ORIGINS}
@@ -29,6 +34,13 @@ peak:
       allow-header-identity: false
       allow-trusted-jwt-identity-claims: false
   integrations:
+    nida:
+      mode: ${PEAK_NIDA_MODE:disabled}
+      base-url: ${PEAK_NIDA_BASE_URL:}
+      client-id: ${PEAK_NIDA_CLIENT_ID:}
+      client-secret: ${PEAK_NIDA_CLIENT_SECRET:}
+      connect-timeout: ${PEAK_NIDA_CONNECT_TIMEOUT:3s}
+      read-timeout: ${PEAK_NIDA_READ_TIMEOUT:8s}
     payment:
       providers:
         vodacom-mpesa:

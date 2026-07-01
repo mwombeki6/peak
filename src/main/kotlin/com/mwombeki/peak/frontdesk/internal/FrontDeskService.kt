@@ -19,6 +19,7 @@ import com.mwombeki.peak.reliability.api.IdempotencyReservation
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
+import com.mwombeki.peak.reservations.api.GuestIdentityReadinessPort
 import com.mwombeki.peak.reservations.api.ReservationPort
 import com.mwombeki.peak.shared.context.TenantActor
 import com.mwombeki.peak.shared.context.TenantRequestContext
@@ -37,6 +38,7 @@ class FrontDeskService(
     private val jdbcTemplate: JdbcTemplate,
     private val tenantRequestContext: TenantRequestContext,
     private val reservationPort: ReservationPort,
+    private val guestIdentityReadinessPort: GuestIdentityReadinessPort,
     private val billingPort: BillingPort,
     private val idempotencyPort: IdempotencyPort,
     private val auditPort: AuditPort,
@@ -72,15 +74,10 @@ class FrontDeskService(
             resourceType = STAYS,
             replayType = FrontDeskMutationReceipt::class.java,
         ) { actor, idempotencyKeyId ->
-            val primaryGuestId = request.primaryGuestId
-                ?: request.guest?.let {
-                    reservationPort.createGuestInCurrentTransaction(actor.tenantId, propertyId, it).id
-                }
-                ?: throw IllegalArgumentException("Either primaryGuestId or guest is required")
             val reservationReceipt = reservationPort.createReservationInCurrentTransaction(
                 tenantId = actor.tenantId,
                 propertyId = propertyId,
-                request = request.reservation.toReservationRequest(primaryGuestId),
+                request = request.reservation.toReservationRequest(request.primaryGuestId),
                 idempotencyKeyId = idempotencyKeyId,
             )
             checkInInternal(actor, propertyId, reservationReceipt.reservationId, request.reservation.roomId, idempotencyKeyId)
@@ -146,6 +143,11 @@ class FrontDeskService(
         idempotencyKeyId: UUID,
     ): FrontDeskMutationReceipt {
         val reservation = requireReservationForCheckIn(actor.tenantId, propertyId, reservationId)
+        guestIdentityReadinessPort.requireReadyInCurrentTransaction(
+            actor.tenantId,
+            propertyId,
+            reservationId,
+        )
         val roomId = requestedRoomId ?: reservation.roomId
             ?: throw FrontDeskConflictException("Room assignment is required before check-in")
         requireRoomAssignable(actor.tenantId, propertyId, reservation.roomTypeId, roomId)

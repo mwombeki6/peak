@@ -171,6 +171,7 @@ class RouteAccessMatrixCoverageIntegrationTests {
             "departmentId" to UUID.fromString("77777777-7777-7777-7777-777777777779").toString(),
             "taxRateId" to UUID.fromString("77777777-7777-7777-7777-777777777780").toString(),
             "guestId" to UUID.fromString("77777777-7777-7777-7777-777777777781").toString(),
+            "documentId" to UUID.fromString("77777777-7777-7777-7777-777777777788").toString(),
             "reservationId" to UUID.fromString("77777777-7777-7777-7777-777777777782").toString(),
             "stayId" to UUID.fromString("77777777-7777-7777-7777-777777777783").toString(),
             "folioId" to UUID.fromString("77777777-7777-7777-7777-777777777784").toString(),

@@ -1,6 +1,9 @@
 # Integrations Module
 
-Integrations owns public booking sessions and external provider handoffs. It does not own tenant onboarding, platform governance, user management, or provider settlement accounting.
+Integrations owns public booking sessions and external provider handoffs. It
+also implements the NIDA verification adapter contract owned by reservations.
+It does not own guest identity records, tenant onboarding, platform governance,
+user management, or provider settlement accounting.
 
 ## Public API
 
@@ -33,3 +36,15 @@ Public routes derive tenant and property scope from the URL property id through 
 5. Keep provider calls timeout-bound and retry only through explicit, observable policies.
 6. Do not bind tenant DB context before calling public module-resolution functions.
 7. Reject public booking or payment requests when tenant, property, tenant module, or property module access is disabled.
+
+## NIDA Verification
+
+`peak.integrations.nida.mode` supports:
+
+- `disabled`: production-safe controlled physical-document fallback.
+- `simulator`: deterministic local/test verification; prohibited in production.
+- `cig`: reserved for the official NIDA Common Interface Gateway adapter.
+
+The application exposes NIDA health state and records provider outcomes without
+logging request identity data. CIG mode is rejected in production until NIDA
+stakeholder onboarding supplies the private wire contract and sandbox.

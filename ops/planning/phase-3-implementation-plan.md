@@ -72,6 +72,7 @@ Allowed dependencies:
 - `pos -> billing.api, payments.api`
 - `fiscal -> billing.api`
 - `integrations -> payments.api, fiscal.api`
+- `integrations -> reservations.api` only for the guest identity provider SPI.
 - `nightaudit -> reservations.api, frontdesk.api, billing.api, payments.api,
   pos.api, fiscal.api`
 
@@ -181,6 +182,18 @@ variance requires approval by a different authorized user.
 Every `/api/v1/**` route must be covered by `module_access_matrix`; unregistered
 routes remain denied by default.
 
+Guest identity compliance additionally requires:
+
+- Every declared occupant to have a guest profile with date of birth and
+  nationality.
+- Verified recognised identity for adults and attested verified-adult guardian
+  linkage for minors.
+- NIDA-first verification behind a provider SPI, with permissioned physical
+  document fallback while CIG onboarding is incomplete.
+- Keyed fingerprints and masked display values instead of raw identity number
+  persistence.
+- A transactional frontdesk gate that prevents partial check-in state.
+
 ## Observability And Performance
 
 - Preserve structured logs and correlation IDs without logging credentials,
@@ -198,13 +211,14 @@ routes remain denied by default.
 
 1. Shared contracts, database hardening, routes, permissions, and runtime grants.
 2. Guests, reservations, room nights, and overlap-safe room allocation.
-3. Walk-ins, check-in, stays, folios, and room-charge posting.
-4. Financial POS and cash settlement.
-5. Manual mobile-money references and split tender.
-6. ClickPesa initiation, status polling, signed webhooks, and reconciliation.
-7. Invoices, document numbering, fiscal submission, and recovery.
-8. Checkout enforcement and night audit.
-9. Observability, security hardening, documentation, and production acceptance.
+3. Guest identity verification, all-occupant readiness, and guardian linkage.
+4. Walk-ins, check-in, stays, folios, and room-charge posting.
+5. Financial POS and cash settlement.
+6. Manual mobile-money references and split tender.
+7. ClickPesa initiation, status polling, signed webhooks, and reconciliation.
+8. Invoices, document numbering, fiscal submission, and recovery.
+9. Checkout enforcement and night audit.
+10. Observability, security hardening, documentation, and production acceptance.
 
 ## Test Plan
 
@@ -224,6 +238,8 @@ Required automated coverage includes:
 - Fiscal retry, rejection, acceptance, and override tests.
 - Night-audit uniqueness, blocker, override, and completion tests.
 - Spring Modulith boundary tests.
+- Identity policy, raw-data non-persistence, every-occupant check-in, guardian,
+  revocation, provider outage, and controlled fallback tests.
 
 Required E2E scenarios are:
 

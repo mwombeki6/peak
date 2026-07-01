@@ -86,16 +86,32 @@ class ReservationService(
         return read(propertyId) { actor ->
             jdbcTemplate.query(
                 """
-                SELECT id, tenant_id, full_name, first_name, last_name, email, phone_primary,
+                SELECT id, tenant_id, full_name, first_name, last_name, email, phone_primary, date_of_birth,
                        nationality, vip_level, blacklisted
-                FROM guests
-                WHERE tenant_id = ?
-                  AND deleted_at IS NULL
+                FROM guests g
+                WHERE g.tenant_id = ?
+                  AND g.deleted_at IS NULL
+                  AND (
+                      g.origin_property_id = ?
+                      OR EXISTS (
+                          SELECT 1
+                          FROM reservation_guests rg
+                          JOIN reservations r
+                            ON r.tenant_id = rg.tenant_id
+                           AND r.id = rg.reservation_id
+                          WHERE rg.tenant_id = g.tenant_id
+                            AND rg.guest_id = g.id
+                            AND r.property_id = ?
+                            AND r.deleted_at IS NULL
+                      )
+                  )
                 ORDER BY full_name NULLS LAST, last_name NULLS LAST, first_name NULLS LAST, created_at DESC
                 LIMIT 500
                 """.trimIndent(),
                 ::mapGuest,
                 actor.tenantId,
+                propertyId,
+                propertyId,
             )
         }
     }
@@ -104,16 +120,32 @@ class ReservationService(
         return read(propertyId) { actor ->
             jdbcTemplate.query(
                 """
-                SELECT id, tenant_id, full_name, first_name, last_name, email, phone_primary,
+                SELECT id, tenant_id, full_name, first_name, last_name, email, phone_primary, date_of_birth,
                        nationality, vip_level, blacklisted
-                FROM guests
-                WHERE tenant_id = ?
-                  AND id = ?
-                  AND deleted_at IS NULL
+                FROM guests g
+                WHERE g.tenant_id = ?
+                  AND g.id = ?
+                  AND g.deleted_at IS NULL
+                  AND (
+                      g.origin_property_id = ?
+                      OR EXISTS (
+                          SELECT 1
+                          FROM reservation_guests rg
+                          JOIN reservations r
+                            ON r.tenant_id = rg.tenant_id
+                           AND r.id = rg.reservation_id
+                          WHERE rg.tenant_id = g.tenant_id
+                            AND rg.guest_id = g.id
+                            AND r.property_id = ?
+                            AND r.deleted_at IS NULL
+                      )
+                  )
                 """.trimIndent(),
                 ::mapGuest,
                 actor.tenantId,
                 guestId,
+                propertyId,
+                propertyId,
             ).singleOrNull()
         }
     }
@@ -308,6 +340,11 @@ class ReservationService(
         request: CreateGuestRequest,
         idempotencyKeyId: UUID?,
     ): GuestResponse {
+        request.dateOfBirth?.let {
+            require(!it.isAfter(LocalDate.now())) {
+                "dateOfBirth cannot be in the future"
+            }
+        }
         val fullName = request.fullName?.trimmedOrNull()
             ?: listOfNotNull(request.firstName?.trimmedOrNull(), request.lastName?.trimmedOrNull())
                 .joinToString(" ")
@@ -317,19 +354,21 @@ class ReservationService(
         jdbcTemplate.update(
             """
             INSERT INTO guests (
-                id, tenant_id, guest_number, full_name, first_name, last_name,
-                email, phone_primary, nationality, notes
+                id, tenant_id, origin_property_id, guest_number, full_name, first_name, last_name,
+                email, phone_primary, date_of_birth, nationality, notes
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """.trimIndent(),
             guestId,
             tenantId,
+            propertyId,
             guestNumber(),
             fullName,
             request.firstName?.trimmedOrNull(),
             request.lastName?.trimmedOrNull(),
             request.email?.normalizedEmail(),
             request.phonePrimary?.trimmedOrNull(),
+            request.dateOfBirth,
             request.nationality?.trimmedOrNull(),
             request.notes?.trimmedOrNull(),
         )
@@ -378,7 +417,7 @@ class ReservationService(
             request.children,
             request.ratePerNight,
         )
-        requireGuestUsable(actor.tenantId, request.primaryGuestId)
+        requireGuestUsable(actor.tenantId, propertyId, request.primaryGuestId)
         val reservationId = UUID.randomUUID()
         val reservationRoomId = UUID.randomUUID()
         val totalAmount = totalRoomAmount(request.checkInDate, request.checkOutDate, request.ratePerNight)
@@ -536,18 +575,34 @@ class ReservationService(
         }
     }
 
-    private fun requireGuestUsable(tenantId: UUID, guestId: UUID) {
+    private fun requireGuestUsable(tenantId: UUID, propertyId: UUID, guestId: UUID) {
         val guest = jdbcTemplate.query(
             """
             SELECT blacklisted
-            FROM guests
-            WHERE tenant_id = ?
-              AND id = ?
-              AND deleted_at IS NULL
+            FROM guests g
+            WHERE g.tenant_id = ?
+              AND g.id = ?
+              AND g.deleted_at IS NULL
+              AND (
+                  g.origin_property_id = ?
+                  OR EXISTS (
+                      SELECT 1
+                      FROM reservation_guests rg
+                      JOIN reservations r
+                        ON r.tenant_id = rg.tenant_id
+                       AND r.id = rg.reservation_id
+                      WHERE rg.tenant_id = g.tenant_id
+                        AND rg.guest_id = g.id
+                        AND r.property_id = ?
+                        AND r.deleted_at IS NULL
+                  )
+              )
             """.trimIndent(),
             { rs, _ -> rs.getBoolean("blacklisted") },
             tenantId,
             guestId,
+            propertyId,
+            propertyId,
         ).singleOrNull() ?: throw ReservationNotFoundException("Guest was not found")
         if (guest) {
             throw ReservationConflictException("Blacklisted guest cannot be used for reservations")
@@ -708,7 +763,7 @@ class ReservationService(
     }
 
     private fun <T> read(propertyId: UUID, block: (TenantActor) -> T): T {
-        return requireNotNull(transactionTemplate.execute { block(bindActor(propertyId)) })
+        return transactionTemplate.execute { block(bindActor(propertyId)) }
     }
 
     private fun bindActor(propertyId: UUID): TenantActor {
@@ -785,6 +840,7 @@ class ReservationService(
             lastName = rs.getString("last_name"),
             email = rs.getString("email"),
             phonePrimary = rs.getString("phone_primary"),
+            dateOfBirth = rs.getObject("date_of_birth", LocalDate::class.java),
             nationality = rs.getString("nationality"),
             vipLevel = rs.getString("vip_level"),
             blacklisted = rs.getBoolean("blacklisted"),
@@ -813,7 +869,7 @@ class ReservationService(
     private fun guestInContext(tenantId: UUID, guestId: UUID): GuestResponse? {
         return jdbcTemplate.query(
             """
-            SELECT id, tenant_id, full_name, first_name, last_name, email, phone_primary,
+            SELECT id, tenant_id, full_name, first_name, last_name, email, phone_primary, date_of_birth,
                    nationality, vip_level, blacklisted
             FROM guests
             WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL
