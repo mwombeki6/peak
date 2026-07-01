@@ -65,8 +65,8 @@ class NotificationDeliveryProcessorIntegrationTests {
                     """
                     {
                       "propertyId": "${fixture.propertyId}",
-                      "channel": "EMAIL",
-                      "recipient": "provider-failure-${fixture.tenantId}@example.com",
+                      "contactChannelId": "${fixture.contactChannelId}",
+                      "purpose": "service_notifications",
                       "subject": "Provider failure",
                       "content": "This provider intentionally fails in tests."
                     }
@@ -113,6 +113,8 @@ class NotificationDeliveryProcessorIntegrationTests {
             tenantUserId = UUID.randomUUID(),
             tenantRoleId = UUID.randomUUID(),
             propertyId = UUID.randomUUID(),
+            contactId = UUID.randomUUID(),
+            contactChannelId = UUID.randomUUID(),
         )
     }
 
@@ -175,6 +177,7 @@ class NotificationDeliveryProcessorIntegrationTests {
         )
         grantPermissionToActor(fixture, "communications.view")
         grantPermissionToActor(fixture, "communications.send")
+        insertConsentedChannel(fixture)
     }
 
     private fun grantPermissionToActor(
@@ -215,6 +218,57 @@ class NotificationDeliveryProcessorIntegrationTests {
         )
     }
 
+    private fun insertConsentedChannel(fixture: DeliveryFixture) {
+        val address = "provider-failure-${fixture.tenantId}@example.com"
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_contacts (id, tenant_id, full_name, status)
+            VALUES (?, ?, ?, 'active')
+            """.trimIndent(),
+            fixture.contactId,
+            fixture.tenantId,
+            "Delivery Contact ${fixture.contactId}",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO contact_channels (
+                id,
+                tenant_id,
+                contact_id,
+                channel_type,
+                address,
+                normalized_address,
+                verification_status,
+                verified_at,
+                is_active
+            )
+            VALUES (?, ?, ?, 'email', ?, ?, 'verified', now(), true)
+            """.trimIndent(),
+            fixture.contactChannelId,
+            fixture.tenantId,
+            fixture.contactId,
+            address,
+            address,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO communication_consents (
+                tenant_id,
+                contact_id,
+                contact_channel_id,
+                purpose,
+                status,
+                policy_version,
+                capture_source
+            )
+            VALUES (?, ?, ?, 'service_notifications', 'active', 'test-v1', 'api')
+            """.trimIndent(),
+            fixture.tenantId,
+            fixture.contactId,
+            fixture.contactChannelId,
+        )
+    }
+
     private fun org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder.headersFor(
         fixture: DeliveryFixture,
         correlationId: String,
@@ -233,6 +287,8 @@ class NotificationDeliveryProcessorIntegrationTests {
         val tenantUserId: UUID,
         val tenantRoleId: UUID,
         val propertyId: UUID,
+        val contactId: UUID,
+        val contactChannelId: UUID,
     )
 
     @TestConfiguration(proxyBeanMethods = false)

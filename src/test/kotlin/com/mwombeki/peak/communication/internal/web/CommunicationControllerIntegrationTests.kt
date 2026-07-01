@@ -214,6 +214,7 @@ class CommunicationControllerIntegrationTests {
         val fixture = communicationFixture()
         insertAuthorizedFixture(fixture)
         insertProperty(fixture)
+        insertConsentedChannel(fixture)
 
         val templateResult = mockMvc.perform(
             post("/api/v1/communication/templates")
@@ -272,8 +273,8 @@ class CommunicationControllerIntegrationTests {
                     """
                     {
                       "propertyId": "${fixture.propertyId}",
-                      "channel": "EMAIL",
-                      "recipient": "ops-${fixture.tenantId}@example.com",
+                      "contactChannelId": "${fixture.contactChannelId}",
+                      "purpose": "critical_operational_alerts",
                       "subject": "Operational alert",
                       "content": "A test alert was emitted."
                     }
@@ -304,8 +305,8 @@ class CommunicationControllerIntegrationTests {
                     """
                     {
                       "propertyId": "${fixture.propertyId}",
-                      "channel": "EMAIL",
-                      "recipient": "ops-${fixture.tenantId}@example.com",
+                      "contactChannelId": "${fixture.contactChannelId}",
+                      "purpose": "critical_operational_alerts",
                       "subject": "Operational alert",
                       "content": "A test alert was emitted."
                     }
@@ -434,8 +435,8 @@ class CommunicationControllerIntegrationTests {
                 .content(
                     """
                     {
-                      "channel": "EMAIL",
-                      "recipient": "ops-${fixture.tenantId}@example.com",
+                      "contactChannelId": "${fixture.contactChannelId}",
+                      "purpose": "critical_operational_alerts",
                       "subject": "Denied",
                       "content": "Denied"
                     }
@@ -445,6 +446,90 @@ class CommunicationControllerIntegrationTests {
         )
             .andExpect(status().isForbidden)
             .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+    }
+
+    @Test
+    fun blocksQueuedNotificationWhenConsentIsRevokedBeforeDelivery() {
+        val fixture = communicationFixture()
+        insertAuthorizedFixture(fixture)
+        insertProperty(fixture)
+        insertConsentedChannel(fixture)
+        val result = mockMvc.perform(
+            post("/api/v1/communication/notifications")
+                .secure(true)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "propertyId": "${fixture.propertyId}",
+                      "contactChannelId": "${fixture.contactChannelId}",
+                      "purpose": "critical_operational_alerts",
+                      "subject": "Consent test",
+                      "content": "This message must not be delivered after revocation."
+                    }
+                    """.trimIndent(),
+                )
+                .headersFor(
+                    fixture,
+                    "corr-communication-consent-revocation",
+                    "idem-communication-consent-revocation",
+                ),
+        )
+            .andExpect(status().isOk)
+            .andReturn()
+        val receipt = objectMapper.readValue(
+            result.response.contentAsString,
+            NotificationEnqueueReceipt::class.java,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO communication_consents (
+                tenant_id,
+                contact_id,
+                contact_channel_id,
+                purpose,
+                status,
+                policy_version,
+                capture_source,
+                revoked_at
+            )
+            VALUES (?, ?, ?, 'critical_operational_alerts', 'revoked', 'test-v2', 'api', now())
+            """.trimIndent(),
+            fixture.tenantId,
+            fixture.contactId,
+            fixture.contactChannelId,
+        )
+
+        outboxWorkerProcessor.processBatchBlocking(OutboxDestination.NOTIFICATION)
+
+        assertEquals(
+            "failed",
+            jdbcTemplate.queryForObject(
+                "SELECT status FROM outbox_events WHERE id = ?",
+                String::class.java,
+                receipt.eventId,
+            ),
+        )
+        assertEquals(
+            "failed",
+            jdbcTemplate.queryForObject(
+                "SELECT status FROM communication_delivery_requests WHERE id = ?",
+                String::class.java,
+                receipt.deliveryRequestId,
+            ),
+        )
+        assertEquals(
+            0,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*)
+                FROM communication_delivery_attempts
+                WHERE delivery_request_id = ?
+                """.trimIndent(),
+                Int::class.java,
+                receipt.deliveryRequestId,
+            ),
+        )
     }
 
     @Test
@@ -611,6 +696,8 @@ class CommunicationControllerIntegrationTests {
             tenantUserId = UUID.randomUUID(),
             tenantRoleId = UUID.randomUUID(),
             propertyId = UUID.randomUUID(),
+            contactId = UUID.randomUUID(),
+            contactChannelId = UUID.randomUUID(),
         )
     }
 
@@ -715,6 +802,56 @@ class CommunicationControllerIntegrationTests {
             fixture.tenantId,
             "Communication Property ${fixture.propertyId}",
             "COM-${fixture.propertyId.toString().take(8)}",
+        )
+    }
+
+    private fun insertConsentedChannel(fixture: CommunicationFixture) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_contacts (id, tenant_id, full_name, status)
+            VALUES (?, ?, ?, 'active')
+            """.trimIndent(),
+            fixture.contactId,
+            fixture.tenantId,
+            "Operations Contact ${fixture.contactId}",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO contact_channels (
+                id,
+                tenant_id,
+                contact_id,
+                channel_type,
+                address,
+                normalized_address,
+                verification_status,
+                verified_at,
+                is_active
+            )
+            VALUES (?, ?, ?, 'email', ?, ?, 'verified', now(), true)
+            """.trimIndent(),
+            fixture.contactChannelId,
+            fixture.tenantId,
+            fixture.contactId,
+            "ops-${fixture.tenantId}@example.com",
+            "ops-${fixture.tenantId}@example.com",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO communication_consents (
+                tenant_id,
+                contact_id,
+                contact_channel_id,
+                purpose,
+                status,
+                policy_version,
+                capture_source
+            )
+            VALUES (?, ?, ?, 'critical_operational_alerts', 'active', 'test-v1', 'api')
+            """.trimIndent(),
+            fixture.tenantId,
+            fixture.contactId,
+            fixture.contactChannelId,
         )
     }
 
@@ -842,5 +979,7 @@ class CommunicationControllerIntegrationTests {
         val tenantUserId: UUID,
         val tenantRoleId: UUID,
         val propertyId: UUID,
+        val contactId: UUID,
+        val contactChannelId: UUID,
     )
 }

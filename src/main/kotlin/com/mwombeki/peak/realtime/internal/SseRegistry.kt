@@ -3,21 +3,21 @@ package com.mwombeki.peak.realtime.internal
 import io.micrometer.core.instrument.MeterRegistry
 import java.util.UUID
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication
+import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.stereotype.Component
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
-import java.util.ArrayDeque
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicLong
+import java.time.Duration
 
 @Component
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
-class SseRegistry {
+class SseRegistry(
+    private val properties: RealtimeSseProperties = RealtimeSseProperties(),
+) {
     private val emitters = ConcurrentHashMap<UUID, ConcurrentHashMap<UUID, CopyOnWriteArrayList<SseEmitter>>>()
-    private val replayBuffers = ConcurrentHashMap<UUID, ConcurrentHashMap<UUID, ArrayDeque<StoredSseEvent>>>()
     private val activeConnections = AtomicInteger(0)
-    private val eventSequence = AtomicLong(0)
     private val fallbackMeterRegistry = io.micrometer.core.instrument.simple.SimpleMeterRegistry()
     private var meterRegistry: MeterRegistry? = null
 
@@ -32,7 +32,7 @@ class SseRegistry {
             .computeIfAbsent(propertyId) { CopyOnWriteArrayList() }
 
         synchronized(propertyEmitters) {
-            if (propertyEmitters.size >= MAX_CONNECTIONS_PER_PROPERTY) {
+            if (propertyEmitters.size >= properties.maxConnectionsPerProperty) {
                 counter("peak.realtime.sse.connections.rejected", "reason", "limit").increment()
                 return false
             }
@@ -72,45 +72,7 @@ class SseRegistry {
         return activeConnections.get()
     }
 
-    fun recordEvent(
-        tenantId: UUID,
-        propertyId: UUID,
-        eventType: String,
-        data: Any,
-    ): StoredSseEvent {
-        val event = StoredSseEvent(
-            id = eventSequence.incrementAndGet().toString(),
-            eventType = eventType,
-            data = data,
-        )
-        val buffer = replayBuffers.computeIfAbsent(tenantId) { ConcurrentHashMap() }
-            .computeIfAbsent(propertyId) { ArrayDeque() }
-        synchronized(buffer) {
-            buffer.addLast(event)
-            while (buffer.size > MAX_REPLAY_EVENTS_PER_PROPERTY) {
-                buffer.removeFirst()
-                recordBackpressureDrop(eventType, "replay_buffer_overflow")
-            }
-        }
-        counter("peak.realtime.sse.events.published", "eventType", eventType).increment()
-        return event
-    }
-
-    fun replayAfter(
-        tenantId: UUID,
-        propertyId: UUID,
-        lastEventId: String?,
-    ): List<StoredSseEvent> {
-        if (lastEventId.isNullOrBlank()) {
-            return emptyList()
-        }
-        val after = lastEventId.toLongOrNull()
-            ?: throw IllegalArgumentException("Last-Event-ID must be a numeric SSE event id.")
-        val buffer = replayBuffers[tenantId]?.get(propertyId) ?: return emptyList()
-        return synchronized(buffer) {
-            buffer.filter { it.id.toLong() > after }
-        }
-    }
+    fun timeoutMillis(): Long = properties.timeout.toMillis()
 
     fun recordDelivered(eventType: String) {
         counter("peak.realtime.sse.events.delivered", "eventType", eventType).increment()
@@ -120,8 +82,18 @@ class SseRegistry {
         counter("peak.realtime.sse.events.failed", "eventType", eventType).increment()
     }
 
-    fun recordBackpressureDrop(eventType: String, reason: String) {
-        counter("peak.realtime.sse.events.dropped", "eventType", eventType, "reason", reason).increment()
+    fun heartbeat() {
+        emitters.forEach { (tenantId, properties) ->
+            properties.forEach { (propertyId, propertyEmitters) ->
+                propertyEmitters.forEach { emitter ->
+                    try {
+                        emitter.send(SseEmitter.event().name("heartbeat").data(""))
+                    } catch (ex: Exception) {
+                        remove(tenantId, propertyId, emitter, "heartbeat_failure")
+                    }
+                }
+            }
+        }
     }
 
     private fun removeEmptyBuckets(tenantId: UUID, propertyId: UUID) {
@@ -139,14 +111,15 @@ class SseRegistry {
         vararg tags: String,
     ) = (meterRegistry ?: fallbackMeterRegistry).counter(name, *tags)
 
-    private companion object {
-        const val MAX_CONNECTIONS_PER_PROPERTY = 100
-        const val MAX_REPLAY_EVENTS_PER_PROPERTY = 500
-    }
 }
 
-data class StoredSseEvent(
-    val id: String,
-    val eventType: String,
-    val data: Any,
-)
+@ConfigurationProperties(prefix = "peak.realtime.sse")
+data class RealtimeSseProperties(
+    val maxConnectionsPerProperty: Int = 100,
+    val timeout: Duration = Duration.ofMinutes(30),
+) {
+    init {
+        require(maxConnectionsPerProperty in 1..10_000)
+        require(!timeout.isNegative && !timeout.isZero)
+    }
+}

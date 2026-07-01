@@ -183,6 +183,31 @@ class PlatformAdministrationControllerIntegrationTests {
     }
 
     @Test
+    fun rejectsPlatformRolePermissionEscalation() {
+        val actorId = insertPlatformActorWithPermissions("platform.security.manage")
+
+        mockMvc.perform(
+            post("/api/v1/platform/roles")
+                .platform(actorId, "corr-platform-role-escalation", "idem-platform-role-escalation")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "code": "unauthorized_auditor",
+                      "name": "Unauthorized Auditor",
+                      "permissionCodes": ["platform.audit.view"]
+                    }
+                    """.trimIndent(),
+                ),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(
+                jsonPath("$.detail")
+                    .value("Platform roles cannot include permissions the actor does not hold"),
+            )
+    }
+
+    @Test
     fun provisionsFirstTenantAdministratorAndVerifiesProfileWithoutManualTenantSql() {
         val actorId = insertPlatformActorWithPermissions(
             "platform.security.manage",
@@ -267,39 +292,11 @@ class PlatformAdministrationControllerIntegrationTests {
     }
 
     private fun insertPlatformSecurityActor(): UUID {
-        val platformUserId = insertPlatformUser()
-        val roleId = UUID.randomUUID()
-        jdbcTemplate.update(
-            """
-            INSERT INTO platform_roles (id, code, name, is_system, is_active)
-            VALUES (?, ?, ?, false, true)
-            """.trimIndent(),
-            roleId,
-            "security-admin-${roleId.toString().take(8)}",
-            "Security Admin",
+        return insertPlatformActorWithPermissions(
+            "platform.security.manage",
+            "platform.audit.view",
+            "platform.monitoring.view",
         )
-        val permissionId = jdbcTemplate.queryForObject(
-            "SELECT id FROM platform_permissions WHERE code = 'platform.security.manage'",
-            UUID::class.java,
-        )
-        jdbcTemplate.update(
-            """
-            INSERT INTO platform_role_permissions (platform_role_id, platform_permission_id)
-            VALUES (?, ?)
-            """.trimIndent(),
-            roleId,
-            permissionId,
-        )
-        jdbcTemplate.update(
-            """
-            INSERT INTO platform_user_roles (platform_user_id, platform_role_id, assigned_by)
-            VALUES (?, ?, ?)
-            """.trimIndent(),
-            platformUserId,
-            roleId,
-            platformUserId,
-        )
-        return platformUserId
     }
 
     private fun insertPlatformUser(): UUID {

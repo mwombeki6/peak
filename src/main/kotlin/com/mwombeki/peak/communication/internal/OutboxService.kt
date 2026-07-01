@@ -61,19 +61,32 @@ class OutboxService(
     @Transactional
     override fun enqueue(request: EnqueueNotificationRequest): NotificationEnqueueReceipt {
         val tenantId = bindTenantContext()
-        val channel = request.channel.canonicalChannel()
-        val recipient = request.recipient.normalizedRequired("recipient")
-        val content = request.content.normalizedRequired("content")
+        val purpose = request.purpose.normalizedCode("purpose")
+        require(purpose in ALLOWED_CONSENT_PURPOSES) {
+            "Unsupported communication purpose."
+        }
+        val channelInfo = consentedContactChannel(
+            tenantId = tenantId,
+            channelId = request.contactChannelId,
+            purpose = purpose,
+        )
+        val message = resolveNotificationMessage(
+            tenantId = tenantId,
+            channel = channelInfo.channelType,
+            request = request,
+        )
         request.propertyId?.let { requirePropertyBelongsToTenant(tenantId, it) }
 
         return withIdempotency(
             operationType = "communication.notification.enqueue",
             requestPayload = mapOf(
                 "propertyId" to request.propertyId,
-                "channel" to channel,
-                "recipient" to recipient,
-                "subject" to request.subject?.trim(),
-                "content" to content,
+                "contactChannelId" to request.contactChannelId,
+                "purpose" to purpose,
+                "templateId" to request.templateId,
+                "variables" to request.variables,
+                "subject" to message.subject,
+                "content" to message.content,
             ),
             resourceType = "communication_notification",
             replayType = NotificationEnqueueReceipt::class.java,
@@ -82,15 +95,16 @@ class OutboxService(
                 OutboxEventCommand(
                     aggregateType = "communication_notification",
                     aggregateId = request.propertyId ?: tenantId,
-                    eventType = "communication.notification.$channel",
+                    eventType = "communication.notification.${channelInfo.channelType}",
                     destination = OutboxDestination.NOTIFICATION,
                     tenantId = tenantId,
                     propertyId = request.propertyId,
                     payload = mapOf(
-                        "channel" to channel,
-                        "recipient" to recipient,
-                        "subject" to request.subject?.trim(),
-                        "content" to content,
+                        "channel" to channelInfo.channelType,
+                        "contactChannelId" to request.contactChannelId,
+                        "purpose" to purpose,
+                        "subject" to message.subject,
+                        "content" to message.content,
                     ),
                     idempotencyKeyId = idempotencyKeyId,
                     priority = 4,
@@ -101,10 +115,10 @@ class OutboxService(
                 propertyId = request.propertyId,
                 originalOutboxEventId = eventId,
                 currentOutboxEventId = eventId,
-                channel = channel,
-                recipient = recipient,
-                subject = request.subject?.trim(),
-                content = content,
+                channel = channelInfo.channelType,
+                recipient = channelInfo.address,
+                subject = message.subject,
+                content = message.content,
             )
 
             auditPort.recordTenantEvent(
@@ -115,9 +129,11 @@ class OutboxService(
                     after = mapOf(
                         "eventId" to eventId,
                         "propertyId" to request.propertyId,
-                        "channel" to channel,
-                        "recipientFingerprint" to sha256Hex(recipient),
-                        "subjectPresent" to !request.subject.isNullOrBlank(),
+                        "channel" to channelInfo.channelType,
+                        "contactChannelId" to request.contactChannelId,
+                        "purpose" to purpose,
+                        "recipientFingerprint" to sha256Hex(channelInfo.address),
+                        "subjectPresent" to !message.subject.isNullOrBlank(),
                     ),
                 ),
             )
@@ -658,7 +674,7 @@ class OutboxService(
                     timezone,
                     deliveryFormat,
                 )
-                changed = changed || updated > 0
+                changed = updated > 0
             }
 
             val existingRecipientId = jdbcTemplate.query(
@@ -1378,6 +1394,119 @@ class OutboxService(
         ).firstOrNull() ?: throw NoSuchElementException("Contact channel not found or access denied.")
     }
 
+    private fun consentedContactChannel(
+        tenantId: UUID,
+        channelId: UUID,
+        purpose: String,
+    ): ContactChannelInfo {
+        return jdbcTemplate.query(
+            """
+            SELECT cc.channel_type, cc.address
+            FROM contact_channels cc
+            JOIN tenant_contacts tc
+              ON tc.tenant_id = cc.tenant_id
+             AND tc.id = cc.contact_id
+             AND tc.status = 'active'
+             AND tc.deleted_at IS NULL
+            WHERE cc.id = ?
+              AND cc.tenant_id = ?
+              AND cc.is_active = true
+              AND cc.verification_status = 'verified'
+              AND cc.deleted_at IS NULL
+              AND contact_channel_has_active_consent(
+                    cc.tenant_id,
+                    cc.contact_id,
+                    cc.id,
+                    ?
+                  )
+            """.trimIndent(),
+            { rs, _ ->
+                ContactChannelInfo(
+                    channelType = rs.getString("channel_type"),
+                    address = rs.getString("address"),
+                )
+            },
+            channelId,
+            tenantId,
+            purpose,
+        ).firstOrNull()
+            ?: throw IllegalStateException(
+                "The contact channel is unavailable, unverified, or lacks active consent for this purpose.",
+            )
+    }
+
+    private fun resolveNotificationMessage(
+        tenantId: UUID,
+        channel: String,
+        request: EnqueueNotificationRequest,
+    ): NotificationMessage {
+        require(request.variables.size <= MAX_TEMPLATE_VARIABLES) {
+            "Too many template variables."
+        }
+        request.variables.forEach { (key, value) ->
+            require(TEMPLATE_VARIABLE_NAME.matches(key) && value.length <= MAX_TEMPLATE_VARIABLE_LENGTH) {
+                "Invalid template variable."
+            }
+        }
+
+        if (request.templateId == null) {
+            require(request.variables.isEmpty()) {
+                "Template variables require a templateId."
+            }
+            return NotificationMessage(
+                subject = request.subject?.trim()?.takeIf { it.isNotEmpty() },
+                content = request.content?.normalizedRequired("content")
+                    ?: throw IllegalArgumentException("content is required"),
+            ).validated()
+        }
+
+        require(request.subject.isNullOrBlank() && request.content.isNullOrBlank()) {
+            "Template messages cannot override subject or content."
+        }
+        val template = jdbcTemplate.query(
+            """
+            SELECT subject, content
+            FROM communication_templates
+            WHERE id = ?
+              AND tenant_id = ?
+              AND channel_type = ?
+              AND deleted_at IS NULL
+            """.trimIndent(),
+            { rs, _ ->
+                NotificationMessage(
+                    subject = rs.getString("subject"),
+                    content = rs.getString("content"),
+                )
+            },
+            request.templateId,
+            tenantId,
+            channel,
+        ).firstOrNull()
+            ?: throw NoSuchElementException("Communication template not found for the selected channel.")
+
+        val referencedVariables = buildSet {
+            template.subject?.let { subject ->
+                TEMPLATE_VARIABLE.findAll(subject).forEach { add(it.groupValues[1]) }
+            }
+            TEMPLATE_VARIABLE.findAll(template.content).forEach { add(it.groupValues[1]) }
+        }
+        require(referencedVariables == request.variables.keys) {
+            "Template variables do not match the template contract."
+        }
+        return NotificationMessage(
+            subject = template.subject?.let { renderTemplate(it, request.variables) },
+            content = renderTemplate(template.content, request.variables),
+        ).validated()
+    }
+
+    private fun renderTemplate(template: String, variables: Map<String, String>): String {
+        return TEMPLATE_VARIABLE.replace(template) { match ->
+            requireNotNull(variables[match.groupValues[1]]) {
+                "Missing template variable."
+            }
+        }
+    }
+
     private fun requirePropertyBelongsToTenant(tenantId: UUID, propertyId: UUID) {
         val exists = requireNotNull(
             jdbcTemplate.queryForObject(
@@ -1677,6 +1806,21 @@ class OutboxService(
         val address: String,
     )
 
+    private data class NotificationMessage(
+        val subject: String?,
+        val content: String,
+    ) {
+        fun validated(): NotificationMessage {
+            require(subject == null || subject.length <= MAX_NOTIFICATION_SUBJECT_LENGTH) {
+                "Notification subject is too long."
+            }
+            require(content.isNotBlank() && content.length <= MAX_NOTIFICATION_CONTENT_LENGTH) {
+                "Notification content is empty or too long."
+            }
+            return this
+        }
+    }
+
     private data class PendingVerification(
         val tokenHash: String?,
         val expiresAt: OffsetDateTime?,
@@ -1693,6 +1837,16 @@ class OutboxService(
 
     private companion object {
         private val ALLOWED_CHANNELS = setOf("email", "sms", "whatsapp", "voice_phone")
+        private val ALLOWED_CONSENT_PURPOSES = setOf(
+            "operational_reports",
+            "critical_operational_alerts",
+            "billing_communications",
+            "security_notifications",
+            "service_notifications",
+            "marketing",
+        )
+        private val TEMPLATE_VARIABLE = Regex("""\{\{([A-Za-z][A-Za-z0-9_.]*)}}""")
+        private val TEMPLATE_VARIABLE_NAME = Regex("""[A-Za-z][A-Za-z0-9_.]*""")
         private val ALLOWED_CONSENT_STATUSES = setOf("active", "declined", "revoked")
         private val ALLOWED_REPORT_FREQUENCIES = setOf(
             "daily",
@@ -1703,6 +1857,10 @@ class OutboxService(
         )
         private val ALLOWED_REPORT_FORMATS = setOf("pdf", "csv", "xlsx", "json", "html")
         private val RETRYABLE_DELIVERY_STATUSES = setOf("failed", "dead_letter")
+        private const val MAX_TEMPLATE_VARIABLES = 50
+        private const val MAX_TEMPLATE_VARIABLE_LENGTH = 4000
+        private const val MAX_NOTIFICATION_SUBJECT_LENGTH = 500
+        private const val MAX_NOTIFICATION_CONTENT_LENGTH = 100_000
         private val secureRandom = SecureRandom()
     }
 }

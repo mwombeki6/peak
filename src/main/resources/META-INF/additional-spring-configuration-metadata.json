@@ -1,0 +1,16 @@
+{
+  "properties": [
+    {
+      "name": "peak.communication.delivery.local-provider.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Enables the local notification delivery provider. This provider must remain disabled in production.",
+      "defaultValue": true
+    },
+    {
+      "name": "peak.reliability.outbox.platform-operations.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Enables the platform operations outbox event handler.",
+      "defaultValue": true
+    }
+  ]
+}

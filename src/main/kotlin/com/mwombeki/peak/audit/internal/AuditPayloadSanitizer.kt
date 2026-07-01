@@ -44,6 +44,10 @@ class AuditPayloadSanitizer {
             "auth",
             "otp",
             "pin",
+            "documentnumber",
+            "document_number",
+            "nin",
+            "passport",
         )
     }
 }

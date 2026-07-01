@@ -19,6 +19,8 @@ Reliability owns idempotency, transactional outbox persistence, and worker dispa
 - Claiming is database-coordinated; workers must not process the same event concurrently.
 - `OutboxWorkerProcessor` uses bounded coroutine parallelism through `peak.reliability.outbox.worker.max-parallelism`.
 - Handlers must be idempotent because retries and recovery are expected.
+- Idempotency keys expire only after their reference-safe retention period; active reservations cannot be reused.
+- The worker periodically deletes expired, unreferenced idempotency rows in bounded batches.
 - Retry delay, batch size, worker id, and stale-lock recovery must stay observable and configurable.
 - Worker counters are emitted for claimed, delivered, failed, dead-lettered, and reclaimed events.
 

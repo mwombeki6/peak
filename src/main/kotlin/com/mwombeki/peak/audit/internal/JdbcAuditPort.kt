@@ -5,6 +5,7 @@ import com.mwombeki.peak.audit.api.PlatformAuditEvent
 import com.mwombeki.peak.audit.api.TenantAuditEvent
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
+import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
 import org.springframework.transaction.support.TransactionSynchronizationManager
@@ -16,6 +17,7 @@ class JdbcAuditPort(
     private val requestContextHolder: RequestContextHolder,
     private val payloadSanitizer: AuditPayloadSanitizer,
     private val objectMapper: ObjectMapper,
+    private val meterRegistry: MeterRegistry,
 ) : AuditPort {
     override fun recordTenantEvent(event: TenantAuditEvent) {
         requireActiveTransaction()
@@ -42,10 +44,12 @@ class JdbcAuditPort(
                 entity_id,
                 old_values,
                 new_values,
+                ip_address,
+                user_agent,
                 correlation_id,
                 outcome
             )
-            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?)
             """.trimIndent(),
             event.tenantId,
             tenantUserId,
@@ -54,9 +58,12 @@ class JdbcAuditPort(
             event.resource.id,
             json(event.before),
             json(event.after),
+            context.remoteAddress,
+            context.userAgent,
             context.correlationId,
             event.outcome.databaseValue,
         )
+        recordMetric("tenant", event.outcome.databaseValue)
     }
 
     override fun recordPlatformEvent(event: PlatformAuditEvent) {
@@ -79,10 +86,12 @@ class JdbcAuditPort(
                 tenant_id,
                 old_values,
                 new_values,
+                ip_address,
+                user_agent,
                 correlation_id,
                 outcome
             )
-            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::inet, ?, ?, ?)
             """.trimIndent(),
             platformUserId,
             event.action,
@@ -91,9 +100,12 @@ class JdbcAuditPort(
             event.targetTenantId,
             json(event.before),
             json(event.after),
+            context.remoteAddress,
+            context.userAgent,
             context.correlationId,
             event.outcome.databaseValue,
         )
+        recordMetric("platform", event.outcome.databaseValue)
     }
 
     private fun json(payload: Map<String, Any?>?): String? {
@@ -104,5 +116,15 @@ class JdbcAuditPort(
         require(TransactionSynchronizationManager.isActualTransactionActive()) {
             "Audit events must be recorded inside an active transaction"
         }
+    }
+
+    private fun recordMetric(scope: String, outcome: String) {
+        meterRegistry.counter(
+            "peak.audit.events",
+            "scope",
+            scope,
+            "outcome",
+            outcome,
+        ).increment()
     }
 }

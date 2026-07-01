@@ -2,6 +2,9 @@
 
 Audit owns append-only security and business event recording. Other modules publish audit events through `audit.api.AuditPort`; they must not write directly to audit tables.
 
+`peak.audit.events{scope,outcome}` counts committed tenant/platform audit
+writes without tagging tenant ids, user ids, resource ids, or payload values.
+
 ## Responsibilities
 
 - Persist platform and tenant audit events inside the caller transaction.

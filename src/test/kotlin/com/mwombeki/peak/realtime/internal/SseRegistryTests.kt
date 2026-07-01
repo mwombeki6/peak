@@ -6,7 +6,6 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.util.UUID
-import kotlin.test.assertFailsWith
 
 class SseRegistryTests {
 
@@ -53,36 +52,4 @@ class SseRegistryTests {
         assertEquals(100, registry.activeConnectionCount())
     }
 
-    @Test
-    fun `should replay events after last event id`() {
-        val first = registry.recordEvent(tenantId, propertyId, "ROOM_CREATED", mapOf("roomId" to "101"))
-        val second = registry.recordEvent(tenantId, propertyId, "ROOM_UPDATED", mapOf("roomId" to "101"))
-        val third = registry.recordEvent(tenantId, propertyId, "ROOM_READY", mapOf("roomId" to "101"))
-
-        val replayed = registry.replayAfter(tenantId, propertyId, first.id)
-
-        assertEquals(listOf(second, third), replayed)
-    }
-
-    @Test
-    fun `should keep replay buffer bounded`() {
-        var lastDroppedEventId = ""
-        repeat(501) {
-            val event = registry.recordEvent(tenantId, propertyId, "ROOM_EVENT", mapOf("index" to it))
-            if (it == 0) {
-                lastDroppedEventId = event.id
-            }
-        }
-
-        val replayed = registry.replayAfter(tenantId, propertyId, lastDroppedEventId)
-
-        assertEquals(500, replayed.size)
-    }
-
-    @Test
-    fun `should reject invalid replay cursor`() {
-        assertFailsWith<IllegalArgumentException> {
-            registry.replayAfter(tenantId, propertyId, "not-a-number")
-        }
-    }
 }

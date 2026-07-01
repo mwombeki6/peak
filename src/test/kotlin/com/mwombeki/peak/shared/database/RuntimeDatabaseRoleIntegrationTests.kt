@@ -288,6 +288,90 @@ class RuntimeDatabaseRoleIntegrationTests {
         assertTrue(eventId in claimedIds)
     }
 
+    @Test
+    fun workerRoleOwnsHeartbeatWritesWhileApiRoleIsReadOnly() {
+        val workerId = "runtime-worker-${UUID.randomUUID()}"
+        inTransaction {
+            setRole(WORKER_ROLE)
+            assertEquals(
+                1,
+                jdbcTemplate.update(
+                    """
+                    INSERT INTO worker_runtime_heartbeats (worker_id, status)
+                    VALUES (?, 'running')
+                    """.trimIndent(),
+                    workerId,
+                ),
+            )
+        }
+
+        val visible = inTransaction {
+            setRole(API_ROLE)
+            jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM worker_runtime_heartbeats WHERE worker_id = ?",
+                Int::class.java,
+                workerId,
+            )
+        }
+        assertEquals(1, visible)
+
+        assertFailsWith<DataAccessException> {
+            inTransaction {
+                setRole(API_ROLE)
+                jdbcTemplate.update(
+                    "UPDATE worker_runtime_heartbeats SET status = 'stopped' WHERE worker_id = ?",
+                    workerId,
+                )
+            }
+        }
+    }
+
+    @Test
+    fun apiRoleCanEvaluateCrossTenantMockProviderGuardWithoutReadingAccounts() {
+        val tenant = insertTenantFixture(status = "active")
+        val providerId = UUID.randomUUID()
+        val accountId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO payment_providers (
+                id, tenant_id, provider_code, name, provider_type
+            )
+            VALUES (?, ?, 'contract_mock', 'Runtime Mock', 'mobile_money')
+            """.trimIndent(),
+            providerId,
+            tenant.tenantId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO payment_provider_accounts (
+                id, tenant_id, provider_id, account_name, secret_ref
+            )
+            VALUES (?, ?, ?, 'Runtime Mock Account', 'literal:test')
+            """.trimIndent(),
+            accountId,
+            tenant.tenantId,
+            providerId,
+        )
+
+        val activeMocks = inTransaction {
+            setRole(API_ROLE)
+            jdbcTemplate.queryForObject(
+                "SELECT payment_account_count FROM active_contract_mock_provider_counts()",
+                Long::class.java,
+            )
+        }
+
+        assertTrue(requireNotNull(activeMocks) >= 1L)
+        val directlyVisible = inTransaction {
+            setRole(API_ROLE)
+            jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM payment_provider_accounts",
+                Int::class.java,
+            )
+        }
+        assertEquals(0, directlyVisible)
+    }
+
     private fun <T> inTransaction(block: () -> T): T {
         return transactionTemplate.execute { block() }
             ?: error("Transaction returned null")

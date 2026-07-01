@@ -1,6 +1,7 @@
 package com.mwombeki.peak.realtime.internal.web
 
 import com.mwombeki.peak.realtime.internal.SseRegistry
+import com.mwombeki.peak.realtime.internal.RealtimeEventJournal
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication
@@ -20,7 +21,8 @@ import java.util.UUID
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 class RealtimeController(
     private val sseRegistry: SseRegistry,
-    private val requestContextHolder: RequestContextHolder
+    private val requestContextHolder: RequestContextHolder,
+    private val eventJournal: RealtimeEventJournal? = null,
 ) {
 
     @GetMapping("/tenants/{tenantId}/properties/{propertyId}/stream", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
@@ -36,11 +38,11 @@ class RealtimeController(
             if (identity.tenantId != tenantId) {
                 throw SecurityException("Access Denied: You cannot subscribe to another tenant's live stream!")
             }
-        } else if (identity !is RequestIdentity.Platform) {
+        } else {
             throw SecurityException("Access Denied: Missing valid credentials.")
         }
 
-        val emitter = SseEmitter(60_000L)
+        val emitter = SseEmitter(sseRegistry.timeoutMillis())
         if (!sseRegistry.add(tenantId, propertyId, emitter)) {
             throw ResponseStatusException(
                 HttpStatus.TOO_MANY_REQUESTS,
@@ -54,12 +56,14 @@ class RealtimeController(
                     .name("connection-established")
                     .data("Connected to stream for property $propertyId"),
             )
-            sseRegistry.replayAfter(tenantId, propertyId, lastEventId).forEach { event ->
+            val replay = eventJournal?.replayAfter(tenantId, propertyId, lastEventId)
+                ?: emptyList()
+            replay.forEach { event ->
                 emitter.send(
                     SseEmitter.event()
-                        .id(event.id)
+                        .id(event.sequenceId.toString())
                         .name(event.eventType)
-                        .data(event.data),
+                        .data(event.payload),
                 )
                 sseRegistry.recordDelivered(event.eventType)
             }

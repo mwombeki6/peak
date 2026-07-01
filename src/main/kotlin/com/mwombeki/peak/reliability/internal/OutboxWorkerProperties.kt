@@ -20,6 +20,9 @@ data class OutboxWorkerProperties(
     val staleLockTimeout: Duration = Duration.ofMinutes(15),
     val staleReclaimInterval: Duration = Duration.ofMinutes(1),
     val staleReclaimLimit: Int = 500,
+    val heartbeatInterval: Duration = Duration.ofSeconds(15),
+    val heartbeatStaleAfter: Duration = Duration.ofSeconds(45),
+    val healthRequired: Boolean = false,
 ) {
     init {
         require(batchSize in 1..500) {
@@ -51,6 +54,12 @@ data class OutboxWorkerProperties(
         }
         require(staleReclaimLimit in 1..5000) {
             "Outbox worker stale reclaim limit must be between 1 and 5000"
+        }
+        require(heartbeatInterval.hasPositiveLength()) {
+            "Outbox worker heartbeat interval must be positive"
+        }
+        require(heartbeatStaleAfter > heartbeatInterval) {
+            "Outbox worker stale threshold must exceed its heartbeat interval"
         }
     }
 

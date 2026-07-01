@@ -29,6 +29,14 @@ class RequestContextResolver(
             idempotencyKey = idempotencyKey,
             httpMethod = request.method,
             requestPath = request.requestURI,
+            remoteAddress = request.remoteAddr
+                ?.trim()
+                ?.takeIf { it.matches(SAFE_IP_ADDRESS) },
+            userAgent = request.getHeader("User-Agent")
+                ?.filterNot(Char::isISOControl)
+                ?.trim()
+                ?.take(MAX_USER_AGENT_LENGTH)
+                ?.takeIf(String::isNotEmpty),
         )
     }
 
@@ -256,7 +264,9 @@ class RequestContextResolver(
     }
 
     private companion object {
+        const val MAX_USER_AGENT_LENGTH = 512
         val SAFE_CONTEXT_TOKEN = Regex("[A-Za-z0-9._:-]{1,128}")
+        val SAFE_IP_ADDRESS = Regex("^[0-9a-fA-F:.]{2,45}$")
         val PUBLIC_PROPERTY_ROUTE_PATTERN = Regex(
             "^/api(?:/v\\d+)?/public/properties/" +
                     "([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-" +

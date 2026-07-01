@@ -244,19 +244,6 @@
           }
         },
         {
-          "name": "Enable tenant booking engine module",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "X-Correlation-Id", "value": "{{correlationId}}" },
-              { "key": "Idempotency-Key", "value": "postman-module-booking-engine-001" }
-            ],
-            "body": { "mode": "raw", "raw": "{\"moduleId\":\"booking_engine\"}" },
-            "url": "{{baseUrl}}/api/v1/tenants/{{tenantId}}/modules"
-          }
-        },
-        {
           "name": "Create property",
           "request": {
             "method": "POST",
@@ -293,19 +280,6 @@
               { "key": "Idempotency-Key", "value": "postman-property-module-core-001" }
             ],
             "body": { "mode": "raw", "raw": "{\"moduleId\":\"property\"}" },
-            "url": "{{baseUrl}}/api/v1/properties/{{propertyId}}/modules"
-          }
-        },
-        {
-          "name": "Enable property booking engine module",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "X-Correlation-Id", "value": "{{correlationId}}" },
-              { "key": "Idempotency-Key", "value": "postman-property-module-booking-001" }
-            ],
-            "body": { "mode": "raw", "raw": "{\"moduleId\":\"booking_engine\"}" },
             "url": "{{baseUrl}}/api/v1/properties/{{propertyId}}/modules"
           }
         },

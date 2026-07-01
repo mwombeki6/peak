@@ -14,7 +14,8 @@ fi
 
 EXPECTED_ISSUER="${PEAK_SECURITY_JWT_ISSUER_URI:-$KEYCLOAK_BASE_URL/realms/peak}"
 
-"$ROOT_DIR/ops/scripts/healthcheck.sh" "$API_BASE_URL/actuator/health"
+"$ROOT_DIR/ops/scripts/healthcheck.sh" "$API_BASE_URL/actuator/health/liveness"
+"$ROOT_DIR/ops/scripts/healthcheck.sh" "$API_BASE_URL/actuator/health/readiness"
 
 OIDC_CONFIGURATION="$(curl -fsS "$KEYCLOAK_BASE_URL/realms/peak/.well-known/openid-configuration")"
 OIDC_CONFIGURATION="$OIDC_CONFIGURATION" EXPECTED_ISSUER="$EXPECTED_ISSUER" python3 - <<'PY'
@@ -30,7 +31,7 @@ if not oidc.get("jwks_uri"):
     raise SystemExit("Keycloak discovery document does not expose jwks_uri")
 PY
 
-swagger_status="$(curl -k -s -o /dev/null -w '%{http_code}' "$API_BASE_URL/swagger-ui.html")"
+swagger_status="$(curl -s -o /dev/null -w '%{http_code}' "$API_BASE_URL/swagger-ui.html")"
 case "$swagger_status" in
   200|301|302|307|308)
     echo "SpringDoc UI is exposed in production: HTTP $swagger_status" >&2
@@ -38,7 +39,7 @@ case "$swagger_status" in
     ;;
 esac
 
-secured_status="$(curl -k -s -o /dev/null -w '%{http_code}' \
+secured_status="$(curl -s -o /dev/null -w '%{http_code}' \
   "$API_BASE_URL/api/v1/platform/tenants/00000000-0000-0000-0000-000000000000")"
 case "$secured_status" in
   401|403) ;;

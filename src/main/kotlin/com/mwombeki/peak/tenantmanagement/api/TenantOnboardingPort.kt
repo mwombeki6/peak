@@ -9,5 +9,4 @@ import java.util.UUID
 interface TenantOnboardingPort{
     fun registerNewTenant(request: TenantRegisterRequest): TenantResponse
     fun getTenantById(id: UUID): TenantResponse?
-    fun updateTenantStatus(id: UUID, status: TenantStatus): TenantResponse
 }

@@ -1,8 +1,13 @@
 peak:
+  communication:
+    invitation:
+      expose-token-in-response: true
   realtime:
     websocket:
       allowed-origins:
         - http://localhost
+    journal:
+      fanout-enabled: false
   security:
     http:
       jwt:

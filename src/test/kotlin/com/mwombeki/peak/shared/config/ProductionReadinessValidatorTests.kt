@@ -2,6 +2,7 @@ package com.mwombeki.peak.shared.config
 
 import com.mwombeki.peak.shared.context.RequestContextProperties
 import com.mwombeki.peak.shared.security.HttpSecurityProperties
+import com.mwombeki.peak.shared.secrets.SecretReferenceResolver
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertFailsWith
@@ -27,6 +28,7 @@ class ProductionReadinessValidatorTests {
         assertTrue(message.contains("API/worker runtime must not use the migrator"))
         assertTrue(message.contains("spring.flyway.enabled must be false"))
         assertTrue(message.contains("communication.delivery.local-provider.enabled must be false"))
+        assertTrue(message.contains("server.forward-headers-strategy must be native"))
     }
 
     @Test
@@ -134,14 +136,10 @@ class ProductionReadinessValidatorTests {
     @Test
     fun allowsProductionApiRuntimeOnlyWhenFlywayIsDisabled() {
         validator(
-            environment = prodEnvironment()
+            environment = secureProdEnvironment()
                 .withProperty("spring.datasource.username", "peak_app")
                 .withProperty("spring.datasource.password", "not-local-secret")
-                .withProperty("springdoc.api-docs.enabled", "false")
-                .withProperty("springdoc.swagger-ui.enabled", "false")
-                .withProperty("peak.realtime.websocket.allowed-origins[0]", "https://app.peak.example.com")
-                .withProperty("spring.flyway.enabled", "false")
-                .withProperty("peak.communication.delivery.local-provider.enabled", "false"),
+                .withProperty("spring.flyway.enabled", "false"),
             runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.API),
             httpSecurityProperties = secureHttpProperties(),
             requestContextProperties = RequestContextProperties(
@@ -149,6 +147,30 @@ class ProductionReadinessValidatorTests {
                 allowTrustedJwtIdentityClaims = false,
             ),
         ).afterSingletonsInstantiated()
+    }
+
+    @Test
+    fun rejectsUnsafeOutboundProviderHostAllowlist() {
+        val error = assertFailsWith<IllegalStateException> {
+            validator(
+                environment = secureProdEnvironment()
+                    .withProperty("spring.datasource.username", "peak_app")
+                    .withProperty("spring.datasource.password", "not-local-secret")
+                    .withProperty("spring.flyway.enabled", "false")
+                    .withProperty(
+                        "peak.security.outbound.allowed-provider-hosts",
+                        "payments.example.com,localhost",
+                    ),
+                runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.API),
+                httpSecurityProperties = secureHttpProperties(),
+                requestContextProperties = secureRequestContextProperties(),
+            ).afterSingletonsInstantiated()
+        }
+
+        assertTrue(
+            requireNotNull(error.message)
+                .contains("allowed-provider-hosts must contain exact external DNS hostnames"),
+        )
     }
 
     @Test
@@ -207,6 +229,7 @@ class ProductionReadinessValidatorTests {
             runtimeProperties = runtimeProperties,
             httpSecurityProperties = httpSecurityProperties,
             requestContextProperties = requestContextProperties,
+            secretReferenceResolver = SecretReferenceResolver(environment),
         )
     }
 
@@ -240,8 +263,14 @@ class ProductionReadinessValidatorTests {
         return prodEnvironment()
             .withProperty("springdoc.api-docs.enabled", "false")
             .withProperty("springdoc.swagger-ui.enabled", "false")
+            .withProperty("server.forward-headers-strategy", "native")
+            .withProperty(
+                "peak.security.outbound.allowed-provider-hosts",
+                "payments.example.com,fiscal.example.com",
+            )
             .withProperty("peak.realtime.websocket.allowed-origins[0]", "https://app.peak.example.com")
             .withProperty("peak.communication.delivery.local-provider.enabled", "false")
+            .withProperty("peak.reliability.outbox.worker.health-required", "true")
             .withProperty("peak.communication.delivery.http-provider.enabled", "true")
             .withProperty(
                 "peak.communication.delivery.http-provider.base-url",
@@ -250,6 +279,18 @@ class ProductionReadinessValidatorTests {
             .withProperty(
                 "peak.communication.delivery.http-provider.api-key",
                 "secure-communication-provider-key",
+            )
+            .withProperty(
+                "peak.security.envelope.key-reference",
+                "env:PEAK_ENVELOPE_KEY",
+            )
+            .withProperty(
+                "PEAK_ENVELOPE_KEY",
+                "cGVhay1sb2NhbC1lbnZlbG9wZS1rZXktMzItYnl0ZSE=",
+            )
+            .withProperty(
+                "peak.communication.invitation.acceptance-base-url",
+                "https://app.peak.example.com/invitations/accept",
             )
     }
 }

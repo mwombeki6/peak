@@ -4,7 +4,8 @@
         allowedDependencies = {
                 "audit::api",
                 "reliability::api",
-                "shared::context"
+                "shared::context",
+                "shared::secrets"
         }
 )
 package com.mwombeki.peak.communication;

@@ -270,10 +270,12 @@ class TenantUserRoleManagementControllerIntegrationTests {
         jdbcTemplate.update(
             """
             INSERT INTO tenant_role_permissions (tenant_role_id, permission_id)
-            VALUES (?, ?)
+            VALUES (?, ?), (?, ?)
             """.trimIndent(),
             fixture.actorRoleId,
             fixture.managePermissionId,
+            fixture.actorRoleId,
+            fixture.reportsPermissionId,
         )
     }
 

@@ -5,12 +5,16 @@ import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventHandler
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.shared.secrets.SecretEnvelopeService
 import io.micrometer.core.instrument.MeterRegistry
 import java.security.MessageDigest
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.util.UUID
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
+import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
 import org.springframework.stereotype.Service
@@ -28,6 +32,30 @@ class NotificationOutboxHandler(
     }
 }
 
+@Component
+class InvitationEmailOutboxHandler(
+    private val deliveryProcessor: NotificationDeliveryProcessor,
+) : OutboxEventHandler {
+    override val destination = OutboxDestination.EMAIL
+
+    override fun supports(event: ClaimedOutboxEvent): Boolean {
+        return event.destination == destination && event.eventType == INVITATION_EVENT
+    }
+
+    override suspend fun handle(event: ClaimedOutboxEvent) {
+        deliveryProcessor.deliver(event)
+    }
+
+    private companion object {
+        const val INVITATION_EVENT = "tenant.user.invited"
+    }
+}
+
+@ConfigurationProperties(prefix = "peak.communication.invitation")
+data class InvitationDeliveryProperties(
+    val acceptanceBaseUrl: String = "",
+)
+
 @Service
 class NotificationDeliveryProcessor(
     private val jdbcTemplate: JdbcTemplate,
@@ -36,12 +64,20 @@ class NotificationDeliveryProcessor(
     private val objectMapper: ObjectMapper,
     private val providers: List<NotificationDeliveryProvider>,
     private val meterRegistry: ObjectProvider<MeterRegistry>,
+    private val secretEnvelopeService: SecretEnvelopeService,
+    private val invitationProperties: InvitationDeliveryProperties,
 ) {
     fun deliver(event: ClaimedOutboxEvent) {
         val tenantId = requireNotNull(event.tenantId) {
             "Notification outbox events must be tenant scoped"
         }
-        val payload = event.notificationPayload()
+        val pendingPayload = event.notificationPayload()
+        val payload = try {
+            validateDeliveryScope(tenantId, event, pendingPayload)
+        } catch (ex: Exception) {
+            markPolicyBlocked(tenantId, event, pendingPayload.channel)
+            throw ex
+        }
         val provider = providers.firstOrNull { it.supports(payload.channel) }
         val providerCode = provider?.providerCode ?: "unavailable"
         val work = startAttempt(
@@ -332,18 +368,158 @@ class NotificationDeliveryProcessor(
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun ClaimedOutboxEvent.notificationPayload(): NotificationPayload {
+    private fun ClaimedOutboxEvent.notificationPayload(): PendingNotificationPayload {
         val payload = objectMapper.readValue(this.payload, Map::class.java) as Map<String, Any?>
+        if (eventType == INVITATION_EVENT) {
+            val invitationId = requireNotNull(aggregateId) {
+                "Invitation aggregate id is required"
+            }
+            val tokenEnvelope = payload["tokenEnvelope"]?.toString()?.normalizedRequired("tokenEnvelope")
+                ?: throw IllegalArgumentException("Invitation token envelope is required")
+            val token = secretEnvelopeService.decrypt(
+                envelope = tokenEnvelope,
+                associatedData = invitationId.toString(),
+            )
+            val acceptanceBaseUrl = invitationProperties.acceptanceBaseUrl
+                .trim()
+                .trimEnd('/')
+                .normalizedRequired("acceptanceBaseUrl")
+            val acceptanceUrl = "$acceptanceBaseUrl?token=${
+                URLEncoder.encode(token, StandardCharsets.UTF_8)
+            }"
+            val fullName = payload["fullName"]?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+                ?: "Peak user"
+            val expiresAt = payload["expiresAt"]?.toString()?.normalizedRequired("expiresAt")
+                ?: throw IllegalArgumentException("Invitation expiry is required")
+            return PendingNotificationPayload(
+                channel = "email",
+                recipient = payload["email"]?.toString()?.normalizedRequired("email"),
+                contactChannelId = null,
+                purpose = null,
+                subject = "Your Peak invitation",
+                content = buildString {
+                    append("Hello ")
+                    append(fullName)
+                    append(",\n\nUse this secure link to accept your Peak invitation:\n")
+                    append(acceptanceUrl)
+                    append("\n\nThis invitation expires at ")
+                    append(expiresAt)
+                    append(".")
+                },
+            )
+        }
         val channel = payload["channel"]?.toString()?.canonicalChannel()
             ?: eventType.substringAfterLast('.').canonicalChannel()
-        return NotificationPayload(
+        return PendingNotificationPayload(
             channel = channel,
-            recipient = payload["recipient"]?.toString()?.normalizedRequired("recipient")
-                ?: throw IllegalArgumentException("Notification recipient is required"),
+            recipient = payload["recipient"]?.toString()?.trim()?.takeIf { it.isNotEmpty() },
+            contactChannelId = payload["contactChannelId"]?.toString()?.let(UUID::fromString),
+            purpose = payload["purpose"]?.toString()?.trim()?.lowercase(),
             subject = payload["subject"]?.toString()?.trim()?.takeIf { it.isNotEmpty() },
             content = payload["content"]?.toString()?.normalizedRequired("content")
                 ?: throw IllegalArgumentException("Notification content is required"),
         )
+    }
+
+    private fun validateDeliveryScope(
+        tenantId: UUID,
+        event: ClaimedOutboxEvent,
+        payload: PendingNotificationPayload,
+    ): NotificationPayload {
+        if (event.eventType in DIRECT_RECIPIENT_EVENTS) {
+            return NotificationPayload(
+                channel = payload.channel,
+                recipient = payload.recipient?.normalizedRequired("recipient")
+                    ?: throw IllegalArgumentException("Notification recipient is required"),
+                subject = payload.subject,
+                content = payload.content,
+            )
+        }
+
+        val channelId = requireNotNull(payload.contactChannelId) {
+            "Contact channel is required for notification delivery"
+        }
+        val purpose = payload.purpose?.normalizedRequired("purpose")
+            ?: throw IllegalArgumentException("Notification purpose is required")
+
+        val resolved = transactionTemplate.execute {
+                bindTenant(tenantId)
+                jdbcTemplate.query(
+                    """
+                    SELECT cc.channel_type, cc.address
+                    FROM contact_channels cc
+                    JOIN tenant_contacts tc
+                      ON tc.tenant_id = cc.tenant_id
+                     AND tc.id = cc.contact_id
+                     AND tc.status = 'active'
+                     AND tc.deleted_at IS NULL
+                    WHERE cc.id = ?
+                      AND cc.tenant_id = ?
+                      AND cc.is_active = true
+                      AND cc.verification_status = 'verified'
+                      AND cc.deleted_at IS NULL
+                      AND contact_channel_has_active_consent(
+                            cc.tenant_id,
+                            cc.contact_id,
+                            cc.id,
+                            ?
+                          )
+                    """.trimIndent(),
+                    { rs, _ ->
+                        ResolvedChannel(
+                            channel = rs.getString("channel_type").canonicalChannel(),
+                            recipient = rs.getString("address").normalizedRequired("recipient"),
+                        )
+                    },
+                    channelId,
+                    tenantId,
+                    purpose,
+                ).firstOrNull()
+            } ?: throw IllegalStateException(
+            "Notification delivery blocked because the channel or consent is no longer active.",
+        )
+        require(resolved.channel == payload.channel) {
+            "Notification channel no longer matches the contact channel."
+        }
+        return NotificationPayload(
+            channel = payload.channel,
+            recipient = resolved.recipient,
+            subject = payload.subject,
+            content = payload.content,
+        )
+    }
+
+    private fun markPolicyBlocked(
+        tenantId: UUID,
+        event: ClaimedOutboxEvent,
+        channel: String,
+    ) {
+        transactionTemplate.executeWithoutResult {
+            bindTenant(tenantId)
+            jdbcTemplate.update(
+                """
+                UPDATE communication_delivery_requests
+                SET status = 'failed',
+                    attempt_count = GREATEST(attempt_count, ?),
+                    failed_at = now(),
+                    last_error = ?,
+                    updated_at = now()
+                WHERE tenant_id = ?
+                  AND deleted_at IS NULL
+                  AND (current_outbox_event_id = ? OR original_outbox_event_id = ?)
+                """.trimIndent(),
+                event.attemptCount,
+                POLICY_BLOCKED_MESSAGE,
+                tenantId,
+                event.id,
+                event.id,
+            )
+        }
+        counter(
+            "peak.communication.delivery.policy_blocked",
+            "channel",
+            channel,
+        ).increment()
     }
 
     private fun bindTenant(tenantId: UUID) {
@@ -376,11 +552,25 @@ class NotificationDeliveryProcessor(
         }
     }
 
+    private data class PendingNotificationPayload(
+        val channel: String,
+        val recipient: String?,
+        val contactChannelId: UUID?,
+        val purpose: String?,
+        val subject: String?,
+        val content: String,
+    )
+
     private data class NotificationPayload(
         val channel: String,
         val recipient: String,
         val subject: String?,
         val content: String,
+    )
+
+    private data class ResolvedChannel(
+        val channel: String,
+        val recipient: String,
     )
 
     private data class DeliveryWork(
@@ -394,6 +584,11 @@ class NotificationDeliveryProcessor(
         private val logger = LoggerFactory.getLogger(NotificationDeliveryProcessor::class.java)
         private val fallbackMeterRegistry = io.micrometer.core.instrument.simple.SimpleMeterRegistry()
         private val ALLOWED_CHANNELS = setOf("email", "sms", "whatsapp", "voice_phone")
+        private const val CHANNEL_VERIFICATION_EVENT = "communication.channel.verification.requested"
+        private const val INVITATION_EVENT = "tenant.user.invited"
+        private val DIRECT_RECIPIENT_EVENTS = setOf(CHANNEL_VERIFICATION_EVENT, INVITATION_EVENT)
+        private const val POLICY_BLOCKED_MESSAGE =
+            "Delivery blocked because the contact channel or consent is no longer active"
         private const val MAX_ERROR_MESSAGE_LENGTH = 1000
     }
 }
