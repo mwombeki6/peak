@@ -124,6 +124,42 @@ class JdbcIdempotencyPortIntegrationTests {
     }
 
     @Test
+    fun expiresAndReusesAnIdempotencyKey() {
+        val platformUserId = UUID.randomUUID()
+        val idempotencyKey = "idem-${UUID.randomUUID()}"
+        val first = transactionTemplate.execute {
+            requestContextHolder.set(platformContext(platformUserId, idempotencyKey))
+            idempotencyPort.reserve(command("expired"))
+        }
+        assertTrue(first is IdempotencyReservation.Started)
+        jdbcTemplate.update(
+            "UPDATE idempotency_keys SET expires_at = now() - interval '1 second' WHERE id = ?",
+            first.recordId,
+        )
+
+        val replacement = transactionTemplate.execute {
+            requestContextHolder.set(platformContext(platformUserId, idempotencyKey))
+            idempotencyPort.reserve(command("expired"))
+        }
+
+        assertTrue(replacement is IdempotencyReservation.Started)
+        assertTrue(replacement.recordId != first.recordId)
+        assertEquals(
+            listOf("expired", "processing"),
+            jdbcTemplate.queryForList(
+                """
+                SELECT status
+                FROM idempotency_keys
+                WHERE tenant_id IS NULL AND idempotency_key = ?
+                ORDER BY created_at, id
+                """.trimIndent(),
+                String::class.java,
+                idempotencyKey,
+            ),
+        )
+    }
+
+    @Test
     fun concurrentReservationsForSameKeyProduceSingleStartedRecord() {
         val platformUserId = UUID.randomUUID()
         val idempotencyKey = "idem-${UUID.randomUUID()}"

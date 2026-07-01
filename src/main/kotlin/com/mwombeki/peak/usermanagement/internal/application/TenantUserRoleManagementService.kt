@@ -151,6 +151,7 @@ class TenantUserRoleManagementService(
             requestPayload = command,
         ) { idempotencyKeyId ->
             val roleId = UUID.randomUUID()
+            requireDelegableTenantPermissions(command.tenantId, command.permissionCodes)
             val permissionIds = requireTenantPermissions(command.tenantId, command.permissionCodes)
             try {
                 jdbcTemplate.update(
@@ -209,6 +210,7 @@ class TenantUserRoleManagementService(
         ) { idempotencyKeyId ->
             requireMutableTenantRole(command.tenantId, command.tenantRoleId)
             val permissionIds = command.permissionCodes
+                ?.also { requireDelegableTenantPermissions(command.tenantId, it) }
                 ?.let { requireTenantPermissions(command.tenantId, it) }
             val rows = jdbcTemplate.update(
                 """
@@ -416,6 +418,7 @@ class TenantUserRoleManagementService(
     ): TenantUserRoleAssignmentReceipt {
         requireActiveTenantUser(command.tenantId, command.userId)
         requireActiveTenantRole(command.tenantId, command.tenantRoleId)
+        requireDelegableTenantRole(command.tenantId, command.tenantRoleId)
 
         val inserted = jdbcTemplate.update(
             """
@@ -786,6 +789,62 @@ class TenantUserRoleManagementService(
             ?: throw TenantUserRoleManagementNotFoundException("Tenant role was not found")
         require(!role.isSystem) {
             "System tenant roles cannot be modified"
+        }
+        val actorUserId = requireTenantActor(tenantId)
+        val assignedToActor = jdbcTemplate.queryForObject(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM user_tenant_roles
+                WHERE tenant_id = ?
+                  AND user_id = ?
+                  AND tenant_role_id = ?
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            tenantId,
+            actorUserId,
+            tenantRoleId,
+        ) == true
+        require(!assignedToActor) {
+            "Tenant user cannot modify a role assigned to self"
+        }
+    }
+
+    private fun requireDelegableTenantRole(tenantId: UUID, tenantRoleId: UUID) {
+        val permissionCodes = jdbcTemplate.queryForList(
+            """
+            SELECT p.code
+            FROM tenant_role_permissions trp
+            JOIN permissions p
+              ON p.id = trp.permission_id
+             AND p.tenant_id = ?
+            WHERE trp.tenant_role_id = ?
+            ORDER BY p.code
+            """.trimIndent(),
+            String::class.java,
+            tenantId,
+            tenantRoleId,
+        ).filterNotNull()
+        requireDelegableTenantPermissions(tenantId, permissionCodes)
+    }
+
+    private fun requireDelegableTenantPermissions(tenantId: UUID, permissionCodes: List<String>) {
+        val actorUserId = requireTenantActor(tenantId)
+        val unauthorized = permissionCodes
+            .map { it.normalizedCode() }
+            .distinct()
+            .filterNot { permissionCode ->
+                jdbcTemplate.queryForObject(
+                    "SELECT user_has_tenant_permission(?, ?, ?)",
+                    Boolean::class.java,
+                    actorUserId,
+                    tenantId,
+                    permissionCode,
+                ) == true
+            }
+        require(unauthorized.isEmpty()) {
+            "Tenant roles cannot include permissions the actor does not hold"
         }
     }
 

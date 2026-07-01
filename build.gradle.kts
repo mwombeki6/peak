@@ -166,6 +166,10 @@ kotlin {
 }
 
 tasks.withType<Test>().configureEach {
+    systemProperty(
+        "spring.profiles.active",
+        System.getProperty("spring.profiles.active") ?: "test",
+    )
     val runtimeDir = System.getenv("XDG_RUNTIME_DIR")
     val podmanSocket = runtimeDir?.let {
         file("$it/podman/podman.sock")

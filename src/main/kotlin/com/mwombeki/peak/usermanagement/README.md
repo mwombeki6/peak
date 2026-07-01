@@ -17,6 +17,8 @@ User management owns authorization, external identity resolution, platform admin
 - Platform permissions are checked through platform roles and tenant access helpers.
 - Tenant permissions are checked through tenant roles, role permissions, and active tenant user state.
 - Tenant-created roles are dynamic but tenant-scoped; a tenant route cannot assign a role from another tenant.
+- Dynamic role creation and update cannot grant permissions the acting user
+  does not already hold.
 - System tenant roles are immutable through tenant self-service. Assignment, revocation, and invitation flows must reject `tenant_roles.is_system=true`.
 - Public property routes are resolved through `resolve_public_property_scope`; public headers are not trusted.
 - Staff and platform guards bind database session context before permission checks; public module guards stay unbound.
@@ -71,7 +73,7 @@ All tenant role routes are tenant-scoped, require `tenant.users.manage`, and are
 | `POST` | `/api/v1/tenants/{tenantId}/users/{userId}/roles/{tenantRoleId}/assign` | Assign a dynamic tenant role to a tenant user. |
 | `POST` | `/api/v1/tenants/{tenantId}/users/{userId}/roles/{tenantRoleId}/revoke` | Revoke a dynamic tenant role from a tenant user. |
 
-Mutating tenant role routes require `Idempotency-Key`. Successful dynamic role definition changes write `audit_logs` entries and enqueue platform outbox events. Tenant system roles are read-only through tenant self-service, and a tenant user cannot change their own role assignments.
+Mutating tenant role routes require `Idempotency-Key`. Successful dynamic role definition changes write `audit_logs` entries and enqueue platform outbox events. Tenant system roles are read-only through tenant self-service, a tenant user cannot change their own role assignments, and delegated permissions cannot exceed the actor's effective permission set.
 
 ## Production Rules
 
@@ -85,3 +87,5 @@ Mutating tenant role routes require `Idempotency-Key`. Successful dynamic role d
 8. Treat disabled, locked, deleted, or revoked OIDC identities as immediately unauthorized; do not cache positive identity resolution outside request scope.
 9. Require idempotency, audit, and outbox side effects for mutating platform and tenant role administration commands.
 10. Keep platform OIDC identity links in `identity_links`; do not add provider-specific identity tables.
+11. Never return invitation bearer tokens from production administration APIs;
+    deliver the encrypted token only through the invitation outbox handler.

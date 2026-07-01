@@ -46,19 +46,16 @@ import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
-import com.mwombeki.peak.shared.context.RealtimeStreamEvent
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
 import io.micrometer.core.instrument.MeterRegistry
 import java.sql.ResultSet
+import java.time.ZoneId
 import java.util.UUID
-import org.springframework.context.ApplicationEventPublisher
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
-import org.springframework.transaction.support.TransactionSynchronization
-import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.ObjectMapper
 
@@ -73,14 +70,14 @@ class PropertyManagementService(
     private val transactionTemplate: TransactionTemplate,
     private val objectMapper: ObjectMapper,
     private val meterRegistry: MeterRegistry,
-    private val applicationEventPublisher: ApplicationEventPublisher,
 ) : PropertyPort {
 
     override fun listProperties(): List<PropertyResponse> {
         return read { identity ->
             jdbcTemplate.query(
                 """
-                SELECT id, tenant_id, name, location, code, type, status, is_active, total_rooms
+                SELECT id, tenant_id, name, location, code, type, status, is_active,
+                       total_rooms, timezone, business_date_offset
                 FROM properties
                 WHERE tenant_id = ? AND deleted_at IS NULL
                 ORDER BY name
@@ -95,7 +92,8 @@ class PropertyManagementService(
         return read { identity ->
             jdbcTemplate.query(
                 """
-                SELECT id, tenant_id, name, location, code, type, status, is_active, total_rooms
+                SELECT id, tenant_id, name, location, code, type, status, is_active,
+                       total_rooms, timezone, business_date_offset
                 FROM properties
                 WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL
                 """.trimIndent(),
@@ -117,8 +115,11 @@ class PropertyManagementService(
             try {
                 jdbcTemplate.update(
                     """
-                    INSERT INTO properties (id, tenant_id, name, location, code, type, status, is_active)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, false)
+                    INSERT INTO properties (
+                        id, tenant_id, name, location, code, type, status,
+                        is_active, timezone, business_date_offset
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, false, ?, ?)
                     """.trimIndent(),
                     propertyId,
                     identity.tenantId,
@@ -127,6 +128,8 @@ class PropertyManagementService(
                     request.code?.normalizedCode(),
                     request.type.normalizedRequired("type").uppercase(),
                     PROPERTY_STATUS_DRAFT,
+                    request.timezone.validatedTimezone(),
+                    request.businessDateOffset.validatedBusinessDateOffset(),
                 )
             } catch (ex: DuplicateKeyException) {
                 throw PropertyManagementConflictException("Property code is already in use")
@@ -180,6 +183,8 @@ class PropertyManagementService(
                         location = COALESCE(?, location),
                         code = COALESCE(?, code),
                         type = COALESCE(?, type),
+                        timezone = COALESCE(?, timezone),
+                        business_date_offset = COALESCE(?, business_date_offset),
                         updated_at = now()
                     WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL
                     """.trimIndent(),
@@ -187,6 +192,8 @@ class PropertyManagementService(
                     request.location?.trimmedOrNull(),
                     request.code?.normalizedCode(),
                     request.type?.normalizedRequired("type")?.uppercase(),
+                    request.timezone?.validatedTimezone(),
+                    request.businessDateOffset?.validatedBusinessDateOffset(),
                     propertyId,
                     identity.tenantId,
                 )
@@ -1779,7 +1786,9 @@ class PropertyManagementService(
             """
             SELECT COUNT(*)
             FROM buildings
-            WHERE tenant_id = ? AND property_id = ? AND deleted_at IS NULL
+            WHERE tenant_id = ?
+              AND property_id = ?
+              AND deleted_at IS NULL
             """.trimIndent(),
             tenantId,
             propertyId,
@@ -1825,7 +1834,10 @@ class PropertyManagementService(
             """
             SELECT COUNT(*)
             FROM rooms
-            WHERE tenant_id = ? AND property_id = ? AND deleted_at IS NULL
+            WHERE tenant_id = ?
+              AND property_id = ?
+              AND deleted_at IS NULL
+              AND status IN ('vacant_clean', 'vacant_dirty', 'occupied')
             """.trimIndent(),
             tenantId,
             propertyId,
@@ -2317,41 +2329,6 @@ class PropertyManagementService(
             ),
         )
 
-        propertyId?.let {
-            publishRealtimeAfterCommit(
-                tenantId = tenantId,
-                propertyId = it,
-                eventType = eventType,
-                payload = payload,
-            )
-        }
-    }
-
-    private fun publishRealtimeAfterCommit(
-        tenantId: UUID,
-        propertyId: UUID,
-        eventType: String,
-        payload: Map<String, Any?>,
-    ) {
-        val event = RealtimeStreamEvent(
-            tenantId = tenantId,
-            propertyId = propertyId,
-            eventType = eventType,
-            payload = payload,
-        )
-
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            applicationEventPublisher.publishEvent(event)
-            return
-        }
-
-        TransactionSynchronizationManager.registerSynchronization(
-            object : TransactionSynchronization {
-                override fun afterCommit() {
-                    applicationEventPublisher.publishEvent(event)
-                }
-            },
-        )
     }
 
     private fun propertyStatus(
@@ -2428,6 +2405,23 @@ class PropertyManagementService(
         return normalizedRequired("code").uppercase()
     }
 
+    private fun String.validatedTimezone(): String {
+        val normalized = normalizedRequired("timezone")
+        try {
+            ZoneId.of(normalized)
+        } catch (ex: Exception) {
+            throw IllegalArgumentException("timezone must be a valid IANA timezone")
+        }
+        return normalized
+    }
+
+    private fun Int.validatedBusinessDateOffset(): Int {
+        require(this in -1..1) {
+            "businessDateOffset must be between -1 and 1"
+        }
+        return this
+    }
+
     private fun String.normalizedModuleId(): String {
         return trim().lowercase().takeIf { it.isNotBlank() }
             ?: throw IllegalArgumentException("moduleId is required")
@@ -2489,12 +2483,7 @@ class PropertyManagementService(
     }
 
     private fun DataIntegrityViolationException.publicDatabaseMessage(): String {
-        val message = mostSpecificCause.message ?: message.orEmpty()
-        return if (message.startsWith("ERROR:")) {
-            message.removePrefix("ERROR:").lineSequence().first().trim()
-        } else {
-            "Property command violates a data integrity rule"
-        }
+        return "Property request conflicts with existing configuration data"
     }
 
     private fun mapProperty(rs: ResultSet, @Suppress("UNUSED_PARAMETER") row: Int): PropertyResponse {
@@ -2508,6 +2497,8 @@ class PropertyManagementService(
             status = rs.getString("status"),
             isActive = rs.getBoolean("is_active"),
             totalRooms = rs.getInt("total_rooms"),
+            timezone = rs.getString("timezone"),
+            businessDateOffset = rs.getInt("business_date_offset"),
         )
     }
 
@@ -2636,7 +2627,7 @@ class PropertyManagementService(
 
         private val UUID_ZERO = UUID.fromString("00000000-0000-0000-0000-000000000000")
 
-        private val REQUIRED_PROPERTY_MODULES = setOf(PROPERTY_MODULE_ID, "booking_engine")
+        private val REQUIRED_PROPERTY_MODULES = setOf(PROPERTY_MODULE_ID)
 
         private val TERMINAL_PROPERTY_STATUSES = setOf(PROPERTY_STATUS_ARCHIVED, "terminated")
 
@@ -2645,7 +2636,6 @@ class PropertyManagementService(
             "property.view",
             "property.manage",
             "property.lifecycle",
-            "booking_engine.manage",
             "realtime.stream",
         )
 

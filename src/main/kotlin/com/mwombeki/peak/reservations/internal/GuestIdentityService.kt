@@ -1117,7 +1117,7 @@ class GuestIdentityService(
                 }
             })
         } catch (ex: DataIntegrityViolationException) {
-            throw ReservationConflictException(ex.mostSpecificCause.message ?: "Identity command conflicts with existing data")
+            throw ReservationConflictException("Identity command conflicts with existing guest data")
         }
     }
 

@@ -90,16 +90,21 @@ data class ConfirmedPaymentRequest(
     val folioId: UUID,
     val paymentMethod: String,
     val amount: BigDecimal,
+    val paymentTransactionId: UUID,
+    val cashSessionId: UUID? = null,
+    val processedBy: UUID? = null,
     val referenceNumber: String? = null,
     val idempotencyKey: String? = null,
     val notes: String? = null,
 )
 
-data class PostPaymentRequest(
-    val paymentMethod: String,
-    val amount: BigDecimal,
+data class ConfirmedPaymentReversalRequest(
+    val originalPaymentTransactionId: UUID,
+    val reversalPaymentTransactionId: UUID,
+    val processedBy: UUID,
+    val reason: String,
     val referenceNumber: String? = null,
-    val notes: String? = null,
+    val cashSessionId: UUID? = null,
 )
 
 data class BillingMutationReceipt(

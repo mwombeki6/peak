@@ -10,13 +10,13 @@ import com.mwombeki.peak.billing.api.BillingNotFoundException
 import com.mwombeki.peak.billing.api.BillingPort
 import com.mwombeki.peak.billing.api.CheckoutFinancialState
 import com.mwombeki.peak.billing.api.ConfirmedPaymentRequest
+import com.mwombeki.peak.billing.api.ConfirmedPaymentReversalRequest
 import com.mwombeki.peak.billing.api.FolioChargeResponse
 import com.mwombeki.peak.billing.api.FolioPaymentResponse
 import com.mwombeki.peak.billing.api.FolioResponse
 import com.mwombeki.peak.billing.api.InvoiceResponse
 import com.mwombeki.peak.billing.api.IssueInvoiceRequest
 import com.mwombeki.peak.billing.api.PostChargeRequest
-import com.mwombeki.peak.billing.api.PostPaymentRequest
 import com.mwombeki.peak.billing.api.ReverseChargeRequest
 import com.mwombeki.peak.reliability.api.IdempotencyCommand
 import com.mwombeki.peak.reliability.api.IdempotencyPort
@@ -169,9 +169,10 @@ class BillingService(
             """
             INSERT INTO folio_payments (
                 id, tenant_id, property_id, folio_id, payment_method, amount,
-                reference_number, idempotency_key, status, paid_at, processed_by, created_by, notes
+                payment_transaction_id, cash_session_id, reference_number,
+                idempotency_key, status, paid_at, processed_by, created_by, notes
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'POSTED', now(), ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'POSTED', now(), ?, ?, ?)
             """.trimIndent(),
             paymentId,
             tenantId,
@@ -179,10 +180,12 @@ class BillingService(
             folio.id,
             method,
             amount,
+            request.paymentTransactionId,
+            request.cashSessionId,
             request.referenceNumber?.trimmedOrNull(),
             request.idempotencyKey?.trimmedOrNull(),
-            tenantUserFromContext(),
-            tenantUserFromContext(),
+            request.processedBy,
+            request.processedBy,
             request.notes?.trimmedOrNull(),
         )
         recalculateFolio(folio.id)
@@ -201,9 +204,117 @@ class BillingService(
                 "amount" to amount,
             ),
             idempotencyKeyId = idempotencyKeyId,
-            destination = OutboxDestination.PAYMENT,
+            destination = OutboxDestination.PLATFORM,
         )
         return paymentId
+    }
+
+    override fun reverseConfirmedPayment(
+        tenantId: UUID,
+        propertyId: UUID,
+        request: ConfirmedPaymentReversalRequest,
+        idempotencyKeyId: UUID,
+    ): UUID {
+        requireActiveContext(tenantId, propertyId)
+        val original = jdbcTemplate.query(
+            """
+            SELECT fp.id,
+                   fp.folio_id,
+                   fp.payment_method,
+                   fp.amount,
+                   fp.cash_session_id,
+                   fp.status,
+                   fp.is_reversed
+            FROM folio_payments fp
+            JOIN folios f
+              ON f.tenant_id = fp.tenant_id
+             AND f.id = fp.folio_id
+             AND f.property_id = ?
+             AND f.status = 'open'
+             AND f.deleted_at IS NULL
+            WHERE fp.tenant_id = ?
+              AND fp.property_id = ?
+              AND fp.payment_transaction_id = ?
+              AND fp.deleted_at IS NULL
+            FOR UPDATE OF fp, f
+            """.trimIndent(),
+            { rs, _ ->
+                PaymentReversalSource(
+                    paymentId = rs.getObject("id", UUID::class.java),
+                    folioId = rs.getObject("folio_id", UUID::class.java),
+                    paymentMethod = rs.getString("payment_method"),
+                    amount = rs.getBigDecimal("amount").money(),
+                    cashSessionId = rs.getObject("cash_session_id", UUID::class.java),
+                    status = rs.getString("status"),
+                    reversed = rs.getBoolean("is_reversed"),
+                )
+            },
+            propertyId,
+            tenantId,
+            propertyId,
+            request.originalPaymentTransactionId,
+        ).singleOrNull() ?: throw BillingNotFoundException(
+            "Posted payment was not found on an open folio",
+        )
+        require(original.status == "POSTED" && !original.reversed) {
+            "Payment has already been reversed or is not posted"
+        }
+        val reversalPaymentId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO folio_payments (
+                id, tenant_id, property_id, folio_id, payment_method, amount,
+                payment_transaction_id, cash_session_id, reference_number,
+                idempotency_key, status, reversal_of, paid_at,
+                processed_by, created_by, notes
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'POSTED', ?, now(), ?, ?, ?)
+            """.trimIndent(),
+            reversalPaymentId,
+            tenantId,
+            propertyId,
+            original.folioId,
+            original.paymentMethod,
+            original.amount,
+            request.reversalPaymentTransactionId,
+            request.cashSessionId,
+            request.referenceNumber?.trimmedOrNull(),
+            idempotencyKeyId.toString(),
+            original.paymentId,
+            request.processedBy,
+            request.processedBy,
+            request.reason.trim(),
+        )
+        jdbcTemplate.update(
+            """
+            UPDATE folio_payments
+            SET is_reversed = true,
+                updated_at = now()
+            WHERE tenant_id = ? AND id = ?
+            """.trimIndent(),
+            tenantId,
+            original.paymentId,
+        )
+        recalculateFolio(original.folioId)
+        recordSideEffects(
+            tenantId = tenantId,
+            propertyId = propertyId,
+            action = "billing.payment.reversed",
+            eventType = "billing.payment.reversed",
+            aggregateType = "folio_payments",
+            aggregateId = reversalPaymentId,
+            payload = mapOf(
+                "propertyId" to propertyId,
+                "folioId" to original.folioId,
+                "originalPaymentId" to original.paymentId,
+                "reversalPaymentId" to reversalPaymentId,
+                "amount" to original.amount,
+                "reason" to request.reason.trim(),
+            ),
+            idempotencyKeyId = idempotencyKeyId,
+            destination = OutboxDestination.PLATFORM,
+        )
+        return reversalPaymentId
     }
 
     override fun checkoutFinancialState(
@@ -361,34 +472,6 @@ class BillingService(
         }
     }
 
-    override fun postPayment(
-        propertyId: UUID,
-        folioId: UUID,
-        request: PostPaymentRequest,
-    ): BillingMutationReceipt {
-        return mutate(
-            propertyId = propertyId,
-            operationType = "billing.payment.post",
-            requestPayload = mapOf("folioId" to folioId, "request" to request),
-            resourceType = "folio_payments",
-            replayType = BillingMutationReceipt::class.java,
-        ) { actor, idempotencyKeyId ->
-            val paymentId = postConfirmedPayment(
-                tenantId = actor.tenantId,
-                propertyId = propertyId,
-                request = ConfirmedPaymentRequest(
-                    folioId = folioId,
-                    paymentMethod = request.paymentMethod,
-                    amount = request.amount,
-                    referenceNumber = request.referenceNumber,
-                    notes = request.notes,
-                ),
-                idempotencyKeyId = idempotencyKeyId,
-            )
-            BillingMutationReceipt(propertyId, folioId, "folio_payments", paymentId, changed = true, replayed = false)
-        }
-    }
-
     override fun reverseCharge(
         propertyId: UUID,
         folioId: UUID,
@@ -404,32 +487,113 @@ class BillingService(
         ) { actor, idempotencyKeyId ->
             requireFolio(actor.tenantId, propertyId, folioId, lock = true)
             val reason = request.reason.normalizedRequired("reason")
-            val rows = jdbcTemplate.update(
+            val original = jdbcTemplate.query(
                 """
-                UPDATE folio_charges
-                SET status = 'REVERSED',
-                    is_reversed = true,
-                    void_reason = ?,
-                    voided_by = ?,
-                    voided_at = now(),
-                    updated_at = now()
-                WHERE tenant_id = ?
-                  AND property_id = ?
-                  AND folio_id = ?
-                  AND id = ?
-                  AND status = 'POSTED'
-                  AND deleted_at IS NULL
+                SELECT revenue_center_id, charge_type, description, source_type,
+                       source_id, quantity, unit_price, subtotal, tax_rate,
+                       tax_amount, amount
+                FROM folio_charges fc
+                WHERE fc.tenant_id = ?
+                  AND fc.property_id = ?
+                  AND fc.folio_id = ?
+                  AND fc.id = ?
+                  AND fc.status = 'POSTED'
+                  AND fc.is_reversed = false
+                  AND fc.reversal_of IS NULL
+                  AND fc.deleted_at IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM folio_charges reversal
+                      WHERE reversal.tenant_id = fc.tenant_id
+                        AND reversal.reversal_of = fc.id
+                  )
+                FOR UPDATE
                 """.trimIndent(),
-                reason,
-                actor.tenantUserId,
+                { rs, _ ->
+                    ReversibleCharge(
+                        revenueCenterId = rs.getObject("revenue_center_id", UUID::class.java),
+                        chargeType = rs.getString("charge_type"),
+                        description = rs.getString("description"),
+                        sourceType = rs.getString("source_type"),
+                        sourceId = rs.getObject("source_id", UUID::class.java),
+                        quantity = rs.getBigDecimal("quantity"),
+                        unitPrice = rs.getBigDecimal("unit_price"),
+                        subtotal = rs.getBigDecimal("subtotal"),
+                        taxRate = rs.getBigDecimal("tax_rate"),
+                        taxAmount = rs.getBigDecimal("tax_amount"),
+                        amount = rs.getBigDecimal("amount"),
+                    )
+                },
                 actor.tenantId,
                 propertyId,
                 folioId,
                 chargeId,
+            ).singleOrNull() ?: throw BillingNotFoundException(
+                "Unreversed posted folio charge was not found",
             )
-            if (rows == 0) {
-                throw BillingNotFoundException("Posted folio charge was not found")
-            }
+            val reversalId = UUID.randomUUID()
+            jdbcTemplate.update(
+                """
+                INSERT INTO folio_charges (
+                    id, tenant_id, property_id, folio_id, revenue_center_id,
+                    charge_type, description, source_type, source_id, quantity,
+                    unit_price, subtotal, tax_rate, tax_amount, amount, posted_by,
+                    status, is_reversed, reversal_of, void_reason, voided_by,
+                    voided_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        'POSTED', true, ?, ?, ?, now())
+                """.trimIndent(),
+                reversalId,
+                actor.tenantId,
+                propertyId,
+                folioId,
+                original.revenueCenterId,
+                original.chargeType,
+                "Reversal: ${original.description}",
+                original.sourceType,
+                original.sourceId,
+                original.quantity.negate(),
+                original.unitPrice,
+                original.subtotal.negate(),
+                original.taxRate,
+                original.taxAmount.negate(),
+                original.amount.negate(),
+                actor.tenantUserId,
+                chargeId,
+                reason,
+                actor.tenantUserId,
+            )
+            jdbcTemplate.update(
+                """
+                INSERT INTO folio_charge_taxes (
+                    id, tenant_id, folio_charge_id, tax_rate_id,
+                    tax_type, rate, taxable_amount, tax_amount
+                )
+                SELECT gen_random_uuid(), tenant_id, ?, tax_rate_id,
+                       tax_type, rate, -taxable_amount, -tax_amount
+                FROM folio_charge_taxes
+                WHERE tenant_id = ? AND folio_charge_id = ?
+                """.trimIndent(),
+                reversalId,
+                actor.tenantId,
+                chargeId,
+            )
+            jdbcTemplate.update(
+                """
+                UPDATE folio_charges
+                SET is_reversed = true,
+                    void_reason = ?,
+                    voided_by = ?,
+                    voided_at = now(),
+                    updated_at = now()
+                WHERE tenant_id = ? AND id = ?
+                """.trimIndent(),
+                reason,
+                actor.tenantUserId,
+                actor.tenantId,
+                chargeId,
+            )
             recalculateFolio(folioId)
             recordSideEffects(
                 tenantId = actor.tenantId,
@@ -437,12 +601,18 @@ class BillingService(
                 action = "billing.charge.reversed",
                 eventType = "billing.charge.reversed",
                 aggregateType = FOLIO_CHARGES,
-                aggregateId = chargeId,
-                payload = mapOf("propertyId" to propertyId, "folioId" to folioId, "chargeId" to chargeId),
+                aggregateId = reversalId,
+                payload = mapOf(
+                    "propertyId" to propertyId,
+                    "folioId" to folioId,
+                    "chargeId" to chargeId,
+                    "reversalChargeId" to reversalId,
+                    "reason" to reason,
+                ),
                 idempotencyKeyId = idempotencyKeyId,
                 destination = OutboxDestination.PLATFORM,
             )
-            BillingMutationReceipt(propertyId, folioId, FOLIO_CHARGES, chargeId, changed = true, replayed = false)
+            BillingMutationReceipt(propertyId, folioId, FOLIO_CHARGES, reversalId, changed = true, replayed = false)
         }
     }
 
@@ -596,6 +766,9 @@ class BillingService(
             "dueDateDays must not be negative"
         }
         val folio = requireFolio(actor.tenantId, propertyId, folioId, lock = true)
+        require(folio.totalPaid.money() == folio.totalAmount.money()) {
+            "Invoice can be issued only after the folio is fully settled"
+        }
         val existing = jdbcTemplate.query(
             """
             SELECT id, folio_id, property_id, invoice_number_formatted, subtotal, vat_total,
@@ -1180,6 +1353,30 @@ class BillingService(
         val createdBy: UUID?,
     )
 
+    private data class ReversibleCharge(
+        val revenueCenterId: UUID?,
+        val chargeType: String,
+        val description: String,
+        val sourceType: String?,
+        val sourceId: UUID?,
+        val quantity: BigDecimal,
+        val unitPrice: BigDecimal,
+        val subtotal: BigDecimal,
+        val taxRate: BigDecimal,
+        val taxAmount: BigDecimal,
+        val amount: BigDecimal,
+    )
+
+    private data class PaymentReversalSource(
+        val paymentId: UUID,
+        val folioId: UUID,
+        val paymentMethod: String,
+        val amount: BigDecimal,
+        val cashSessionId: UUID?,
+        val status: String,
+        val reversed: Boolean,
+    )
+
     companion object {
         const val FOLIOS = "folios"
         const val FOLIO_CHARGES = "folio_charges"
@@ -1242,9 +1439,5 @@ private fun BigDecimal.requireRate(field: String): BigDecimal {
 }
 
 private fun DataIntegrityViolationException.publicDatabaseMessage(): String {
-    return mostSpecificCause.message
-        ?.lineSequence()
-        ?.firstOrNull()
-        ?.take(240)
-        ?: "Billing request violates a database constraint"
+    return "Billing request conflicts with existing financial data"
 }

@@ -51,10 +51,10 @@ class NightAuditService(
             resourceType = NIGHT_AUDIT_RUNS,
             replayType = NightAuditRunResponse::class.java,
         ) { actor, idempotencyKeyId ->
-            val auditDate = request.auditDate ?: LocalDate.now()
-            val runId = upsertRun(actor, propertyId, auditDate)
-            jdbcTemplate.update("DELETE FROM night_audit_issues WHERE tenant_id = ? AND run_id = ?", actor.tenantId, runId)
-            val issues = collectIssues(actor.tenantId, propertyId, runId)
+            val auditDate = request.auditDate
+                ?: propertyBusinessDate(actor.tenantId, propertyId)
+            val runId = createRun(actor, propertyId, auditDate)
+            val issues = collectIssues(actor.tenantId, propertyId, runId, auditDate)
             issues.forEach { issue ->
                 jdbcTemplate.update(
                     """
@@ -131,7 +131,7 @@ class NightAuditService(
         return read(propertyId) { actor ->
             jdbcTemplate.query(
                 """
-                SELECT id, tenant_id, property_id, audit_date, status, started_at,
+                SELECT id, tenant_id, property_id, audit_date, attempt_no, status, started_at,
                        completed_at, run_by, COALESCE(summary, '{}'::jsonb)::text AS summary
                 FROM night_audit_runs
                 WHERE tenant_id = ?
@@ -152,41 +152,62 @@ class NightAuditService(
         }
     }
 
-    private fun upsertRun(
+    private fun createRun(
         actor: TenantActor,
         propertyId: UUID,
         auditDate: LocalDate,
     ): UUID {
+        jdbcTemplate.queryForList(
+            "SELECT pg_advisory_xact_lock(hashtextextended(?::text, 0))",
+            "$propertyId:$auditDate",
+        )
+        val latest = jdbcTemplate.query(
+            """
+            SELECT status, attempt_no
+            FROM night_audit_runs
+            WHERE tenant_id = ?
+              AND property_id = ?
+              AND audit_date = ?
+            ORDER BY attempt_no DESC
+            LIMIT 1
+            FOR UPDATE
+            """.trimIndent(),
+            { rs, _ -> rs.getString("status") to rs.getInt("attempt_no") },
+            actor.tenantId,
+            propertyId,
+            auditDate,
+        ).singleOrNull()
+        require(latest?.first != "completed") {
+            "Night audit is already completed for $auditDate"
+        }
+        require(latest?.first != "running") {
+            "Night audit is already running for $auditDate"
+        }
+
         val runId = UUID.randomUUID()
-        return jdbcTemplate.query(
+        jdbcTemplate.update(
             """
             INSERT INTO night_audit_runs (
-                id, tenant_id, property_id, audit_date, status, started_at, run_by
+                id, tenant_id, property_id, audit_date, attempt_no,
+                status, started_at, run_by
             )
-            VALUES (?, ?, ?, ?, 'running', now(), ?)
-            ON CONFLICT (property_id, audit_date)
-            DO UPDATE SET
-                status = 'running',
-                started_at = now(),
-                completed_at = NULL,
-                run_by = EXCLUDED.run_by,
-                error_message = NULL,
-                updated_at = now()
-            RETURNING id
+            VALUES (?, ?, ?, ?, ?, 'running', now(), ?)
             """.trimIndent(),
-            { rs, _ -> rs.getObject("id", UUID::class.java) },
             runId,
             actor.tenantId,
             propertyId,
             auditDate,
+            (latest?.second ?: 0) + 1,
             actor.tenantUserId,
-        ).single()
+        )
+        return runId
     }
 
     private fun collectIssues(
         tenantId: UUID,
         propertyId: UUID,
         runId: UUID,
+        auditDate: LocalDate,
     ): List<NightAuditIssueDraft> {
         val issues = mutableListOf<NightAuditIssueDraft>()
         addCountIssue(
@@ -322,10 +343,11 @@ class NightAuditService(
                 WHERE s.tenant_id = ?
                   AND r.property_id = ?
                   AND s.status = 'checked_in'
-                  AND r.check_out_date < CURRENT_DATE
+                  AND r.check_out_date < ?
                 """.trimIndent(),
                 tenantId,
                 propertyId,
+                auditDate,
             ),
             runId = runId,
             code = "overdue_checked_in_stays",
@@ -333,6 +355,19 @@ class NightAuditService(
             blocking = false,
         )
         return issues
+    }
+
+    private fun propertyBusinessDate(tenantId: UUID, propertyId: UUID): LocalDate {
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT ((now() AT TIME ZONE timezone)::date + business_date_offset)
+            FROM properties
+            WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL
+            """.trimIndent(),
+            LocalDate::class.java,
+            tenantId,
+            propertyId,
+        ) ?: throw NightAuditNotFoundException("Property was not found")
     }
 
     private fun addCountIssue(
@@ -374,7 +409,7 @@ class NightAuditService(
     ): NightAuditRunResponse? {
         return jdbcTemplate.query(
             """
-            SELECT id, tenant_id, property_id, audit_date, status, started_at,
+            SELECT id, tenant_id, property_id, audit_date, attempt_no, status, started_at,
                    completed_at, run_by, COALESCE(summary, '{}'::jsonb)::text AS summary
             FROM night_audit_runs
             WHERE tenant_id = ?
@@ -397,6 +432,7 @@ class NightAuditService(
             tenantId = tenantId,
             propertyId = propertyId,
             auditDate = rs.getObject("audit_date", LocalDate::class.java),
+            attemptNo = rs.getInt("attempt_no"),
             status = rs.getString("status"),
             startedAt = rs.getTimestamp("started_at")?.toInstant(),
             completedAt = rs.getTimestamp("completed_at")?.toInstant(),
@@ -530,9 +566,5 @@ class NightAuditService(
 }
 
 private fun DataIntegrityViolationException.publicDatabaseMessage(): String {
-    return mostSpecificCause.message
-        ?.lineSequence()
-        ?.firstOrNull()
-        ?.take(240)
-        ?: "Night audit request violates a database constraint"
+    return "Night-audit request conflicts with existing operational data"
 }

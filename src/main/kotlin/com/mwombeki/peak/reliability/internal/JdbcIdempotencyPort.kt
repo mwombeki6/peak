@@ -10,6 +10,7 @@ import com.mwombeki.peak.shared.context.RequestIdentity
 import java.sql.ResultSet
 import java.sql.Timestamp
 import java.time.Clock
+import java.time.Instant
 import java.util.UUID
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.JdbcTemplate
@@ -139,10 +140,12 @@ class JdbcIdempotencyPort(
         val rows = if (tenantId == null) {
             jdbcTemplate.query(
                 """
-                SELECT id, request_hash, status, response_code, response_body::text AS response_body
+                SELECT id, request_hash, status, response_code,
+                       response_body::text AS response_body, expires_at
                 FROM idempotency_keys
                 WHERE tenant_id IS NULL
                   AND idempotency_key = ?
+                  AND status <> 'expired'
                 FOR UPDATE
                 """.trimIndent(),
                 ::mapExisting,
@@ -151,10 +154,12 @@ class JdbcIdempotencyPort(
         } else {
             jdbcTemplate.query(
                 """
-                SELECT id, request_hash, status, response_code, response_body::text AS response_body
+                SELECT id, request_hash, status, response_code,
+                       response_body::text AS response_body, expires_at
                 FROM idempotency_keys
                 WHERE tenant_id = ?
                   AND idempotency_key = ?
+                  AND status <> 'expired'
                 FOR UPDATE
                 """.trimIndent(),
                 ::mapExisting,
@@ -163,7 +168,22 @@ class JdbcIdempotencyPort(
             )
         }
 
-        return rows.singleOrNull()
+        val existing = rows.singleOrNull() ?: return null
+        if (!existing.expiresAt.isAfter(clock.instant())) {
+            jdbcTemplate.update(
+                """
+                UPDATE idempotency_keys
+                SET status = 'expired',
+                    locked_at = NULL,
+                    updated_at = now()
+                WHERE id = ?
+                  AND status <> 'expired'
+                """.trimIndent(),
+                existing.id,
+            )
+            return null
+        }
+        return existing
     }
 
     @Suppress("UNUSED_PARAMETER")
@@ -176,6 +196,7 @@ class JdbcIdempotencyPort(
             },
             responseCode = rs.getObject("response_code") as Int?,
             responseBody = rs.getString("response_body"),
+            expiresAt = rs.getTimestamp("expires_at").toInstant(),
         )
     }
 
@@ -235,6 +256,7 @@ class JdbcIdempotencyPort(
         val status: IdempotencyStatus,
         val responseCode: Int?,
         val responseBody: String?,
+        val expiresAt: Instant,
     )
 
     private data class ActorScope(

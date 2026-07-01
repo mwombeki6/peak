@@ -1,41 +1,15 @@
 # Integrations Module
 
-Integrations owns public booking sessions and external provider handoffs. It
-also implements the NIDA verification adapter contract owned by reservations.
-It does not own guest identity records, tenant onboarding, platform governance,
-user management, or provider settlement accounting.
+Integrations owns external identity-provider adapters. It currently implements
+the NIDA verification adapter contract owned by reservations. It does not own
+guest identity records, tenant onboarding, platform governance, user
+management, payments, fiscalization, or settlement accounting.
 
-## Public API
+## V1 Boundary
 
-- `POST /api/v1/public/properties/{propertyId}/booking-engine/sessions`
-- `POST /api/v1/public/properties/{propertyId}/booking-engine/payments/initiate`
-
-Public routes derive tenant and property scope from the URL property id through the database function `resolve_public_property_scope`. Do not trust tenant or property ids from public headers or request bodies.
-
-## Security Model
-
-- Public booking and payment routes are guarded by `module_access_matrix` with `route_scope=public_property`.
-- Property access requires an active tenant, active property, and enabled public module access.
-- Payment initiation must use `Idempotency-Key` for duplicate-charge protection.
-- Provider credentials must come from environment or a secrets manager, never source files.
-- Production API startup fails unless at least one payment provider is configured with HTTPS and non-placeholder credentials.
-
-## Persistence
-
-- Public module access is resolved first while the database session is still public/unbound.
-- Booking sessions and payment transactions are written inside transactions after `DatabaseSessionContext` binds the resolved tenant.
-- External payment calls should be isolated behind provider adapters and must not leak provider-specific models through the public API.
-- Provider callbacks must verify signatures, timestamps, and replay windows before mutating payment state.
-
-## Production Rules
-
-1. Keep public route scope URL-derived.
-2. Keep provider secrets out of Git and application YAML defaults.
-3. Treat every provider command as idempotent.
-4. Emit audit and outbox events for externally visible state changes.
-5. Keep provider calls timeout-bound and retry only through explicit, observable policies.
-6. Do not bind tenant DB context before calling public module-resolution functions.
-7. Reject public booking or payment requests when tenant, property, tenant module, or property module access is disabled.
+The public Booking Engine is outside V1 and has no controller or route
+permission. Its existing schema is dormant for a later phase. Payment and
+fiscal provider workflows live in their dedicated business modules.
 
 ## NIDA Verification
 

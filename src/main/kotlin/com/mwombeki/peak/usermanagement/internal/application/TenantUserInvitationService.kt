@@ -13,6 +13,7 @@ import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.shared.secrets.SecretEnvelopeService
 import com.mwombeki.peak.usermanagement.api.AcceptTenantUserInvitationCommand
 import com.mwombeki.peak.usermanagement.api.InviteTenantUserCommand
 import com.mwombeki.peak.usermanagement.api.TenantUserInvitationAcceptanceReceipt
@@ -44,6 +45,8 @@ class TenantUserInvitationService(
     private val outboxPort: OutboxPort,
     private val transactionTemplate: TransactionTemplate,
     private val objectMapper: ObjectMapper,
+    private val secretEnvelopeService: SecretEnvelopeService,
+    private val invitationSecurityProperties: TenantInvitationSecurityProperties,
     private val clock: Clock = Clock.systemUTC(),
 ) : TenantUserInvitationPort {
     override fun inviteTenantUser(command: InviteTenantUserCommand): TenantUserInvitationReceipt {
@@ -177,6 +180,10 @@ class TenantUserInvitationService(
                     "email" to command.email,
                     "fullName" to command.fullName,
                     "expiresAt" to expiresAt.toString(),
+                    "tokenEnvelope" to secretEnvelopeService.encrypt(
+                        plaintext = token,
+                        associatedData = invitationId.toString(),
+                    ),
                 ),
                 idempotencyKeyId = idempotencyKeyId,
                 priority = 4,
@@ -190,7 +197,12 @@ class TenantUserInvitationService(
             resourceId = invitationId,
         )
 
-        return snapshot.toReceipt(invitationToken = token, replayed = false)
+        return snapshot.toReceipt(
+            invitationToken = token.takeIf {
+                invitationSecurityProperties.exposeTokenInResponse
+            },
+            replayed = false,
+        )
     }
 
     private fun replayInvitation(
@@ -267,7 +279,7 @@ class TenantUserInvitationService(
             )
         } catch (ex: DataAccessException) {
             throw TenantUserInvitationAcceptanceRejectedException(
-                ex.mostSpecificCause.message ?: "Invitation acceptance was rejected",
+                "Invitation acceptance was rejected",
             )
         }
 

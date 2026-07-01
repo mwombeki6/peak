@@ -12,6 +12,8 @@ data class PropertyResponse(
     val status: String,
     val isActive: Boolean,
     val totalRooms: Int,
+    val timezone: String,
+    val businessDateOffset: Int,
 )
 
 data class CreatePropertyRequest(
@@ -19,6 +21,8 @@ data class CreatePropertyRequest(
     val location: String? = null,
     val code: String? = null,
     val type: String = "HOTEL",
+    val timezone: String = "Africa/Dar_es_Salaam",
+    val businessDateOffset: Int = 0,
 )
 
 data class UpdatePropertyRequest(
@@ -26,6 +30,8 @@ data class UpdatePropertyRequest(
     val location: String? = null,
     val code: String? = null,
     val type: String? = null,
+    val timezone: String? = null,
+    val businessDateOffset: Int? = null,
 )
 
 data class PropertyMutationReceipt(

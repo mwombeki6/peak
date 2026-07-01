@@ -2,6 +2,7 @@ package com.mwombeki.peak.shared.config
 
 import com.mwombeki.peak.shared.context.RequestContextProperties
 import com.mwombeki.peak.shared.security.HttpSecurityProperties
+import com.mwombeki.peak.shared.secrets.SecretReferenceResolver
 import org.springframework.beans.factory.SmartInitializingSingleton
 import org.springframework.core.env.Environment
 import org.springframework.stereotype.Component
@@ -12,6 +13,7 @@ class ProductionReadinessValidator(
     private val runtimeProperties: PeakRuntimeProperties,
     private val httpSecurityProperties: HttpSecurityProperties,
     private val requestContextProperties: RequestContextProperties,
+    private val secretReferenceResolver: SecretReferenceResolver,
 ) : SmartInitializingSingleton {
 
     override fun afterSingletonsInstantiated() {
@@ -38,6 +40,24 @@ class ProductionReadinessValidator(
             requireTrue(!requestContextProperties.allowTrustedJwtIdentityClaims) {
                 "peak.security.request-context.allow-trusted-jwt-identity-claims must be false in prod"
             }
+            requireTrue(
+                environment.getProperty(
+                    "peak.security.route-guard.enabled",
+                    Boolean::class.java,
+                    true,
+                ),
+            ) {
+                "peak.security.route-guard.enabled must be true in prod"
+            }
+            requireTrue(
+                environment.getProperty(
+                    "peak.security.route-guard.deny-unregistered-api-routes",
+                    Boolean::class.java,
+                    true,
+                ),
+            ) {
+                "peak.security.route-guard.deny-unregistered-api-routes must be true in prod"
+            }
             requireTrue(!springDocEnabled("springdoc.api-docs.enabled")) {
                 "springdoc.api-docs.enabled must be false in prod"
             }
@@ -48,6 +68,17 @@ class ProductionReadinessValidator(
             validateFlyway()
             validateRuntimeTopology()
             validateCommunicationProviders()
+            validateSecretEnvelope()
+            validateOutboundProviderHosts()
+            requireTrue(
+                !environment.getProperty(
+                    "peak.communication.invitation.expose-token-in-response",
+                    Boolean::class.java,
+                    false,
+                ),
+            ) {
+                "peak.communication.invitation.expose-token-in-response must be false in prod"
+            }
         }
 
         if (violations.isNotEmpty()) {
@@ -112,6 +143,22 @@ class ProductionReadinessValidator(
                 }
                 requireTrue(webApplicationType != WEB_APPLICATION_TYPE_NONE) {
                     "spring.main.web-application-type must not be none for API runtime in prod"
+                }
+                requireTrue(
+                    environment.getProperty("server.forward-headers-strategy")
+                        ?.trim()
+                        ?.lowercase() == FORWARD_HEADERS_NATIVE,
+                ) {
+                    "server.forward-headers-strategy must be native for API runtime in prod"
+                }
+                requireTrue(
+                    environment.getProperty(
+                        "peak.reliability.outbox.worker.health-required",
+                        Boolean::class.java,
+                        false,
+                    ),
+                ) {
+                    "peak.reliability.outbox.worker.health-required must be true for API runtime in prod"
                 }
                 validateRealtimeWebSocketOrigins()
             }
@@ -214,6 +261,68 @@ class ProductionReadinessValidator(
         }
     }
 
+    private fun MutableList<String>.validateSecretEnvelope() {
+        if (runtimeProperties.mode !in setOf(PeakRuntimeMode.API, PeakRuntimeMode.WORKER)) {
+            return
+        }
+        val keyReference = environment.getProperty("peak.security.envelope.key-reference")
+        requireTrue(keyReference?.startsWith("env:") == true) {
+            "peak.security.envelope.key-reference must use an environment-backed secret in prod"
+        }
+        if (keyReference?.startsWith("env:") == true) {
+            try {
+                secretReferenceResolver.validate(keyReference)
+            } catch (ex: RuntimeException) {
+                add("peak.security.envelope.key-reference cannot be resolved")
+            }
+        }
+        val previousKeyReference = environment.getProperty(
+            "peak.security.envelope.previous-key-reference",
+        )
+        if (!previousKeyReference.isNullOrBlank()) {
+            requireTrue(previousKeyReference.startsWith("env:")) {
+                "peak.security.envelope.previous-key-reference must use an environment-backed secret in prod"
+            }
+            requireTrue(previousKeyReference != keyReference) {
+                "current and previous envelope key references must differ"
+            }
+            if (previousKeyReference.startsWith("env:")) {
+                try {
+                    secretReferenceResolver.validate(previousKeyReference)
+                } catch (ex: RuntimeException) {
+                    add("peak.security.envelope.previous-key-reference cannot be resolved")
+                }
+            }
+        }
+        if (runtimeProperties.mode == PeakRuntimeMode.WORKER) {
+            val acceptanceUrl = environment.getProperty(
+                "peak.communication.invitation.acceptance-base-url",
+            )
+            requireTrue(acceptanceUrl?.startsWith("https://") == true) {
+                "peak.communication.invitation.acceptance-base-url must use https in prod"
+            }
+        }
+    }
+
+    private fun MutableList<String>.validateOutboundProviderHosts() {
+        if (runtimeProperties.mode !in setOf(PeakRuntimeMode.API, PeakRuntimeMode.WORKER)) {
+            return
+        }
+        val hosts = configuredList("peak.security.outbound.allowed-provider-hosts")
+        requireTrue(hosts.isNotEmpty()) {
+            "peak.security.outbound.allowed-provider-hosts is required for API/worker runtime in prod"
+        }
+        requireTrue(
+            hosts.all { host ->
+                OUTBOUND_HOST_PATTERN.matches(host.lowercase()) &&
+                        !host.equals("localhost", ignoreCase = true) &&
+                        !host.endsWith(".local", ignoreCase = true)
+            },
+        ) {
+            "peak.security.outbound.allowed-provider-hosts must contain exact external DNS hostnames"
+        }
+    }
+
     private fun String?.isDefaultLocalSecret(): Boolean {
         return this == LOCAL_MIGRATOR_USER || this == "peak_app" || this == "peak_worker"
     }
@@ -255,5 +364,10 @@ class ProductionReadinessValidator(
         const val ACCEPTANCE_PROFILE = "acceptance"
         const val LOCAL_MIGRATOR_USER = "peak_migrator"
         const val WEB_APPLICATION_TYPE_NONE = "none"
+        const val FORWARD_HEADERS_NATIVE = "native"
+        val OUTBOUND_HOST_PATTERN = Regex(
+            "^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+" +
+                    "[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+        )
     }
 }

@@ -32,7 +32,7 @@ The Communication Module provides infrastructure for multi-channel tenant notifi
 ### Notifications
 | Method | Endpoint | Description | Roles |
 |--------|----------|-------------|-------|
-| POST | `/api/v1/communication/notifications` | Enqueue a tenant or property notification and create a delivery request | `communications.send` |
+| POST | `/api/v1/communication/notifications` | Enqueue to a verified database contact channel for a consent purpose | `communications.send` |
 | GET | `/api/v1/communication/delivery-requests` | List recent tenant delivery requests | `communications.view` |
 | GET | `/api/v1/communication/delivery-requests/{id}` | Get delivery request status | `communications.view` |
 | GET | `/api/v1/communication/delivery-requests/{id}/attempts` | List provider delivery attempts | `communications.view` |
@@ -51,9 +51,16 @@ The module stages notifications through the shared `reliability::api` `OutboxPor
 2. **Worker**: Worker runtime is owned by the Reliability module and is enabled only in `peak.runtime.mode=worker`.
 3. **Delivery**: `NotificationOutboxHandler` handles `notification` destination events, creates provider attempts, updates `communication_delivery_requests`, and records operational metrics.
 4. **Completion**: The Reliability module owns claim locking, retry, timeout, metrics, and dead-letter state transitions.
-5. **Provider adapters**: `NotificationDeliveryProvider` isolates provider integrations from delivery state management. The default local provider accepts messages for development and tests; production providers should be configured without placing credentials in YAML defaults.
+5. **Provider adapters**: `NotificationDeliveryProvider` isolates provider integrations from delivery state management. The default local provider accepts messages for development and tests; production providers must be configured without placing credentials in YAML defaults.
 
 Production uses the HTTP provider adapter with credentials supplied through secrets/environment configuration. The local provider is rejected by production validation. Provider payloads, raw addresses, message bodies, and verification tokens are excluded from platform-operation logs.
+
+Normal notification requests cannot supply an arbitrary recipient. The service
+resolves the target from `contactChannelId`, requires an active verified
+channel and the latest active purpose-specific consent, and validates template
+variables against the exact template contract. The worker repeats those checks
+immediately before each provider call so consent revocation or channel
+deactivation takes effect without waiting for queued work to expire.
 
 ## Data Model
 - **Tenant Contact**: Individual people associated with a tenant.

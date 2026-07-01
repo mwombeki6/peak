@@ -11,7 +11,6 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
-import kotlin.test.assertTrue
 import org.springframework.http.HttpHeaders
 import org.springframework.http.server.ServletServerHttpRequest
 import org.springframework.mock.web.MockHttpServletRequest
@@ -50,12 +49,13 @@ class WebSocketHandshakeContextResolverTests {
         val context = resolver.resolve(authenticatedRequest())
 
         assertNull(context)
-        assertTrue(
+        assertEquals(
+            1.0,
             meterRegistry.counter(
-                "realtime.websocket.handshakes.rejected",
+                "peak.realtime.websocket.handshakes.rejected",
                 "reason",
                 "tenant_identity_required",
-            ).count() == 1.0,
+            ).count(),
         )
     }
 

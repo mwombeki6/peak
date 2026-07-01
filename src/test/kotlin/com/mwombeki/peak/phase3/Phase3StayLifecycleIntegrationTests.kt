@@ -1,9 +1,16 @@
 package com.mwombeki.peak.phase3
 
 import com.mwombeki.peak.TestcontainersConfiguration
+import com.mwombeki.peak.reliability.api.OutboxDestination
+import com.mwombeki.peak.reliability.internal.OutboxWorkerProcessor
 import com.mwombeki.peak.shared.context.PeakRequestHeaders
 import java.time.LocalDate
+import java.time.Instant
+import java.nio.charset.StandardCharsets
+import java.util.HexFormat
 import java.util.UUID
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import org.hamcrest.Matchers.hasItem
@@ -36,6 +43,9 @@ class Phase3StayLifecycleIntegrationTests {
 
     @Autowired
     private lateinit var jdbcTemplate: JdbcTemplate
+
+    @Autowired
+    private lateinit var outboxWorkerProcessor: OutboxWorkerProcessor
 
     private val createdTenantIds = mutableSetOf<UUID>()
 
@@ -141,16 +151,42 @@ class Phase3StayLifecycleIntegrationTests {
             .andExpect(jsonPath("$.totalAmount").value(118.00))
             .andExpect(jsonPath("$.charges[0].chargeType").value("ROOM"))
 
+        val cashSessionId = postForId(
+            fixture = fixture,
+            path = "/api/v1/properties/${fixture.propertyId}/payments/cash-sessions",
+            idempotencyKey = "idem-cash-session-${fixture.tenantId}",
+            idField = "id",
+            json = """{"openingFloat": 0.00}""",
+        )
+
         postForId(
             fixture = fixture,
-            path = "/api/v1/properties/${fixture.propertyId}/folios/$folioId/payments",
+            path = "/api/v1/properties/${fixture.propertyId}/payments/cash",
             idempotencyKey = "idem-payment-${fixture.tenantId}",
-            idField = "resourceId",
+            idField = "id",
             json = """
                 {
-                  "paymentMethod": "cash",
-                  "amount": 118.00,
-                  "referenceNumber": "CASH-001"
+                  "folioId": "$folioId",
+                  "cashSessionId": "$cashSessionId",
+                  "amount": 118.00
+                }
+            """.trimIndent(),
+        )
+
+        postForId(
+            fixture = fixture,
+            path = "/api/v1/properties/${fixture.propertyId}/fiscal/provider-configs",
+            idempotencyKey = "idem-fiscal-config-${fixture.tenantId}",
+            idField = "id",
+            json = """
+                {
+                  "providerCode": "contract_mock",
+                  "providerName": "Contract Fiscal Provider",
+                  "environment": "sandbox",
+                  "endpointUrl": "https://fiscal.test.invalid",
+                  "secretRef": "literal:fiscal-test-secret",
+                  "taxpayerIdentifier": "TIN-${fixture.tenantId.toString().take(8)}",
+                  "isDefault": true
                 }
             """.trimIndent(),
         )
@@ -162,10 +198,32 @@ class Phase3StayLifecycleIntegrationTests {
             idField = "id",
             json = """{"dueDateDays": 0}""",
         )
+        outboxWorkerProcessor.processBatchBlocking(OutboxDestination.FISCAL)
+        mockMvc.perform(
+            get("/api/v1/properties/${fixture.propertyId}/fiscal/receipts")
+                .secureJson()
+                .headersFor(fixture, "corr-fiscal-receipts"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$[0].invoiceId").value(invoiceId.toString()))
+            .andExpect(jsonPath("$[0].status").value("accepted"))
 
         mockMvc.perform(
-            post("/api/v1/properties/${fixture.propertyId}/checkouts/$stayId/fiscal-override")
-                .secureJson("""{"reason": "Fiscal provider simulator unavailable in Engineer A test slice"}""")
+            post("/api/v1/properties/${fixture.propertyId}/payments/cash-sessions/$cashSessionId/close")
+                .secureJson("""{"actualCash": 118.00}""")
+                .headersFor(
+                    fixture,
+                    "corr-cash-session-close",
+                    "idem-cash-session-close-${fixture.tenantId}",
+                ),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.status").value("closed"))
+            .andExpect(jsonPath("$.variance").value(0.00))
+
+        mockMvc.perform(
+            post("/api/v1/properties/${fixture.propertyId}/checkouts/$stayId")
+                .secureJson("{}")
                 .headersFor(fixture, "corr-checkout", "idem-checkout-${fixture.tenantId}"),
         )
             .andExpect(status().isOk)
@@ -194,8 +252,244 @@ class Phase3StayLifecycleIntegrationTests {
                 .headersFor(fixture, "corr-night-audit", "idem-night-audit-${fixture.tenantId}"),
         )
             .andExpect(status().isOk)
-            .andExpect(jsonPath("$.status").value("failed"))
-            .andExpect(jsonPath("$.issues[*].issueCode", hasItem("invoices_missing_accepted_fiscal_receipt")))
+            .andExpect(jsonPath("$.status").value("completed"))
+            .andExpect(jsonPath("$.issues.length()").value(0))
+    }
+
+    @Test
+    fun recordsManualMobileMoneyAndCreatesAppendOnlyCashReversal() {
+        val fixture = phase3Fixture()
+        insertAuthorizedFixture(fixture)
+        val folioId = UUID.randomUUID()
+        val chargeId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO folios (id, tenant_id, property_id, folio_type, status)
+            VALUES (?, ?, ?, 'guest', 'open')
+            """.trimIndent(),
+            folioId,
+            fixture.tenantId,
+            fixture.propertyId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO folio_charges (
+                id, tenant_id, property_id, folio_id, charge_type, description,
+                quantity, unit_price, subtotal, tax_rate, tax_amount, amount,
+                posted_by, status
+            )
+            VALUES (?, ?, ?, ?, 'MISC', 'Payment workflow test', 1, 200, 200, 0, 0, 200, ?, 'POSTED')
+            """.trimIndent(),
+            chargeId,
+            fixture.tenantId,
+            fixture.propertyId,
+            folioId,
+            fixture.tenantUserId,
+        )
+        jdbcTemplate.queryForList("SELECT recalculate_folio_totals(?)", folioId)
+
+        val providerAccountId = postForId(
+            fixture = fixture,
+            path = "/api/v1/properties/${fixture.propertyId}/payments/provider-accounts",
+            idempotencyKey = "idem-payment-provider-${fixture.tenantId}",
+            idField = "id",
+            json = """
+                {
+                  "providerCode": "contract_mock",
+                  "providerName": "Contract Payment Provider",
+                  "accountName": "Manual Reference Account",
+                  "merchantId": "MERCHANT-001",
+                  "secretRef": "literal:payment-test-secret",
+                  "webhookSecretRef": "literal:webhook-test-secret",
+                  "isDefault": true
+                }
+            """.trimIndent(),
+        )
+        val manualTransactionId = postForId(
+            fixture = fixture,
+            path = "/api/v1/properties/${fixture.propertyId}/payments/mobile-money/manual-reference",
+            idempotencyKey = "idem-manual-payment-${fixture.tenantId}",
+            idField = "id",
+            json = """
+                {
+                  "folioId": "$folioId",
+                  "providerAccountId": "$providerAccountId",
+                  "referenceNumber": "MANUAL-${fixture.tenantId.toString().take(12)}",
+                  "phoneNumber": "+255712345678",
+                  "amount": 120.00
+                }
+            """.trimIndent(),
+        )
+        mockMvc.perform(
+            get("/api/v1/properties/${fixture.propertyId}/payments/transactions/$manualTransactionId")
+                .secureJson()
+                .headersFor(fixture, "corr-manual-payment-view"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.status").value("confirmed"))
+            .andExpect(jsonPath("$.providerReference").exists())
+
+        val cashSessionId = postForId(
+            fixture = fixture,
+            path = "/api/v1/properties/${fixture.propertyId}/payments/cash-sessions",
+            idempotencyKey = "idem-reversal-cash-session-${fixture.tenantId}",
+            idField = "id",
+            json = """{"openingFloat": 100.00}""",
+        )
+        val cashTransactionId = postForId(
+            fixture = fixture,
+            path = "/api/v1/properties/${fixture.propertyId}/payments/cash",
+            idempotencyKey = "idem-reversal-cash-${fixture.tenantId}",
+            idField = "id",
+            json = """
+                {
+                  "folioId": "$folioId",
+                  "cashSessionId": "$cashSessionId",
+                  "amount": 80.00
+                }
+            """.trimIndent(),
+        )
+        val reversalId = postForId(
+            fixture = fixture,
+            path = "/api/v1/properties/${fixture.propertyId}/payments/transactions/$cashTransactionId/reverse",
+            idempotencyKey = "idem-cash-reversal-${fixture.tenantId}",
+            idField = "id",
+            json = """
+                {
+                  "reason": "Guest payment was entered against the wrong folio",
+                  "cashSessionId": "$cashSessionId"
+                }
+            """.trimIndent(),
+        )
+
+        mockMvc.perform(
+            get("/api/v1/properties/${fixture.propertyId}/payments/transactions/$reversalId")
+                .secureJson()
+                .headersFor(fixture, "corr-cash-reversal-view"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.transactionType").value("reversal"))
+            .andExpect(jsonPath("$.status").value("confirmed"))
+            .andExpect(jsonPath("$.reversalOfTransactionId").value(cashTransactionId.toString()))
+        kotlin.test.assertEquals(
+            0,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*)
+                FROM payment_transactions
+                WHERE tenant_id = ? AND id IN (?, ?) AND amount <= 0
+                """.trimIndent(),
+                Int::class.java,
+                fixture.tenantId,
+                cashTransactionId,
+                reversalId,
+            ),
+        )
+        kotlin.test.assertEquals(
+            java.math.BigDecimal("120.00"),
+            jdbcTemplate.queryForObject(
+                "SELECT total_paid FROM folios WHERE id = ?",
+                java.math.BigDecimal::class.java,
+                folioId,
+            ),
+        )
+        kotlin.test.assertEquals(
+            java.math.BigDecimal("100.00"),
+            jdbcTemplate.queryForObject(
+                "SELECT expected_cash FROM cash_sessions WHERE id = ?",
+                java.math.BigDecimal::class.java,
+                cashSessionId,
+            ),
+        )
+
+        val gatewayTransactionId = postForId(
+            fixture = fixture,
+            path = "/api/v1/properties/${fixture.propertyId}/payments/mobile-money",
+            idempotencyKey = "idem-gateway-payment-${fixture.tenantId}",
+            idField = "id",
+            json = """
+                {
+                  "folioId": "$folioId",
+                  "providerAccountId": "$providerAccountId",
+                  "phoneNumber": "+255712345678",
+                  "amount": 80.00
+                }
+            """.trimIndent(),
+        )
+        outboxWorkerProcessor.processBatchBlocking(OutboxDestination.PAYMENT)
+        val gatewayTransaction = jdbcTemplate.queryForMap(
+            """
+            SELECT internal_reference, provider_reference, status
+            FROM payment_transactions
+            WHERE tenant_id = ? AND id = ?
+            """.trimIndent(),
+            fixture.tenantId,
+            gatewayTransactionId,
+        )
+        kotlin.test.assertEquals("pending", gatewayTransaction["status"])
+        val webhookPayload = """
+            {
+              "internalReference": "${gatewayTransaction["internal_reference"]}",
+              "providerReference": "${gatewayTransaction["provider_reference"]}",
+              "status": "confirmed",
+              "amount": "80.00",
+              "feeAmount": "0.00",
+              "currency": "TZS",
+              "contractVersion": "1"
+            }
+        """.trimIndent()
+        val timestamp = Instant.now().epochSecond.toString()
+        val signature = hmacSha256Hex(
+            secret = "webhook-test-secret",
+            value = "$timestamp.$webhookPayload",
+        )
+        val providerEventId = "evt-${UUID.randomUUID()}"
+
+        mockMvc.perform(
+            post("/api/v1/payments/webhooks/$providerAccountId")
+                .secureJson(webhookPayload)
+                .header(PeakRequestHeaders.CORRELATION_ID, "corr-payment-webhook-invalid")
+                .header("X-Peak-Provider-Event-Id", "invalid-$providerEventId")
+                .header("X-Peak-Provider-Timestamp", timestamp)
+                .header("X-Peak-Provider-Signature", "00"),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.errorCode").value("PAYMENT_REJECTED"))
+
+        repeat(2) { attempt ->
+            mockMvc.perform(
+                post("/api/v1/payments/webhooks/$providerAccountId")
+                    .secureJson(webhookPayload)
+                    .header(PeakRequestHeaders.CORRELATION_ID, "corr-payment-webhook-$attempt")
+                    .header("X-Peak-Provider-Event-Id", providerEventId)
+                    .header("X-Peak-Provider-Timestamp", timestamp)
+                    .header("X-Peak-Provider-Signature", signature),
+            )
+                .andExpect(status().isOk)
+                .andExpect(jsonPath("$.status").value("confirmed"))
+                .andExpect(jsonPath("$.replayed").value(attempt == 1))
+        }
+        kotlin.test.assertEquals(
+            java.math.BigDecimal("200.00"),
+            jdbcTemplate.queryForObject(
+                "SELECT total_paid FROM folios WHERE id = ?",
+                java.math.BigDecimal::class.java,
+                folioId,
+            ),
+        )
+        kotlin.test.assertEquals(
+            1,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*)
+                FROM folio_payments
+                WHERE tenant_id = ? AND payment_transaction_id = ?
+                """.trimIndent(),
+                Int::class.java,
+                fixture.tenantId,
+                gatewayTransactionId,
+            ),
+        )
     }
 
     @Test
@@ -810,6 +1104,12 @@ class Phase3StayLifecycleIntegrationTests {
         return this
     }
 
+    private fun hmacSha256Hex(secret: String, value: String): String {
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(secret.toByteArray(StandardCharsets.UTF_8), "HmacSHA256"))
+        return HexFormat.of().formatHex(mac.doFinal(value.toByteArray(StandardCharsets.UTF_8)))
+    }
+
     private data class Phase3Fixture(
         val planId: UUID,
         val tenantId: UUID,
@@ -822,7 +1122,14 @@ class Phase3StayLifecycleIntegrationTests {
     )
 
     private companion object {
-        val MODULES = listOf("reservations", "frontdesk", "billing", "night_audit")
+        val MODULES = listOf(
+            "reservations",
+            "frontdesk",
+            "billing",
+            "payments",
+            "fiscal",
+            "night_audit",
+        )
         val PERMISSIONS = listOf(
             "guests.view",
             "guests.manage",
@@ -835,10 +1142,18 @@ class Phase3StayLifecycleIntegrationTests {
             "reservations.create",
             "checkin.process",
             "frontdesk.stays.view",
-            "checkout.fiscal_override",
+            "checkout.process",
             "folio.view",
-            "folio.post_payment",
             "billing.invoice",
+            "payments.view",
+            "payments.collect",
+            "payments.cash.manage",
+            "payments.configure",
+            "payments.reconcile",
+            "payments.reverse",
+            "fiscal.view",
+            "fiscal.configure",
+            "fiscal.retry",
             "night_audit.view",
             "night_audit.run",
         )

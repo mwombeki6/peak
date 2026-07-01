@@ -111,6 +111,7 @@ class RouteAccessMatrixCoverageIntegrationTests {
         return when {
             startsWith("/api/v1/platform/") -> GuardMode.PLATFORM_PERMISSION
             startsWith("/api/v1/public/properties/") -> GuardMode.MODULE_ONLY
+            startsWith("/api/v1/payments/webhooks/") -> GuardMode.PUBLIC_TOKEN
             this == "/api/v1/invitations/accept" -> GuardMode.PUBLIC_TOKEN
             startsWith("/api/v1/tenants/") -> GuardMode.STAFF_PERMISSION
             startsWith("/api/v1/properties") -> GuardMode.STAFF_PERMISSION
@@ -124,6 +125,7 @@ class RouteAccessMatrixCoverageIntegrationTests {
         return when {
             startsWith("/api/v1/platform/") -> RouteScope.PLATFORM
             startsWith("/api/v1/public/properties/") -> RouteScope.PUBLIC_PROPERTY
+            startsWith("/api/v1/payments/webhooks/") -> RouteScope.PUBLIC
             this == "/api/v1/invitations/accept" -> RouteScope.PUBLIC
             startsWith("/api/v1/tenants/") -> RouteScope.TENANT
             this == "/api/v1/properties" -> RouteScope.TENANT
@@ -178,6 +180,11 @@ class RouteAccessMatrixCoverageIntegrationTests {
             "chargeId" to UUID.fromString("77777777-7777-7777-7777-777777777785").toString(),
             "invoiceId" to UUID.fromString("77777777-7777-7777-7777-777777777786").toString(),
             "runId" to UUID.fromString("77777777-7777-7777-7777-777777777787").toString(),
+            "cashSessionId" to UUID.fromString("77777777-7777-7777-7777-777777777789").toString(),
+            "transactionId" to UUID.fromString("77777777-7777-7777-7777-777777777790").toString(),
+            "providerAccountId" to UUID.fromString("77777777-7777-7777-7777-777777777791").toString(),
+            "reconciliationId" to UUID.fromString("77777777-7777-7777-7777-777777777792").toString(),
+            "receiptId" to UUID.fromString("77777777-7777-7777-7777-777777777793").toString(),
             "contactId" to UUID.fromString("88888888-8888-8888-8888-888888888887").toString(),
             "channelId" to UUID.fromString("88888888-8888-8888-8888-888888888888").toString(),
             "deliveryRequestId" to UUID.fromString("99999999-9999-9999-9999-999999999999").toString(),

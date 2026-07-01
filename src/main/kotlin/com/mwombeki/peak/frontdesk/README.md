@@ -39,3 +39,6 @@ occupant before changing reservation, stay, or room state. A missing,
 expired, failed, or revoked adult identity, an unattested minor, or an
 occupant-count mismatch returns `RESERVATION_CONFLICT` with
 `GUEST_IDENTITY_INCOMPLETE`. No stay or occupancy mutation is committed.
+
+The assigned room must be `vacant_clean` at check-in. The transition locks the
+reservation and room rows so concurrent check-ins cannot occupy one room.
