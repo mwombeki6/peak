@@ -5,6 +5,7 @@ import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
 import org.springframework.http.HttpStatus
+import org.springframework.modulith.NamedInterface
 
 data class GuestResponse(
     val id: UUID,
@@ -31,6 +32,7 @@ data class CreateGuestRequest(
     val notes: String? = null,
 )
 
+@NamedInterface("api")
 data class CreateReservationRequest(
     val primaryGuestId: UUID,
     val roomTypeId: UUID,

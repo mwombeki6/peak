@@ -3,6 +3,7 @@ package com.mwombeki.peak.reliability.internal
 import com.mwombeki.peak.reliability.api.ClaimedOutboxEvent
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxStatus
+import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import java.time.Instant
 import java.util.UUID
@@ -13,11 +14,11 @@ import org.springframework.beans.factory.support.StaticListableBeanFactory
 
 class PlatformOperationsOutboxHandlerTests {
     @Test
-    fun `publishes platform event metric without requiring payload processing`() = runBlocking {
+    fun `publishes platform event metric without requiring payload processing`(): Unit = runBlocking {
         val registry = SimpleMeterRegistry()
         val beanFactory = StaticListableBeanFactory(mapOf("meterRegistry" to registry))
         val provider = beanFactory.getBeanProvider(
-            io.micrometer.core.instrument.MeterRegistry::class.java,
+            MeterRegistry::class.java,
         )
         val handler = PlatformOperationsOutboxHandler(provider)
         val event = platformEvent()

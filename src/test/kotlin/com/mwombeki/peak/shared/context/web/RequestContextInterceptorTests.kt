@@ -1,6 +1,5 @@
 package com.mwombeki.peak.shared.context.web
 
-import com.mwombeki.peak.shared.context.ExternalIdentityResolver
 import com.mwombeki.peak.shared.context.PeakRequestHeaders
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestContextProperties

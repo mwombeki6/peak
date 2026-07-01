@@ -25,7 +25,6 @@ import com.mwombeki.peak.usermanagement.api.PlatformIdentityLinkReceipt
 import com.mwombeki.peak.usermanagement.api.PlatformPermissionSummary
 import com.mwombeki.peak.usermanagement.api.PlatformRoleMutationReceipt
 import com.mwombeki.peak.usermanagement.api.PlatformRoleSummary
-import com.mwombeki.peak.usermanagement.api.PlatformUserLifecycleAction
 import com.mwombeki.peak.usermanagement.api.PlatformUserLifecycleCommand
 import com.mwombeki.peak.usermanagement.api.PlatformUserMutationReceipt
 import com.mwombeki.peak.usermanagement.api.PlatformUserRoleMutationReceipt

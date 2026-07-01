@@ -658,7 +658,7 @@ class OutboxService(
                     timezone,
                     deliveryFormat,
                 )
-                changed = changed || updated > 0
+                changed = updated > 0
             }
 
             val existingRecipientId = jdbcTemplate.query(
