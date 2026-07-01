@@ -48,6 +48,20 @@ ops/scripts/deploy.sh
 - Keep payment provider URLs and credentials out of checked-in YAML. Production payment providers are supplied through environment variables and must use HTTPS.
 - Reject placeholder secrets and short passwords with `ops/scripts/validate-production-env.sh`.
 - Store production secrets outside Git; `.env` is ignored and is only a local operator input file.
+- Generate `PEAK_GUEST_IDENTITY_HASH_KEY` from at least 32 cryptographically
+  random characters and retain its `PEAK_GUEST_IDENTITY_HASH_KEY_VERSION`
+  during key rotation.
+- Rotate by moving the former key/version into
+  `PEAK_GUEST_IDENTITY_PREVIOUS_HASH_KEY` and
+  `PEAK_GUEST_IDENTITY_PREVIOUS_HASH_KEY_VERSION`. Successful re-verification
+  rewrites the fingerprint with the current key; remove the previous key only
+  after outstanding documents have been re-verified.
+- Keep `PEAK_NIDA_MODE=disabled` until NIDA supplies and approves the CIG
+  sandbox contract. `simulator` and the incomplete `cig` mode fail production
+  validation.
+- While NIDA is disabled, only users with
+  `guests.identity.manual_verify` may attest a physical document. Monitor
+  `peak.guest.identity.verification` and the `nida` health contributor.
 
 ## Database Roles
 
@@ -128,4 +142,16 @@ The outbox worker emits counters tagged by destination:
 - `peak.outbox.worker.dead_lettered`
 - `peak.outbox.worker.reclaimed`
 
-Alert on sustained delivery failures, any dead-letter growth, health-check failures, database connection saturation, and Keycloak discovery/token validation errors.
+Guest identity emits:
+
+- `peak.guest.identity.verification`, tagged by provider and result.
+- `peak.guest.identity.provider.latency`, tagged by provider.
+- `peak.frontdesk.checkin.identity`, tagged `ready` or `blocked`.
+- The `nida` health contributor with mode and fallback state.
+
+Alert on sustained delivery failures, any dead-letter growth, health-check
+failures, database connection saturation, and Keycloak discovery/token
+validation errors. For identity operations, alert when provider
+`unavailable` outcomes persist for five minutes, manual fallback exceeds the
+normal property baseline, blocked check-ins exceed ten in five minutes, or
+provider p95 latency exceeds the configured read timeout.

@@ -5,7 +5,7 @@ Owns Phase 3 check-in, walk-in, stay, and checkout transitions.
 ## Responsibilities
 
 - Check in confirmed reservations.
-- Create walk-ins atomically by composing reservation and billing contracts.
+- Create walk-ins from pre-registered, identity-ready guest profiles.
 - Maintain stay records and room occupancy state.
 - Enforce checkout financial controls.
 - Provide a separate fiscal override checkout path with mandatory reason.
@@ -31,3 +31,11 @@ Normal checkout requires:
 Fiscal override checkout is intentionally separated by route and permission. It
 does not mark fiscalization complete; night audit continues to surface the
 missing accepted fiscal receipt.
+
+## Check-In Identity Gate
+
+Check-in and walk-in commands lock the reservation and evaluate every attached
+occupant before changing reservation, stay, or room state. A missing,
+expired, failed, or revoked adult identity, an unattested minor, or an
+occupant-count mismatch returns `RESERVATION_CONFLICT` with
+`GUEST_IDENTITY_INCOMPLETE`. No stay or occupancy mutation is committed.

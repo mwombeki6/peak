@@ -130,7 +130,10 @@ for name in \
   PEAK_MIGRATION_DB_POOL_MIN_IDLE \
   PEAK_OUTBOX_WORKER_BATCH_SIZE \
   PEAK_OUTBOX_WORKER_MAX_PARALLELISM \
-  PEAK_PAYMENT_VODACOM_MPESA_URL
+  PEAK_PAYMENT_VODACOM_MPESA_URL \
+  PEAK_GUEST_IDENTITY_HASH_KEY \
+  PEAK_GUEST_IDENTITY_HASH_KEY_VERSION \
+  PEAK_NIDA_MODE
 do
   require_var "$name"
   reject_placeholder "$name"
@@ -171,10 +174,37 @@ for name in \
   KEYCLOAK_DB_PASSWORD \
   PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY \
   PEAK_PAYMENT_VODACOM_MPESA_API_KEY \
-  PEAK_PAYMENT_VODACOM_MPESA_API_SECRET
+  PEAK_PAYMENT_VODACOM_MPESA_API_SECRET \
+  PEAK_GUEST_IDENTITY_HASH_KEY
 do
   require_secret "$name"
 done
+
+guest_identity_hash_key="$(value_of PEAK_GUEST_IDENTITY_HASH_KEY)"
+if [ -n "$guest_identity_hash_key" ] && [ "${#guest_identity_hash_key}" -lt 32 ]; then
+  fail "PEAK_GUEST_IDENTITY_HASH_KEY must be at least 32 characters"
+fi
+previous_guest_identity_hash_key="$(value_of PEAK_GUEST_IDENTITY_PREVIOUS_HASH_KEY)"
+previous_guest_identity_hash_version="$(value_of PEAK_GUEST_IDENTITY_PREVIOUS_HASH_KEY_VERSION)"
+if [ -n "$previous_guest_identity_hash_key" ] || [ -n "$previous_guest_identity_hash_version" ]; then
+  if [ -z "$previous_guest_identity_hash_key" ] || [ -z "$previous_guest_identity_hash_version" ]; then
+    fail "previous guest identity hash key and version must be configured together"
+  fi
+  reject_placeholder PEAK_GUEST_IDENTITY_PREVIOUS_HASH_KEY
+  if [ -n "$previous_guest_identity_hash_key" ] && [ "${#previous_guest_identity_hash_key}" -lt 32 ]; then
+    fail "PEAK_GUEST_IDENTITY_PREVIOUS_HASH_KEY must be at least 32 characters"
+  fi
+  if [ "$previous_guest_identity_hash_version" = "$(value_of PEAK_GUEST_IDENTITY_HASH_KEY_VERSION)" ]; then
+    fail "current and previous guest identity hash key versions must differ"
+  fi
+fi
+
+case "$(value_of PEAK_NIDA_MODE)" in
+  disabled) ;;
+  simulator) fail "PEAK_NIDA_MODE must not be simulator in production" ;;
+  cig) fail "PEAK_NIDA_MODE=cig is unavailable until the official private CIG contract is implemented" ;;
+  *) fail "PEAK_NIDA_MODE must be disabled, simulator, or cig" ;;
+esac
 
 for name in \
   PEAK_ALLOW_HEADER_IDENTITY \

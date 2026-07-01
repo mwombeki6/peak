@@ -4,6 +4,7 @@ import com.mwombeki.peak.TestcontainersConfiguration
 import com.mwombeki.peak.shared.context.PeakRequestHeaders
 import java.time.LocalDate
 import java.util.UUID
+import kotlin.test.AfterTest
 import kotlin.test.Test
 import org.hamcrest.Matchers.hasItem
 import org.springframework.beans.factory.annotation.Autowired
@@ -36,6 +37,16 @@ class Phase3StayLifecycleIntegrationTests {
     @Autowired
     private lateinit var jdbcTemplate: JdbcTemplate
 
+    private val createdTenantIds = mutableSetOf<UUID>()
+
+    @AfterTest
+    fun removePendingPhase3OutboxEvents() {
+        createdTenantIds.forEach { tenantId ->
+            jdbcTemplate.update("DELETE FROM outbox_events WHERE tenant_id = ?", tenantId)
+        }
+        createdTenantIds.clear()
+    }
+
     @Test
     fun completesReservationToCheckoutAndNightAuditControlsThroughApis() {
         val fixture = phase3Fixture()
@@ -51,12 +62,35 @@ class Phase3StayLifecycleIntegrationTests {
                   "fullName": "Phase Three Guest",
                   "email": "phase3.guest@example.com",
                   "phonePrimary": "+255700000001",
+                  "dateOfBirth": "1990-01-01",
                   "nationality": "TZ"
                 }
             """.trimIndent(),
         )
 
         val today = LocalDate.now()
+        mockMvc.perform(
+            post("/api/v1/properties/${fixture.propertyId}/guests/$guestId/identity-documents/manual-verification")
+                .secureJson(
+                    """
+                    {
+                      "documentType": "NIDA",
+                      "documentNumber": "19900101123456789000",
+                      "issuingCountry": "TZ",
+                      "attestationReason": "Physical NIDA card inspected at reception"
+                    }
+                    """.trimIndent(),
+                )
+                .headersFor(
+                    fixture,
+                    "corr-identity-${fixture.tenantId}",
+                    "idem-identity-${fixture.tenantId}",
+                ),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.document.verificationStatus").value("VERIFIED"))
+            .andExpect(jsonPath("$.document.maskedDocumentNumber").value("***9000"))
+
         val reservationId = postForId(
             fixture = fixture,
             path = "/api/v1/properties/${fixture.propertyId}/reservations",
@@ -164,6 +198,433 @@ class Phase3StayLifecycleIntegrationTests {
             .andExpect(jsonPath("$.issues[*].issueCode", hasItem("invoices_missing_accepted_fiscal_receipt")))
     }
 
+    @Test
+    fun blocksCheckInUntilEveryAdultOccupantIsVerifiedWithoutPersistingRawIdentity() {
+        val fixture = phase3Fixture()
+        insertAuthorizedFixture(fixture)
+        val primaryGuestId = postForId(
+            fixture,
+            "/api/v1/properties/${fixture.propertyId}/guests",
+            "identity-primary-${fixture.tenantId}",
+            "id",
+            """
+            {
+              "fullName": "Primary Identity Guest",
+              "dateOfBirth": "1990-01-01",
+              "nationality": "TZ"
+            }
+            """.trimIndent(),
+        )
+        val additionalGuestId = postForId(
+            fixture,
+            "/api/v1/properties/${fixture.propertyId}/guests",
+            "identity-additional-${fixture.tenantId}",
+            "id",
+            """
+            {
+              "fullName": "Additional Identity Guest",
+              "dateOfBirth": "1992-02-02",
+              "nationality": "KE"
+            }
+            """.trimIndent(),
+        )
+        val today = LocalDate.now()
+        val reservationId = postForId(
+            fixture,
+            "/api/v1/properties/${fixture.propertyId}/reservations",
+            "identity-reservation-${fixture.tenantId}",
+            "reservationId",
+            """
+            {
+              "primaryGuestId": "$primaryGuestId",
+              "roomTypeId": "${fixture.roomTypeId}",
+              "roomId": "${fixture.roomId}",
+              "checkInDate": "$today",
+              "checkOutDate": "${today.plusDays(1)}",
+              "adults": 2,
+              "children": 0,
+              "ratePerNight": 100.00
+            }
+            """.trimIndent(),
+        )
+        mockMvc.perform(
+            post("/api/v1/properties/${fixture.propertyId}/reservations/$reservationId/guests")
+                .secureJson(
+                    """{"guestId":"$additionalGuestId","relationship":"ADULT"}""",
+                )
+                .headersFor(
+                    fixture,
+                    "corr-additional-${fixture.tenantId}",
+                    "identity-additional-occupant-${fixture.tenantId}",
+                ),
+        ).andExpect(status().isOk)
+        mockMvc.perform(
+            get("/api/v1/properties/${fixture.propertyId}/reservations/$reservationId/guests")
+                .secureJson()
+                .headersFor(fixture, "corr-list-occupants-${fixture.tenantId}"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.length()").value(2))
+
+        manuallyVerify(
+            fixture,
+            primaryGuestId,
+            "NIDA",
+            "19900101123456781234",
+            "TZ",
+            "identity-verify-primary-${fixture.tenantId}",
+        )
+        manuallyVerify(
+            fixture,
+            primaryGuestId,
+            "NIDA",
+            "19900101123456781234",
+            "TZ",
+            "identity-verify-primary-${fixture.tenantId}",
+            replayed = true,
+        )
+        kotlin.test.assertEquals(
+            1,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*) FROM guest_identity_verification_attempts
+                WHERE tenant_id = ? AND guest_id = ?
+                """.trimIndent(),
+                Int::class.java,
+                fixture.tenantId,
+                primaryGuestId,
+            ),
+        )
+
+        mockMvc.perform(
+            post("/api/v1/properties/${fixture.propertyId}/checkins")
+                .secureJson("""{"reservationId":"$reservationId","roomId":"${fixture.roomId}"}""")
+                .headersFor(
+                    fixture,
+                    "corr-blocked-checkin-${fixture.tenantId}",
+                    "identity-blocked-checkin-${fixture.tenantId}",
+                ),
+        )
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.errorCode").value("GUEST_IDENTITY_INCOMPLETE"))
+
+        kotlin.test.assertEquals(
+            "confirmed",
+            jdbcTemplate.queryForObject(
+                "SELECT status FROM reservations WHERE tenant_id = ? AND id = ?",
+                String::class.java,
+                fixture.tenantId,
+                reservationId,
+            ),
+        )
+        kotlin.test.assertEquals(
+            0,
+            jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM stays WHERE tenant_id = ? AND reservation_id = ?",
+                Int::class.java,
+                fixture.tenantId,
+                reservationId,
+            ),
+        )
+
+        manuallyVerify(
+            fixture,
+            additionalGuestId,
+            "PASSPORT",
+            "A123456789",
+            "KE",
+            "identity-verify-additional-${fixture.tenantId}",
+        )
+
+        mockMvc.perform(
+            get("/api/v1/properties/${fixture.propertyId}/reservations/$reservationId/identity-readiness")
+                .secureJson()
+                .headersFor(fixture, "corr-ready-${fixture.tenantId}"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.ready").value(true))
+            .andExpect(jsonPath("$.occupants.length()").value(2))
+
+        postForId(
+            fixture,
+            "/api/v1/properties/${fixture.propertyId}/checkins",
+            "identity-successful-checkin-${fixture.tenantId}",
+            "stayId",
+            """{"reservationId":"$reservationId","roomId":"${fixture.roomId}"}""",
+        )
+
+        kotlin.test.assertEquals(
+            0,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*) FROM guest_documents
+                WHERE tenant_id = ? AND document_number IN (?, ?)
+                """.trimIndent(),
+                Int::class.java,
+                fixture.tenantId,
+                "19900101123456781234",
+                "A123456789",
+            ),
+        )
+        kotlin.test.assertEquals(
+            0,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT
+                    (SELECT count(*) FROM audit_logs
+                     WHERE tenant_id = ? AND new_values::text LIKE ?)
+                  + (SELECT count(*) FROM outbox_events
+                     WHERE tenant_id = ? AND payload::text LIKE ?)
+                  + (SELECT count(*) FROM idempotency_keys
+                     WHERE tenant_id = ? AND response_body::text LIKE ?)
+                """.trimIndent(),
+                Int::class.java,
+                fixture.tenantId,
+                "%19900101123456781234%",
+                fixture.tenantId,
+                "%19900101123456781234%",
+                fixture.tenantId,
+                "%19900101123456781234%",
+            ),
+        )
+    }
+
+    @Test
+    fun recordsUnavailableOnlineNidaVerificationWithoutLeakingTheNin() {
+        val fixture = phase3Fixture()
+        insertAuthorizedFixture(fixture)
+        val guestId = postForId(
+            fixture,
+            "/api/v1/properties/${fixture.propertyId}/guests",
+            "nida-unavailable-guest-${fixture.tenantId}",
+            "id",
+            """
+            {
+              "fullName": "NIDA Unavailable Guest",
+              "dateOfBirth": "1990-01-01",
+              "nationality": "TZ"
+            }
+            """.trimIndent(),
+        )
+        val rawNin = "19900101123456785678"
+        mockMvc.perform(
+            post("/api/v1/properties/${fixture.propertyId}/guests/$guestId/identity-documents/verify")
+                .secureJson(
+                    """
+                    {
+                      "documentType": "NIDA",
+                      "documentNumber": "$rawNin",
+                      "issuingCountry": "TZ"
+                    }
+                    """.trimIndent(),
+                )
+                .headersFor(
+                    fixture,
+                    "corr-nida-unavailable-${fixture.tenantId}",
+                    "nida-unavailable-${fixture.tenantId}",
+                ),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.failureCode").value("NIDA_NOT_CONFIGURED"))
+            .andExpect(jsonPath("$.document.verificationStatus").value("FAILED"))
+            .andExpect(jsonPath("$.document.maskedDocumentNumber").value("***5678"))
+
+        kotlin.test.assertEquals(
+            "unavailable",
+            jdbcTemplate.queryForObject(
+                """
+                SELECT status FROM guest_identity_verification_attempts
+                WHERE tenant_id = ? AND guest_id = ?
+                """.trimIndent(),
+                String::class.java,
+                fixture.tenantId,
+                guestId,
+            ),
+        )
+        kotlin.test.assertEquals(
+            0,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*) FROM guest_documents
+                WHERE tenant_id = ? AND document_number = ?
+                """.trimIndent(),
+                Int::class.java,
+                fixture.tenantId,
+                rawNin,
+            ),
+        )
+    }
+
+    @Test
+    fun revokedIdentityImmediatelyRemovesReservationReadiness() {
+        val fixture = phase3Fixture()
+        insertAuthorizedFixture(fixture)
+        val guestId = postForId(
+            fixture,
+            "/api/v1/properties/${fixture.propertyId}/guests",
+            "revoked-identity-guest-${fixture.tenantId}",
+            "id",
+            """
+            {
+              "fullName": "Revoked Identity Guest",
+              "dateOfBirth": "1990-01-01",
+              "nationality": "TZ"
+            }
+            """.trimIndent(),
+        )
+        manuallyVerify(
+            fixture,
+            guestId,
+            "NIDA",
+            "19900101123456789999",
+            "TZ",
+            "revoked-identity-verify-${fixture.tenantId}",
+        )
+        val today = LocalDate.now()
+        val reservationId = postForId(
+            fixture,
+            "/api/v1/properties/${fixture.propertyId}/reservations",
+            "revoked-identity-reservation-${fixture.tenantId}",
+            "reservationId",
+            """
+            {
+              "primaryGuestId": "$guestId",
+              "roomTypeId": "${fixture.roomTypeId}",
+              "roomId": "${fixture.roomId}",
+              "checkInDate": "$today",
+              "checkOutDate": "${today.plusDays(1)}",
+              "adults": 1,
+              "children": 0,
+              "ratePerNight": 100.00
+            }
+            """.trimIndent(),
+        )
+        val documentId = requireNotNull(
+            jdbcTemplate.queryForObject(
+                "SELECT id FROM guest_documents WHERE tenant_id = ? AND guest_id = ?",
+                UUID::class.java,
+                fixture.tenantId,
+                guestId,
+            ),
+        )
+        mockMvc.perform(
+            post("/api/v1/properties/${fixture.propertyId}/guests/$guestId/identity-documents/$documentId/revoke")
+                .secureJson("""{"reason":"Identity document reported invalid"}""")
+                .headersFor(
+                    fixture,
+                    "corr-revoke-${fixture.tenantId}",
+                    "revoke-${fixture.tenantId}",
+                ),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.verificationStatus").value("REVOKED"))
+
+        mockMvc.perform(
+            get("/api/v1/properties/${fixture.propertyId}/reservations/$reservationId/identity-readiness")
+                .secureJson()
+                .headersFor(fixture, "corr-revoked-readiness-${fixture.tenantId}"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.ready").value(false))
+            .andExpect(
+                jsonPath(
+                    "$.occupants[0].reasons",
+                    hasItem("valid_verified_identity_required"),
+                ),
+            )
+    }
+
+    @Test
+    fun preventsCrossPropertyGuestAndIdentityAccess() {
+        val fixture = phase3Fixture()
+        insertAuthorizedFixture(fixture)
+        val secondPropertyId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO properties (id, tenant_id, name, status, is_active, total_rooms)
+            VALUES (?, ?, 'Second Property', 'active', true, 0)
+            """.trimIndent(),
+            secondPropertyId,
+            fixture.tenantId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO property_modules (
+                tenant_id, property_id, module_id, is_enabled, is_configured
+            )
+            VALUES (?, ?, 'reservations', true, true)
+            """.trimIndent(),
+            fixture.tenantId,
+            secondPropertyId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO user_property_roles (user_id, property_id, role_id, tenant_id)
+            VALUES (?, ?, ?, ?)
+            """.trimIndent(),
+            fixture.tenantUserId,
+            secondPropertyId,
+            fixture.propertyRoleId,
+            fixture.tenantId,
+        )
+        val guestId = postForId(
+            fixture,
+            "/api/v1/properties/${fixture.propertyId}/guests",
+            "property-isolated-guest-${fixture.tenantId}",
+            "id",
+            """
+            {
+              "fullName": "Property Isolated Guest",
+              "dateOfBirth": "1990-01-01",
+              "nationality": "TZ"
+            }
+            """.trimIndent(),
+        )
+
+        mockMvc.perform(
+            get("/api/v1/properties/$secondPropertyId/guests/$guestId")
+                .secureJson()
+                .headersFor(fixture, "corr-cross-property-guest-${fixture.tenantId}"),
+        )
+            .andExpect(status().isNotFound)
+
+        mockMvc.perform(
+            get("/api/v1/properties/$secondPropertyId/guests/$guestId/identity-documents")
+                .secureJson()
+                .headersFor(fixture, "corr-cross-property-identity-${fixture.tenantId}"),
+        )
+            .andExpect(status().isNotFound)
+    }
+
+    private fun manuallyVerify(
+        fixture: Phase3Fixture,
+        guestId: UUID,
+        documentType: String,
+        documentNumber: String,
+        issuingCountry: String,
+        idempotencyKey: String,
+        replayed: Boolean = false,
+    ) {
+        val request = post(
+            "/api/v1/properties/${fixture.propertyId}/guests/$guestId/identity-documents/manual-verification",
+        )
+            .secureJson(
+                """
+                {
+                  "documentType": "$documentType",
+                  "documentNumber": "$documentNumber",
+                  "issuingCountry": "$issuingCountry",
+                  "attestationReason": "Physical identity document inspected at reception"
+                }
+                """.trimIndent(),
+            )
+            .headersFor(fixture, "corr-$idempotencyKey", idempotencyKey)
+        mockMvc.perform(request)
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.document.verificationStatus").value("VERIFIED"))
+            .andExpect(jsonPath("$.replayed").value(replayed))
+    }
+
     private fun postForId(
         fixture: Phase3Fixture,
         path: String,
@@ -197,7 +658,7 @@ class Phase3StayLifecycleIntegrationTests {
             propertyId = UUID.randomUUID(),
             roomTypeId = UUID.randomUUID(),
             roomId = UUID.randomUUID(),
-        )
+        ).also { createdTenantIds += it.tenantId }
     }
 
     private fun insertAuthorizedFixture(fixture: Phase3Fixture) {
@@ -365,6 +826,11 @@ class Phase3StayLifecycleIntegrationTests {
         val PERMISSIONS = listOf(
             "guests.view",
             "guests.manage",
+            "guests.identity.manual_verify",
+            "guests.identity.verify",
+            "guests.identity.manage",
+            "guests.identity.view",
+            "reservations.guests.manage",
             "reservations.view",
             "reservations.create",
             "checkin.process",

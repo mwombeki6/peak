@@ -1,6 +1,5 @@
 package com.mwombeki.peak.frontdesk.api
 
-import com.mwombeki.peak.reservations.api.CreateGuestRequest
 import com.mwombeki.peak.reservations.api.CreateReservationRequest
 import com.mwombeki.peak.shared.exception.BusinessException
 import java.math.BigDecimal
@@ -15,8 +14,7 @@ data class CheckInRequest(
 )
 
 data class WalkInRequest(
-    val guest: CreateGuestRequest? = null,
-    val primaryGuestId: UUID? = null,
+    val primaryGuestId: UUID,
     val reservation: WalkInReservationRequest,
 )
 

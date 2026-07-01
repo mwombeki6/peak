@@ -14,6 +14,7 @@ data class GuestResponse(
     val lastName: String?,
     val email: String?,
     val phonePrimary: String?,
+    val dateOfBirth: LocalDate?,
     val nationality: String?,
     val vipLevel: String,
     val blacklisted: Boolean,
@@ -25,6 +26,7 @@ data class CreateGuestRequest(
     val lastName: String? = null,
     val email: String? = null,
     val phonePrimary: String? = null,
+    val dateOfBirth: LocalDate? = null,
     val nationality: String? = null,
     val notes: String? = null,
 )
@@ -107,4 +109,10 @@ class ReservationInProgressException(message: String) : ReservationException(
     message = message,
     status = HttpStatus.CONFLICT,
     code = "RESERVATION_COMMAND_IN_PROGRESS",
+)
+
+class GuestIdentityIncompleteException(message: String) : ReservationException(
+    message = message,
+    status = HttpStatus.CONFLICT,
+    code = "GUEST_IDENTITY_INCOMPLETE",
 )
