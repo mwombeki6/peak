@@ -47,7 +47,6 @@ class PropertyManagementIntegrationTests {
         insertAuthorizedFixture(fixture)
 
         enableTenantModule(fixture, "property")
-        enableTenantModule(fixture, "booking_engine")
         enableTenantModule(fixture, "communications")
 
         val createPropertyBody = """
@@ -99,7 +98,6 @@ class PropertyManagementIntegrationTests {
             .andExpect(jsonPath("$.isReady").value(false))
             .andExpect(jsonPath("$.missingRequirements").isArray)
 
-        enablePropertyModule(fixture, propertyId, "booking_engine")
 
         val buildingId = postForResourceId(
             fixture = fixture,

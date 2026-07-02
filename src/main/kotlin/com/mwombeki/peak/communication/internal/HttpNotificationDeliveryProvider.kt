@@ -4,6 +4,7 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.nio.charset.StandardCharsets
 import java.time.Duration
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.boot.context.properties.ConfigurationProperties
@@ -62,14 +63,20 @@ class HttpNotificationDeliveryProvider(
             .header("Idempotency-Key", command.outboxEventId.toString())
             .POST(HttpRequest.BodyPublishers.ofString(payload))
             .build()
-        val response = client.send(request, HttpResponse.BodyHandlers.ofString())
-
-        check(response.statusCode() in 200..299) {
-            "Communication provider returned HTTP ${response.statusCode()}"
+        val response = client.send(request, HttpResponse.BodyHandlers.ofInputStream())
+        val responseBodyText = response.body().use { body ->
+            check(response.statusCode() in 200..299) {
+                "Communication provider returned HTTP ${response.statusCode()}"
+            }
+            val bytes = body.readNBytes(MAX_RESPONSE_BYTES + 1)
+            check(bytes.size <= MAX_RESPONSE_BYTES) {
+                "Communication provider response exceeds 64 KiB"
+            }
+            String(bytes, StandardCharsets.UTF_8)
         }
 
         @Suppress("UNCHECKED_CAST")
-        val responseBody = objectMapper.readValue(response.body(), Map::class.java) as Map<String, Any?>
+        val responseBody = objectMapper.readValue(responseBodyText, Map::class.java) as Map<String, Any?>
         val messageId = (responseBody["messageId"] ?: responseBody["id"])
             ?.toString()
             ?.trim()
@@ -80,6 +87,7 @@ class HttpNotificationDeliveryProvider(
     }
 
     private companion object {
+        const val MAX_RESPONSE_BYTES = 64 * 1024
         val SUPPORTED_CHANNELS = setOf("email", "sms", "whatsapp", "voice_phone")
     }
 }

@@ -7,11 +7,20 @@ ADMIN_USER="${KEYCLOAK_ADMIN:-admin}"
 ADMIN_PASSWORD="${KEYCLOAK_ADMIN_PASSWORD:-}"
 EXPECTED_ISSUER="${PEAK_SECURITY_JWT_ISSUER_URI:-$BASE_URL/realms/$REALM}"
 EXPECTED_AUDIENCE="${PEAK_SECURITY_JWT_AUDIENCE:-peak-api}"
+EXPECTED_APP_ORIGIN="${PEAK_APP_ORIGIN:-}"
 
 if [ -z "$ADMIN_PASSWORD" ]; then
   echo "KEYCLOAK_ADMIN_PASSWORD is required" >&2
   exit 1
 fi
+
+case "$EXPECTED_APP_ORIGIN" in
+  https://*) ;;
+  *)
+    echo "PEAK_APP_ORIGIN must be an HTTPS origin" >&2
+    exit 1
+    ;;
+esac
 
 TOKEN_RESPONSE="$(curl -fsS \
   -X POST "$BASE_URL/realms/master/protocol/openid-connect/token" \
@@ -67,12 +76,14 @@ BASE_URL="$BASE_URL" \
 REALM="$REALM" \
 EXPECTED_ISSUER="$EXPECTED_ISSUER" \
 EXPECTED_AUDIENCE="$EXPECTED_AUDIENCE" \
+EXPECTED_APP_ORIGIN="$EXPECTED_APP_ORIGIN" \
 python3 - <<'PY'
 import json
 import os
 
 expected_issuer = os.environ["EXPECTED_ISSUER"].rstrip("/")
 expected_audience = os.environ["EXPECTED_AUDIENCE"]
+expected_app_origin = os.environ["EXPECTED_APP_ORIGIN"].rstrip("/")
 
 oidc = json.loads(os.environ["OIDC_CONFIGURATION"])
 issuer = (oidc.get("issuer") or "").rstrip("/")
@@ -99,6 +110,16 @@ if web_client.get("publicClient") is not True:
     raise SystemExit("peak-web client must be public")
 if not web_client.get("standardFlowEnabled"):
     raise SystemExit("peak-web client must enable authorization code flow")
+if web_client.get("directAccessGrantsEnabled"):
+    raise SystemExit("peak-web client must not enable direct access grants")
+if web_client.get("implicitFlowEnabled"):
+    raise SystemExit("peak-web client must not enable implicit flow")
+if web_client.get("redirectUris") != [f"{expected_app_origin}/*"]:
+    raise SystemExit("peak-web redirect URIs must contain only PEAK_APP_ORIGIN")
+if web_client.get("webOrigins") != [expected_app_origin]:
+    raise SystemExit("peak-web origins must contain only PEAK_APP_ORIGIN")
+if web_client.get("attributes", {}).get("pkce.code.challenge.method") != "S256":
+    raise SystemExit("peak-web client must require PKCE S256")
 
 mappers = json.loads(os.environ["WEB_MAPPERS_RESPONSE"])
 audience_mappers = [

@@ -257,6 +257,38 @@ class TenantUserRoleManagementServiceIntegrationTests {
         assertEquals(0, roleAssignmentCount(fixture))
     }
 
+    @Test
+    fun rejectsDelegatingPermissionActorDoesNotHold() {
+        val fixture = roleManagementFixture()
+        insertRoleManagementFixture(fixture)
+        jdbcTemplate.update(
+            """
+            DELETE FROM tenant_role_permissions
+            WHERE tenant_role_id = ?
+              AND permission_id = ?
+            """.trimIndent(),
+            fixture.actorRoleId,
+            fixture.reportsPermissionId,
+        )
+        requestContextHolder.set(tenantContext(fixture, "idem-role-escalation"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            roleManagementPort.assignTenantUserRole(
+                AssignTenantUserRoleCommand(
+                    tenantId = fixture.tenantId,
+                    userId = fixture.targetUserId,
+                    tenantRoleId = fixture.targetRoleId,
+                ),
+            )
+        }
+
+        assertEquals(
+            "Tenant roles cannot include permissions the actor does not hold",
+            error.message,
+        )
+        assertEquals(0, roleAssignmentCount(fixture))
+    }
+
     private fun roleManagementFixture(): RoleManagementFixture {
         val actorRoleId = UUID.randomUUID()
         val targetRoleId = UUID.randomUUID()
@@ -321,6 +353,7 @@ class TenantUserRoleManagementServiceIntegrationTests {
             description = "View reports",
         )
         insertRolePermission(fixture.actorRoleId, fixture.managePermissionId)
+        insertRolePermission(fixture.actorRoleId, fixture.reportsPermissionId)
         insertRolePermission(fixture.targetRoleId, fixture.reportsPermissionId)
         jdbcTemplate.update(
             """

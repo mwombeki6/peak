@@ -25,8 +25,9 @@ class OutboxWorkerLifecycle(
     private val properties: OutboxWorkerProperties,
     @Value("\${peak.runtime.mode:api}")
     private val runtimeMode: String,
-    private val dispatcher: OutboxEventDispatcher,
     private val processor: OutboxWorkerProcessor,
+    private val idempotencyMaintenance: IdempotencyMaintenance,
+    private val workerHeartbeat: WorkerHeartbeat,
 ) : SmartLifecycle {
     private val running = AtomicBoolean(false)
     private var supervisorJob: Job? = null
@@ -46,14 +47,27 @@ class OutboxWorkerLifecycle(
             return
         }
 
+        try {
+            workerHeartbeat.started(destinations)
+        } catch (ex: Exception) {
+            running.set(false)
+            throw ex
+        }
+
         val job = SupervisorJob()
         supervisorJob = job
-        val scope = CoroutineScope(job + Dispatchers.Default)
+        val scope = CoroutineScope(
+            job + Dispatchers.IO.limitedParallelism(properties.maxParallelism),
+        )
 
         destinations.forEach { destination ->
             scope.launch(CoroutineName("outbox-worker-${destination.databaseValue}")) {
                 pollLoop(destination)
             }
+        }
+
+        scope.launch(CoroutineName("outbox-worker-heartbeat")) {
+            heartbeatLoop(destinations)
         }
 
         if (properties.reclaimStaleLocks) {
@@ -79,6 +93,7 @@ class OutboxWorkerLifecycle(
             }
         }
         supervisorJob = null
+        workerHeartbeat.stopped()
         logger.info("Stopped outbox worker")
     }
 
@@ -124,6 +139,7 @@ class OutboxWorkerLifecycle(
                 if (reclaimed > 0) {
                     logger.warn("Reclaimed {} stale outbox worker locks", reclaimed)
                 }
+                idempotencyMaintenance.run()
             } catch (ex: CancellationException) {
                 throw ex
             } catch (ex: Exception) {
@@ -134,13 +150,26 @@ class OutboxWorkerLifecycle(
         }
     }
 
+    private suspend fun heartbeatLoop(destinations: List<OutboxDestination>) {
+        while (currentCoroutineContext().isActive) {
+            try {
+                workerHeartbeat.alive(destinations)
+            } catch (ex: CancellationException) {
+                throw ex
+            } catch (ex: Exception) {
+                logger.error("Outbox worker heartbeat failed", ex)
+            }
+            delay(properties.heartbeatInterval.toKotlinDuration())
+        }
+    }
+
     private fun shouldRun(): Boolean {
         return properties.enabled && runtimeMode.equals(WORKER_RUNTIME_MODE, ignoreCase = true)
     }
 
     private fun destinationsToPoll(): List<OutboxDestination> {
         return properties.destinations.ifEmpty {
-            dispatcher.supportedDestinations()
+            OutboxDestination.entries
         }.distinct()
     }
 

@@ -60,7 +60,7 @@ class RouteGuardBoundaryControllerIntegrationTests {
     @Test
     fun deniesTenantIdentityOnPublicPropertyControllerRoute() {
         mockMvc.perform(
-            post("/api/v1/public/properties/${UUID.randomUUID()}/booking-engine/payments/initiate")
+            post("/api/v1/payments/webhooks/${UUID.randomUUID()}")
                 .secure(true)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")

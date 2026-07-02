@@ -9,4 +9,6 @@ data class RequestContext(
     val idempotencyKey: String?,
     val httpMethod: String,
     val requestPath: String,
+    val remoteAddress: String? = null,
+    val userAgent: String? = null,
 )

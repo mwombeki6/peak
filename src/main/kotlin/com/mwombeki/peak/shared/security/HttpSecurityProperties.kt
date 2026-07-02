@@ -1,5 +1,6 @@
 package com.mwombeki.peak.shared.security
 
+import java.time.Duration
 import org.springframework.boot.context.properties.ConfigurationProperties
 
 @ConfigurationProperties(prefix = "peak.security.http")
@@ -17,6 +18,8 @@ data class HttpSecurityProperties(
         val enabled: Boolean = false,
         val issuerUri: String? = null,
         val audience: String? = null,
+        val discoveryHealthTimeout: Duration = Duration.ofSeconds(3),
+        val discoveryHealthCacheTtl: Duration = Duration.ofSeconds(30),
     )
 
     data class Cors(

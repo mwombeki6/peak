@@ -250,7 +250,7 @@ class TenantUserInvitationControllerIntegrationTests {
         )
             .andExpect(status().isBadRequest)
             .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
-            .andExpect(content().string(containsString("Invitation token is invalid")))
+            .andExpect(content().string(containsString("Invitation acceptance was rejected")))
             .andExpect(content().string(not(containsString("ERROR:"))))
     }
 

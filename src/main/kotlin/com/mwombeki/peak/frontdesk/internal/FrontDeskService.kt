@@ -161,7 +161,7 @@ class FrontDeskService(
             WHERE tenant_id = ?
               AND property_id = ?
               AND id = ?
-              AND status IN ('pending', 'confirmed')
+              AND status = 'confirmed'
             """.trimIndent(),
             actor.tenantId,
             propertyId,
@@ -388,7 +388,7 @@ class FrontDeskService(
             propertyId,
             reservationId,
         ).singleOrNull()?.also {
-            if (it.status !in setOf("pending", "confirmed")) {
+            if (it.status != "confirmed") {
                 throw FrontDeskConflictException("Reservation is ${it.status} and cannot be checked in")
             }
             if (it.folioId == null) {
@@ -412,7 +412,7 @@ class FrontDeskService(
                   AND property_id = ?
                   AND room_type_id = ?
                   AND id = ?
-                  AND status IN ('vacant_clean', 'vacant_dirty')
+                  AND status = 'vacant_clean'
                   AND deleted_at IS NULL
             )
             """.trimIndent(),
@@ -615,9 +615,5 @@ private fun String.normalizedRequired(field: String): String {
 }
 
 private fun DataIntegrityViolationException.publicDatabaseMessage(): String {
-    return mostSpecificCause.message
-        ?.lineSequence()
-        ?.firstOrNull()
-        ?.take(240)
-        ?: "Frontdesk request violates a database constraint"
+    return "Frontdesk request conflicts with existing operational data"
 }

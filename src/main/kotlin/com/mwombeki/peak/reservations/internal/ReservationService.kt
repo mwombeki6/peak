@@ -963,9 +963,5 @@ private fun BigDecimal.requireNonNegativeMoney(field: String): BigDecimal {
 }
 
 private fun DataIntegrityViolationException.publicDatabaseMessage(): String {
-    return mostSpecificCause.message
-        ?.lineSequence()
-        ?.firstOrNull()
-        ?.take(240)
-        ?: "Reservation request violates a database constraint"
+    return "Reservation request conflicts with existing inventory or stay data"
 }

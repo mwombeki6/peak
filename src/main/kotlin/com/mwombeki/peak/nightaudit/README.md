@@ -9,6 +9,8 @@ Owns Phase 3 property close checks and blocking issue capture.
 - Report open unpaid folios, missing invoices, missing accepted fiscal receipts,
   pending payments, open POS sessions, and overdue stays.
 - Emit audit and outbox events for completed audit runs.
+- Derive the business date from the property's IANA timezone and configured
+  business-day offset.
 
 ## API
 
@@ -18,9 +20,13 @@ Owns Phase 3 property close checks and blocking issue capture.
 
 ## Operations
 
-1. **Room Charge Posting**: During each audit run, the system automatically identifies all `checked_in` guests and posts their recurring room charges for the audit date.
-2. **Blocker Checks**: The audit checks for open POS sessions, pending payments, missing invoices, and missing fiscal receipts.
-3. **Business Date Transition**: Upon a successful run (no blocking issues), the property's `business_date` is automatically incremented.
+1. **Blocker Checks**: The audit checks for open POS sessions, pending payments,
+   unpaid folios, missing invoices, missing fiscal receipts, and overdue stays.
+2. **Immutable Attempts**: Each attempt is retained under a property and
+   business date; a property/date advisory lock serializes concurrent runs.
+3. **Business Date Control**: Business date is read from the property close
+   configuration. Room-charge posting remains an explicit billing operation and
+   is not silently retried or swallowed by night audit.
 
 ## Status Semantics
 
@@ -28,3 +34,6 @@ Runs complete with `completed` when no blocking issues exist. Runs complete with
 `failed` when blocking operational or financial issues require resolution. A
 fiscal override checkout still leaves a night-audit issue until fiscal recovery
 accepts the invoice.
+
+Every attempt is retained. Concurrent requests lock per property/business date,
+and completed or failed attempts are never deleted and recreated.

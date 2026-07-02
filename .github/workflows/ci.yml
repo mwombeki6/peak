@@ -50,9 +50,11 @@ jobs:
           POSTGRES_PLATFORM_SUPPORT_PASSWORD=ci-platform-support-password-1234
           KEYCLOAK_ADMIN_PASSWORD=ci-keycloak-admin-password-1234
           KEYCLOAK_DB_PASSWORD=ci-keycloak-db-password-1234
-          PEAK_PAYMENT_VODACOM_MPESA_API_KEY=ci-vodacom-api-key-1234
-          PEAK_PAYMENT_VODACOM_MPESA_API_SECRET=ci-vodacom-api-secret-1234
           PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=ci-communication-provider-key-1234
+          PEAK_ENVELOPE_KEY_BASE64=cGVhay1jaS1lbnZlbG9wZS1rZXktMzItYnl0ZXMhISE=
+          PEAK_PAYMENT_GATEWAY_CREDENTIAL=ci-payment-gateway-credential-1234
+          PEAK_PAYMENT_WEBHOOK_SECRET=ci-payment-webhook-secret-1234
+          PEAK_FISCAL_GATEWAY_CREDENTIAL=ci-fiscal-gateway-credential-1234
           PEAK_GUEST_IDENTITY_HASH_KEY=ci-guest-identity-hmac-key-1234567890
           EOF
           sed -i 's/^          //' "$tmp"
@@ -61,11 +63,22 @@ jobs:
       - name: Validate Keycloak realm JSON
         run: python3 -m json.tool ops/keycloak/peak-realm.json >/dev/null
 
+      - name: Validate Postman collections
+        run: |
+          python3 -m json.tool ops/testing/Peak-Phase-2.postman_collection.json >/dev/null
+          python3 -m json.tool ops/testing/Peak-Phase-3-Guest-Identity.postman_collection.json >/dev/null
+          python3 -m json.tool ops/testing/Peak-Phase-3.postman_collection.json >/dev/null
+
       - name: Validate ops scripts
-        run: sh -n ops/scripts/*.sh
+        run: |
+          sh -n ops/scripts/*.sh
+          bash -n ops/testing/run-phase2-acceptance.sh
 
       - name: Run tests
         run: ./gradlew test
+
+      - name: Validate clean migrations
+        run: ./gradlew test --tests '*MigrationValidationIntegrationTests' --rerun-tasks
 
       - name: Check whitespace
         run: git diff --check

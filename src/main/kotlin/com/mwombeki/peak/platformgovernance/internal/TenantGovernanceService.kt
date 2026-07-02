@@ -1,7 +1,16 @@
 package com.mwombeki.peak.platformgovernance.internal
 
+import com.mwombeki.peak.audit.api.AuditPort
+import com.mwombeki.peak.audit.api.AuditResource
+import com.mwombeki.peak.audit.api.PlatformAuditEvent
 import com.mwombeki.peak.platformgovernance.api.GovernanceActionResponse
 import com.mwombeki.peak.platformgovernance.api.TenantGovernancePort
+import com.mwombeki.peak.reliability.api.IdempotencyCommand
+import com.mwombeki.peak.reliability.api.IdempotencyPort
+import com.mwombeki.peak.reliability.api.IdempotencyReservation
+import com.mwombeki.peak.reliability.api.OutboxDestination
+import com.mwombeki.peak.reliability.api.OutboxEventCommand
+import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
@@ -16,6 +25,9 @@ class TenantGovernanceService(
     private val jdbcTemplate: JdbcTemplate,
     private val requestContextHolder: RequestContextHolder,
     private val databaseSessionContext: DatabaseSessionContext,
+    private val idempotencyPort: IdempotencyPort,
+    private val auditPort: AuditPort,
+    private val outboxPort: OutboxPort,
     private val objectMapper: ObjectMapper,
 ) : TenantGovernancePort {
 
@@ -26,15 +38,23 @@ class TenantGovernanceService(
         reason: String,
     ): GovernanceActionResponse {
         bindPlatformContext(operatorId)
-        return transitionTenant(
+        return idempotentTransition(
             tenantId = tenantId,
-            operatorId = operatorId,
-            allowedCurrentStatuses = setOf("trial", "suspended", "frozen"),
-            newStatus = "active",
-            lifecycleEventType = "activated",
+            operationType = "platform.tenant.approve",
+            requestedStatus = "active",
             reason = reason,
-            message = "Tenant account has been activated.",
-        )
+        ) { idempotencyKeyId ->
+            transitionTenant(
+                tenantId = tenantId,
+                operatorId = operatorId,
+                allowedCurrentStatuses = setOf("trial", "suspended", "frozen"),
+                newStatus = "active",
+                lifecycleEventType = "activated",
+                reason = reason,
+                message = "Tenant account has been activated.",
+                idempotencyKeyId = idempotencyKeyId,
+            )
+        }
     }
 
     @Transactional
@@ -44,15 +64,79 @@ class TenantGovernanceService(
         reason: String,
     ): GovernanceActionResponse {
         bindPlatformContext(operatorId)
-        return transitionTenant(
+        return idempotentTransition(
             tenantId = tenantId,
-            operatorId = operatorId,
-            allowedCurrentStatuses = setOf("trial", "active"),
-            newStatus = "suspended",
-            lifecycleEventType = "suspended",
+            operationType = "platform.tenant.suspend",
+            requestedStatus = "suspended",
             reason = reason,
-            message = "Tenant account has been suspended.",
-        )
+        ) { idempotencyKeyId ->
+            transitionTenant(
+                tenantId = tenantId,
+                operatorId = operatorId,
+                allowedCurrentStatuses = setOf("trial", "active"),
+                newStatus = "suspended",
+                lifecycleEventType = "suspended",
+                reason = reason,
+                message = "Tenant account has been suspended.",
+                idempotencyKeyId = idempotencyKeyId,
+            )
+        }
+    }
+
+    private fun idempotentTransition(
+        tenantId: UUID,
+        operationType: String,
+        requestedStatus: String,
+        reason: String,
+        transition: (UUID) -> GovernanceActionResponse,
+    ): GovernanceActionResponse {
+        require(reason.isNotBlank()) {
+            "Governance reason is required"
+        }
+        return when (
+            val reservation = idempotencyPort.reserve(
+                IdempotencyCommand(
+                    operationType = operationType,
+                    requestPayload = mapOf(
+                        "tenantId" to tenantId,
+                        "requestedStatus" to requestedStatus,
+                        "reason" to reason.trim(),
+                    ),
+                    resourceType = "tenants",
+                ),
+            )
+        ) {
+            is IdempotencyReservation.Started -> {
+                val response = transition(reservation.recordId)
+                idempotencyPort.markSucceeded(
+                    recordId = reservation.recordId,
+                    responseCode = 200,
+                    responseBody = response,
+                    resourceId = tenantId,
+                )
+                response
+            }
+
+            is IdempotencyReservation.Replay -> {
+                require(!reservation.responseBody.isNullOrBlank()) {
+                    "Governance replay does not contain a stored response body"
+                }
+                objectMapper.readValue(
+                    reservation.responseBody,
+                    GovernanceActionResponse::class.java,
+                ).copy(replayed = true)
+            }
+
+            is IdempotencyReservation.InProgress -> {
+                error("Tenant governance command is already being processed")
+            }
+
+            is IdempotencyReservation.Conflict -> {
+                throw IllegalArgumentException(
+                    "Idempotency key was already used for a different governance command",
+                )
+            }
+        }
     }
 
     private fun transitionTenant(
@@ -63,11 +147,8 @@ class TenantGovernanceService(
         lifecycleEventType: String,
         reason: String,
         message: String,
+        idempotencyKeyId: UUID,
     ): GovernanceActionResponse {
-        require(reason.isNotBlank()) {
-            "Governance reason is required"
-        }
-
         val currentStatus = currentTenantStatusForUpdate(tenantId)
             ?: throw IllegalArgumentException("Tenant was not found")
 
@@ -111,12 +192,38 @@ class TenantGovernanceService(
             operatorId,
         )
 
-        return GovernanceActionResponse(
+        val response = GovernanceActionResponse(
             tenantId = tenantId,
             previousStatus = currentStatus,
             newStatus = newStatus,
             message = message,
         )
+        val payload = mapOf(
+            "tenantId" to tenantId,
+            "previousStatus" to currentStatus,
+            "newStatus" to newStatus,
+            "reason" to reason.trim(),
+        )
+        auditPort.recordPlatformEvent(
+            PlatformAuditEvent(
+                action = "platform.tenants.$lifecycleEventType",
+                targetTenantId = tenantId,
+                resource = AuditResource("tenants", tenantId),
+                after = payload,
+            ),
+        )
+        outboxPort.enqueue(
+            OutboxEventCommand(
+                aggregateType = "tenants",
+                aggregateId = tenantId,
+                eventType = "platform.tenant.$lifecycleEventType",
+                destination = OutboxDestination.PLATFORM,
+                payload = payload,
+                idempotencyKeyId = idempotencyKeyId,
+                priority = 3,
+            ),
+        )
+        return response
     }
 
     private fun currentTenantStatusForUpdate(tenantId: UUID): String? {

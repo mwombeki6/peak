@@ -1,48 +1,32 @@
 # Fiscal Module
 
-## Purpose
+Owns fiscal provider configuration, invoice submission, receipt state,
+provider mappings, retries, and recovery.
 
-The `fiscal` module is responsible for the immutable submission of invoices to external fiscal authorities (e.g., TRA in Tanzania). It ensures that every issued invoice is legally recorded and assigned a verified fiscal reference.
+## Invariants
 
-## Goal
+- Only issued invoices can be submitted.
+- One fiscal receipt identity exists per invoice.
+- Accepted receipts are immutable.
+- Rejected receipts require an explicit, idempotent retry command.
+- Provider calls run through the outbox worker and every attempt is persisted.
+- Checkout requires an accepted receipt unless the dedicated audited override is used.
+- Provider credentials use environment-backed secret references.
 
-- Provide a provider-neutral SPI for different fiscal authorities.
-- Handle asynchronous submission and automatic retries for temporary provider outages.
-- Support manual overrides by authorized personnel during extended outages.
-- Maintain a local ledger of fiscal receipts and their current status.
+## Production
 
-## Architecture
+The `contract_mock` adapter is rejected under `prod`. Production uses the
+provider-neutral `http_gateway` adapter with an exact HTTPS endpoint and an
+environment-backed credential reference. Calls reject redirects, use bounded
+timeouts, send the receipt id as `Idempotency-Key`, and reject hosts outside
+the operator-owned `PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS` exact-host allowlist.
 
-- **api**: Defines `FiscalPort` for other modules (like `billing` and `nightaudit`) and standard DTOs.
-- **internal**: Contains the core logic, persistence (`JdbcTemplate`), and state management.
-- **provider**: Defines the `FiscalProvider` SPI.
+The external gateway is responsible for translating Peak's canonical fiscal
+request to the approved TRA/EFD/VFD provider contract. A property must complete
+provider certification before enabling the configuration in production.
 
-## Implementation Details
+## Metrics
 
-- **Submission Workflow**: Outbox-driven (in Phase 3, triggered synchronously but designed for idempotent retry).
-- **Persistence**: Managed via `fiscal_receipts` table.
-- **Simulator**: A deterministic signed simulator is available for development (`peak.fiscal.simulator.enabled=true`).
-
-## Key States
-
-- `PENDING`: Waiting for submission or scheduled for retry.
-- `ACCEPTED`: Successfully verified by the authority.
-- `REJECTED`: Permanently rejected by the authority (requires manual correction).
-- `OVERRIDDEN`: Manually authorized to proceed without fiscalization.
-
-## Security
-
-- Access to manual overrides requires specific supervisor permissions.
-- Every submission and override is audited.
-- Multi-tenant and multi-property isolation is enforced at the database and API level.
-
-## API Endpoints
-
-All fiscal endpoints are prefixed with `/api/v1/fiscal`.
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/invoices/{invoiceId}/receipt` | Retrieves the fiscal receipt for a specific invoice. |
-| `POST` | `/invoices/{invoiceId}/override` | Manually overrides fiscalization for an invoice (requires supervisor permission). |
-
-Note: Initial submission of invoices is handled asynchronously via the outbox pattern and `FiscalPort`.
+- `peak.fiscal.command{operation,result}`
+- `peak.fiscal.provider.submission{provider,result}`
+- `peak.fiscal.provider.latency{provider}`

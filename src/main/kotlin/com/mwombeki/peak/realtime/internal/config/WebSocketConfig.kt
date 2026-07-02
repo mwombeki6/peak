@@ -10,6 +10,7 @@ import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.context.event.EventListener
 import org.springframework.messaging.Message
 import org.springframework.messaging.MessageChannel
 import org.springframework.messaging.simp.config.ChannelRegistration
@@ -20,6 +21,7 @@ import org.springframework.messaging.support.ChannelInterceptor
 import org.springframework.messaging.support.MessageHeaderAccessor
 import org.springframework.scheduling.TaskScheduler
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
+import org.springframework.scheduling.annotation.EnableScheduling
 import org.springframework.http.server.ServerHttpRequest
 import org.springframework.http.server.ServerHttpResponse
 import org.springframework.http.server.ServletServerHttpRequest
@@ -30,6 +32,7 @@ import org.springframework.web.socket.WebSocketHandler
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer
+import org.springframework.web.socket.messaging.SessionDisconnectEvent
 import org.springframework.web.socket.server.HandshakeInterceptor
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
@@ -49,7 +52,7 @@ class WebSocketConfig(
     private val activeConnections = AtomicInteger(0)
 
     init {
-        meterRegistry.gauge("realtime.websocket.active_connections", activeConnections)
+        meterRegistry.gauge("peak.realtime.websocket.connections.active", activeConnections)
     }
 
     override fun configureMessageBroker(config: MessageBrokerRegistry) {
@@ -103,24 +106,45 @@ class WebSocketConfig(
                             throw SecurityException("Tenant identity is required for realtime WebSocket sessions.")
                         }
                         if (attributes.putIfAbsent(SESSION_COUNTED_ATTRIBUTE, true) == null) {
-                            activeConnections.incrementAndGet()
+                            val count = activeConnections.incrementAndGet()
+                            if (count > webSocketProperties.maxConnections) {
+                                activeConnections.decrementAndGet()
+                                attributes.remove(SESSION_COUNTED_ATTRIBUTE)
+                                meterRegistry.counter(
+                                    "peak.realtime.websocket.connections.rejected",
+                                    "reason",
+                                    "limit",
+                                ).increment()
+                                throw SecurityException("Realtime WebSocket connection limit reached.")
+                            }
                         }
-                        meterRegistry.counter("realtime.websocket.connect_attempts").increment()
+                        meterRegistry.counter("peak.realtime.websocket.connect_attempts").increment()
                     }
                     StompCommand.DISCONNECT -> {
-                        val attributes = accessor.sessionAttributes
-                        if (attributes?.remove(SESSION_COUNTED_ATTRIBUTE) == true) {
-                            activeConnections.updateAndGet { current -> (current - 1).coerceAtLeast(0) }
-                        }
+                        releaseConnection(accessor.sessionAttributes)
                     }
                     StompCommand.SUBSCRIBE -> {
                         val destination = accessor.destination ?: throw IllegalStateException("No channel destination provided.")
-                        val match = STREAM_DESTINATION_PATTERN.matchEntire(destination) ?: return message
-                        val targetTenantId = UUID.fromString(match.groupValues[1])
-                        val targetPropertyId = UUID.fromString(match.groupValues[2])
                         val context = accessor.sessionAttributes
                             ?.get(SESSION_CONTEXT_ATTRIBUTE) as? RequestContext
                             ?: throw SecurityException("Authenticated WebSocket session is required.")
+                        val match = STREAM_DESTINATION_PATTERN.matchEntire(destination)
+                            ?: run {
+                                val identity = context.identity as? RequestIdentity.Tenant
+                                if (identity != null) {
+                                    recordDeniedSubscription(
+                                        context,
+                                        identity.tenantId,
+                                        INVALID_PROPERTY_ID,
+                                        destination,
+                                    )
+                                }
+                                throw SecurityException(
+                                    "Realtime subscription destination is not allowed.",
+                                )
+                            }
+                        val targetTenantId = UUID.fromString(match.groupValues[1])
+                        val targetPropertyId = UUID.fromString(match.groupValues[2])
                         val identity = context.identity
 
                         if (!subscriptionAuthorizer.canSubscribe(identity, targetTenantId, targetPropertyId)) {
@@ -128,13 +152,27 @@ class WebSocketConfig(
                             throw SecurityException("Access denied for realtime property stream.")
                         }
 
-                        meterRegistry.counter("realtime.websocket.subscriptions").increment()
+                        meterRegistry.counter("peak.realtime.websocket.subscriptions").increment()
                     }
+                    StompCommand.SEND -> throw SecurityException(
+                        "Client publishing is not enabled for realtime streams.",
+                    )
                     else -> {}
                 }
                 return message
             }
         })
+    }
+
+    @EventListener
+    fun onSessionDisconnect(event: SessionDisconnectEvent) {
+        releaseConnection(StompHeaderAccessor.wrap(event.message).sessionAttributes)
+    }
+
+    private fun releaseConnection(attributes: MutableMap<String, Any>?) {
+        if (attributes?.remove(SESSION_COUNTED_ATTRIBUTE) == true) {
+            activeConnections.updateAndGet { current -> (current - 1).coerceAtLeast(0) }
+        }
     }
 
     private fun recordDeniedSubscription(
@@ -143,7 +181,7 @@ class WebSocketConfig(
         targetPropertyId: UUID,
         destination: String,
     ) {
-        meterRegistry.counter("realtime.security.violations").increment()
+        meterRegistry.counter("peak.realtime.security.violations").increment()
         securityAuditService.recordDeniedSubscription(
             context = context,
             targetTenantId = targetTenantId,
@@ -156,6 +194,7 @@ class WebSocketConfig(
         val STREAM_DESTINATION_PATTERN = Regex("^/topic/tenants/([^/]+)/properties/([^/]+)/stream$")
         const val SESSION_CONTEXT_ATTRIBUTE = "peak.realtime.request-context"
         const val SESSION_COUNTED_ATTRIBUTE = "peak.realtime.connection-counted"
+        val INVALID_PROPERTY_ID: UUID = UUID(0, 0)
     }
 }
 
@@ -184,7 +223,7 @@ class WebSocketHandshakeContextResolver(
 
     private fun reject(reason: String): Nothing? {
         meterRegistry.counter(
-            "realtime.websocket.handshakes.rejected",
+            "peak.realtime.websocket.handshakes.rejected",
             "reason",
             reason,
         ).increment()
@@ -193,6 +232,7 @@ class WebSocketHandshakeContextResolver(
 }
 
 @Configuration
+@EnableScheduling
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 class RealtimeBrokerSchedulerConfiguration {
     @Bean

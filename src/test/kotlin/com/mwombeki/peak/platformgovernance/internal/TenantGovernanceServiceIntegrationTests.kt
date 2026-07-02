@@ -54,6 +54,7 @@ class TenantGovernanceServiceIntegrationTests {
         assertEquals("active", activation.newStatus)
         assertEquals("active", tenantStatus(tenantId))
 
+        requestContextHolder.set(platformContext(platformUserId, "corr-governance-suspend"))
         val suspension = tenantGovernancePort.suspendTenant(
             tenantId = tenantId,
             operatorId = platformUserId,

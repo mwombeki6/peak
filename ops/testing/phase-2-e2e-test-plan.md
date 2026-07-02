@@ -296,13 +296,6 @@ Use a tenant token whose user has `module.manage`, `property.view`, `property.ma
 
 ```http
 POST {{baseUrl}}/api/v1/tenants/{{tenantId}}/modules
-Idempotency-Key: tenant-module-enable-booking-engine-001
-
-{ "moduleId": "booking_engine" }
-```
-
-```http
-POST {{baseUrl}}/api/v1/tenants/{{tenantId}}/modules
 Idempotency-Key: tenant-module-enable-communications-001
 
 { "moduleId": "communications" }
@@ -324,16 +317,7 @@ Idempotency-Key: property-create-001
 
 Expected: response has `propertyId`, `status=draft`, `changed=true`, `replayed=false`. Replay with the same idempotency key returns the same `propertyId` with `replayed=true`.
 
-2. Enable the booking engine for the property.
-
-```http
-POST {{baseUrl}}/api/v1/properties/{{propertyId}}/modules
-Idempotency-Key: property-module-booking-engine-001
-
-{ "moduleId": "booking_engine" }
-```
-
-Expected: `enabled=true`. Disabling the core `property` module must return `400`.
+2. Confirm disabling the core `property` module returns `400`.
 
 3. Create the structural setup.
 

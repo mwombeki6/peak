@@ -20,16 +20,15 @@ contracts.
 - `GET /api/v1/properties/{propertyId}/folios/{folioId}`
 - `POST /api/v1/properties/{propertyId}/folios/{folioId}/charges`
 - `POST /api/v1/properties/{propertyId}/folios/{folioId}/charges/{chargeId}/reverse`
-- `POST /api/v1/properties/{propertyId}/folios/{folioId}/payments`
 - `POST /api/v1/properties/{propertyId}/folios/{folioId}/invoice`
 - `GET /api/v1/properties/{propertyId}/invoices`
 - `GET /api/v1/properties/{propertyId}/invoices/{invoiceId}`
 
 ## Engineer B Contract
 
-Provider payment modules must call `BillingPort.postConfirmedPayment` after a
+The payment module calls `BillingPort.postConfirmedPayment` after a
 cash or mobile-money transaction is confirmed. Provider calls must not write
-directly to billing tables.
+directly to billing tables. There is no public direct-payment billing route.
 
 ## Financial Safety
 

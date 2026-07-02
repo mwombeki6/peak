@@ -1,62 +1,51 @@
 package com.mwombeki.peak.pos.internal.web
 
-import com.mwombeki.peak.pos.api.ApproveVarianceRequest
-import com.mwombeki.peak.pos.api.CloseSessionRequest
-import com.mwombeki.peak.pos.api.FolioTransferRequest
-import com.mwombeki.peak.pos.api.OpenSessionRequest
+import com.mwombeki.peak.pos.api.ApprovePosVarianceRequest
+import com.mwombeki.peak.pos.api.ClosePosSessionRequest
+import com.mwombeki.peak.pos.api.OpenPosSessionRequest
+import com.mwombeki.peak.pos.api.PosSessionResponse
+import com.mwombeki.peak.pos.api.PosSessionSummaryResponse
 import com.mwombeki.peak.pos.internal.PosSessionService
-import org.springframework.http.ResponseEntity
-import org.springframework.security.access.prepost.PreAuthorize
-import org.springframework.web.bind.annotation.*
+import jakarta.validation.Valid
 import java.util.UUID
+import org.springframework.http.HttpStatus
+import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.ResponseStatus
+import org.springframework.web.bind.annotation.RestController
 
 @RestController
 @RequestMapping("/api/v1/properties/{propertyId}/pos-sessions")
-class PosSessionController (
+class PosSessionController(
     private val posSessionService: PosSessionService,
-){
+) {
     @PostMapping("/open")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN', 'ROLE_PROPERTY_MANAGER', 'ROLE_CASHIER')")
-    fun openNewSession(
+    @ResponseStatus(HttpStatus.CREATED)
+    fun openSession(
         @PathVariable propertyId: UUID,
-        @RequestBody request: OpenSessionRequest
-    ): ResponseEntity<Map<String, UUID>> {
-        // Enforce that the propertyId in the URL path matches our request logic
-        val openRequestWithProperty = request.copy(propertyId = propertyId)
-        val sessionId = posSessionService.openSession(openRequestWithProperty)
-        return ResponseEntity.ok(mapOf("sessionId" to sessionId))
-    }
+        @Valid @RequestBody request: OpenPosSessionRequest,
+    ): PosSessionResponse = posSessionService.openSession(propertyId, request)
 
     @PostMapping("/{sessionId}/close")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN', 'ROLE_PROPERTY_MANAGER', 'ROLE_CASHIER')")
-    fun closeActiveSession(
+    fun closeSession(
         @PathVariable propertyId: UUID,
         @PathVariable sessionId: UUID,
-        @RequestBody request: CloseSessionRequest
-    ): ResponseEntity<Map<String, String>> {
-        posSessionService.closeSession(sessionId, request)
-        return ResponseEntity.ok(mapOf("status" to "Session close instruction processed successfully."))
-    }
+        @Valid @RequestBody request: ClosePosSessionRequest,
+    ): PosSessionResponse = posSessionService.closeSession(propertyId, sessionId, request)
 
     @PostMapping("/{sessionId}/variance-approve")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN', 'ROLE_PROPERTY_MANAGER')") //  Enforces independent approval!
     fun approveVariance(
         @PathVariable propertyId: UUID,
         @PathVariable sessionId: UUID,
-        @RequestBody request: ApproveVarianceRequest
-    ): ResponseEntity<Map<String, String>> {
-        posSessionService.approveSessionVariance(sessionId, request)
-        return ResponseEntity.ok(mapOf("status" to "Session variance approved and closed successfully."))
-    }
+        @Valid @RequestBody request: ApprovePosVarianceRequest,
+    ): PosSessionResponse = posSessionService.approveVariance(propertyId, sessionId, request)
 
-    @PostMapping("/{sessionId}/folio-transfer")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN', 'ROLE_PROPERTY_MANAGER', 'ROLE_CASHIER')")
-    fun transferChargeToRoomFolio(
+    @GetMapping("/{sessionId}")
+    fun getSessionSummary(
         @PathVariable propertyId: UUID,
         @PathVariable sessionId: UUID,
-        @RequestBody request: FolioTransferRequest
-    ): ResponseEntity<Map<String, String>> {
-        posSessionService.transferToFolio(sessionId, request)
-        return ResponseEntity.ok(mapOf("status" to "Charge successfully transferred to guest folio ledger."))
-    }
+    ): PosSessionSummaryResponse = posSessionService.getSessionSummary(propertyId, sessionId)
 }

@@ -5,11 +5,13 @@ import java.time.LocalTime
 import java.util.UUID
 
 data class EnqueueNotificationRequest(
-   val propertyId: UUID? = null,
-   val channel: String,     // "EMAIL", "SMS", "WHATSAPP"
-   val recipient: String,   // e.g., "manager@mbeyapeak.com" or "255712345678"
-   val subject: String?,
-   val content: String,
+    val propertyId: UUID? = null,
+    val contactChannelId: UUID,
+    val purpose: String,
+    val templateId: UUID? = null,
+    val variables: Map<String, String> = emptyMap(),
+    val subject: String? = null,
+    val content: String? = null,
 )
 
 interface CommunicationPort {

@@ -286,6 +286,7 @@ class PlatformAdministrationService(
             replayType = PlatformRoleMutationReceipt::class.java,
         ) { reservationId ->
             val id = UUID.randomUUID()
+            requireDelegablePlatformPermissions(command.permissionCodes)
             val permissionIds = requirePlatformPermissions(command.permissionCodes)
             try {
                 jdbcTemplate.update(
@@ -330,7 +331,9 @@ class PlatformAdministrationService(
             replayType = PlatformRoleMutationReceipt::class.java,
         ) { reservationId ->
             requireMutablePlatformRole(command.platformRoleId)
-            val permissionIds = command.permissionCodes?.let(::requirePlatformPermissions)
+            val permissionIds = command.permissionCodes
+                ?.also(::requireDelegablePlatformPermissions)
+                ?.let(::requirePlatformPermissions)
 
             val rows = jdbcTemplate.update(
                 """
@@ -427,6 +430,7 @@ class PlatformAdministrationService(
             }
             requireActivePlatformUser(command.platformUserId)
             requireActivePlatformRole(command.platformRoleId)
+            requireDelegablePlatformRole(command.platformRoleId)
             val inserted = jdbcTemplate.update(
                 """
                 INSERT INTO platform_user_roles (platform_user_id, platform_role_id, assigned_by)
@@ -922,6 +926,56 @@ class PlatformAdministrationService(
 
         require(!row) {
             "System platform roles cannot be modified"
+        }
+        val assignedToActor = jdbcTemplate.queryForObject(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM platform_user_roles
+                WHERE platform_user_id = ?
+                  AND platform_role_id = ?
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            currentPlatformActorId(),
+            platformRoleId,
+        ) == true
+        require(!assignedToActor) {
+            "Platform operator cannot modify a role assigned to self"
+        }
+    }
+
+    private fun requireDelegablePlatformRole(platformRoleId: UUID) {
+        val permissionCodes = jdbcTemplate.queryForList(
+            """
+            SELECT pp.code
+            FROM platform_role_permissions prp
+            JOIN platform_permissions pp
+              ON pp.id = prp.platform_permission_id
+            WHERE prp.platform_role_id = ?
+            ORDER BY pp.code
+            """.trimIndent(),
+            String::class.java,
+            platformRoleId,
+        ).filterNotNull()
+        requireDelegablePlatformPermissions(permissionCodes)
+    }
+
+    private fun requireDelegablePlatformPermissions(permissionCodes: List<String>) {
+        val actorId = currentPlatformActorId()
+        val unauthorized = permissionCodes
+            .map { it.normalizedCode() }
+            .distinct()
+            .filterNot { permissionCode ->
+                jdbcTemplate.queryForObject(
+                    "SELECT platform_user_has_permission(?, ?)",
+                    Boolean::class.java,
+                    actorId,
+                    permissionCode,
+                ) == true
+            }
+        require(unauthorized.isEmpty()) {
+            "Platform roles cannot include permissions the actor does not hold"
         }
     }
 

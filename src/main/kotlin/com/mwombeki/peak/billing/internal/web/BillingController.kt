@@ -7,7 +7,6 @@ import com.mwombeki.peak.billing.api.FolioResponse
 import com.mwombeki.peak.billing.api.InvoiceResponse
 import com.mwombeki.peak.billing.api.IssueInvoiceRequest
 import com.mwombeki.peak.billing.api.PostChargeRequest
-import com.mwombeki.peak.billing.api.PostPaymentRequest
 import com.mwombeki.peak.billing.api.ReverseChargeRequest
 import java.util.UUID
 import org.springframework.web.bind.annotation.GetMapping
@@ -43,15 +42,6 @@ class BillingController(
         @RequestBody request: PostChargeRequest,
     ): BillingMutationReceipt {
         return billingPort.postCharge(propertyId, folioId, request)
-    }
-
-    @PostMapping("/folios/{folioId}/payments")
-    fun postPayment(
-        @PathVariable propertyId: UUID,
-        @PathVariable folioId: UUID,
-        @RequestBody request: PostPaymentRequest,
-    ): BillingMutationReceipt {
-        return billingPort.postPayment(propertyId, folioId, request)
     }
 
     @PostMapping("/folios/{folioId}/charges/{chargeId}/reverse")

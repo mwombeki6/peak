@@ -103,7 +103,7 @@ class RouteAccessMatrixCoverageIntegrationTests {
     private fun String.toSamplePath(): String {
         return PATH_VARIABLE_PATTERN.replace(this) { match ->
             val variableName = match.groupValues[1].substringBefore(":")
-            SAMPLE_UUIDS.getValue(variableName)
+            SAMPLE_UUIDS[variableName] ?: DEFAULT_SAMPLE_UUID
         }
     }
 
@@ -111,6 +111,7 @@ class RouteAccessMatrixCoverageIntegrationTests {
         return when {
             startsWith("/api/v1/platform/") -> GuardMode.PLATFORM_PERMISSION
             startsWith("/api/v1/public/properties/") -> GuardMode.MODULE_ONLY
+            startsWith("/api/v1/payments/webhooks/") -> GuardMode.PUBLIC_TOKEN
             this == "/api/v1/invitations/accept" -> GuardMode.PUBLIC_TOKEN
             startsWith("/api/v1/tenants/") -> GuardMode.STAFF_PERMISSION
             startsWith("/api/v1/properties") -> GuardMode.STAFF_PERMISSION
@@ -124,6 +125,7 @@ class RouteAccessMatrixCoverageIntegrationTests {
         return when {
             startsWith("/api/v1/platform/") -> RouteScope.PLATFORM
             startsWith("/api/v1/public/properties/") -> RouteScope.PUBLIC_PROPERTY
+            startsWith("/api/v1/payments/webhooks/") -> RouteScope.PUBLIC
             this == "/api/v1/invitations/accept" -> RouteScope.PUBLIC
             startsWith("/api/v1/tenants/") -> RouteScope.TENANT
             this == "/api/v1/properties" -> RouteScope.TENANT
@@ -153,6 +155,8 @@ class RouteAccessMatrixCoverageIntegrationTests {
         )
 
         val PATH_VARIABLE_PATTERN = Regex("\\{([^}]+)}")
+        val DEFAULT_SAMPLE_UUID =
+            UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").toString()
 
         val SAMPLE_UUIDS = mapOf(
             "id" to UUID.fromString("11111111-1111-1111-1111-111111111111").toString(),
@@ -178,6 +182,11 @@ class RouteAccessMatrixCoverageIntegrationTests {
             "chargeId" to UUID.fromString("77777777-7777-7777-7777-777777777785").toString(),
             "invoiceId" to UUID.fromString("77777777-7777-7777-7777-777777777786").toString(),
             "runId" to UUID.fromString("77777777-7777-7777-7777-777777777787").toString(),
+            "cashSessionId" to UUID.fromString("77777777-7777-7777-7777-777777777789").toString(),
+            "transactionId" to UUID.fromString("77777777-7777-7777-7777-777777777790").toString(),
+            "providerAccountId" to UUID.fromString("77777777-7777-7777-7777-777777777791").toString(),
+            "reconciliationId" to UUID.fromString("77777777-7777-7777-7777-777777777792").toString(),
+            "receiptId" to UUID.fromString("77777777-7777-7777-7777-777777777793").toString(),
             "contactId" to UUID.fromString("88888888-8888-8888-8888-888888888887").toString(),
             "channelId" to UUID.fromString("88888888-8888-8888-8888-888888888888").toString(),
             "deliveryRequestId" to UUID.fromString("99999999-9999-9999-9999-999999999999").toString(),

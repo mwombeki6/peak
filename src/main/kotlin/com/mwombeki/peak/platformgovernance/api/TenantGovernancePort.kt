@@ -12,5 +12,6 @@ data class GovernanceActionResponse(
     val tenantId: UUID,
     val previousStatus: String,
     val newStatus: String,
-    val message: String
+    val message: String,
+    val replayed: Boolean = false,
 )

@@ -21,7 +21,12 @@ This directory contains the Podman Compose deployment baseline for Peak.
 7. Start PostgreSQL and wait for its health check, then run Flyway through the migration profile: `podman compose --env-file ops/production/.env -f ops/production/compose.yaml --profile migration run --rm --no-deps peak-migration`. The `--no-deps` flag is required with Podman Compose so a one-shot migration does not reconcile or replace already-running services.
 8. On the first installation only, create the initial operator in Keycloak, set `PEAK_PLATFORM_BOOTSTRAP_ENABLED=true` plus the operator name, email, exact issuer, and Keycloak subject, then run `ops/scripts/bootstrap-platform.sh`. Immediately set the flag back to `false` and clear the four bootstrap identity values. The command refuses to create a different root after platform initialization.
 9. Start API and worker: `podman compose --env-file ops/production/.env -f ops/production/compose.yaml up -d peak-api peak-worker`.
-10. Verify the deployment: `ops/scripts/smoke-test.sh http://localhost:8080 http://localhost:8081`.
+10. Configure a host reverse proxy to terminate TLS for `PEAK_PUBLIC_HOST` and
+    `KEYCLOAK_HOSTNAME`, forwarding only to `127.0.0.1:8080` and
+    `127.0.0.1:8081`. Preserve `X-Forwarded-For`, `X-Forwarded-Proto`, and
+    `Host`, overwrite any client-supplied forwarding headers, and restrict
+    direct access to both loopback listeners.
+11. Verify the deployment: `ops/scripts/smoke-test.sh http://localhost:8080 http://localhost:8081`.
 
 The standard deploy script performs steps 3, 7, 8, and 9:
 
@@ -32,6 +37,9 @@ ops/scripts/deploy.sh
 ## Security Requirements
 
 - Never run API or worker as the migration login.
+- Keep `PEAK_API_BIND_ADDRESS` and `KEYCLOAK_BIND_ADDRESS` on `127.0.0.1`.
+  Public traffic must enter through an HTTPS reverse proxy; do not expose the
+  application or Keycloak plaintext ports directly.
 - Keep Flyway disabled for API and worker; only `peak-migration` runs migrations.
 - Keep the one-shot `peak-bootstrap` service disabled after the initial platform operator is linked. Routine operator, tenant, and tenant-admin provisioning must use authenticated APIs.
 - Keep `PEAK_ALLOW_HEADER_IDENTITY=false` in production.
@@ -39,13 +47,36 @@ ops/scripts/deploy.sh
 - Keep `PEAK_COMMUNICATION_DELIVERY_LOCAL_PROVIDER_ENABLED=false` in production.
 - Configure the worker HTTP communication gateway with an HTTPS base URL and a
   secret API key. The provider contract is `POST /v1/messages`.
+- Generate a random 32-byte envelope key, encode it as base64, store it in
+  `PEAK_ENVELOPE_KEY_BASE64`, and keep
+  `PEAK_ENVELOPE_KEY_REFERENCE=env:PEAK_ENVELOPE_KEY_BASE64`.
+- During rotation, move the old key to
+  `PEAK_ENVELOPE_PREVIOUS_KEY_BASE64` and set
+  `PEAK_ENVELOPE_PREVIOUS_KEY_REFERENCE=env:PEAK_ENVELOPE_PREVIOUS_KEY_BASE64`.
+  Remove it only after every invitation encrypted with the old key has expired.
+- Set `PEAK_INVITATION_ACCEPTANCE_BASE_URL` to the public HTTPS application
+  route that consumes invitation tokens.
 - Keep SpringDoc disabled in production.
 - Keep CORS origins explicit.
 - Keep realtime WebSocket origins explicit and free of wildcards.
 - Import and verify the Keycloak realm before allowing tenant users to authenticate.
 - Keep `PEAK_SECURITY_JWT_ISSUER_URI` equal to the Keycloak realm issuer and `PEAK_SECURITY_JWT_AUDIENCE=peak-api`.
 - Resolve tenant and platform users through active OIDC `identity_links`; do not rely on client-editable user attributes for authorization.
-- Keep payment provider URLs and credentials out of checked-in YAML. Production payment providers are supplied through environment variables and must use HTTPS.
+- Keep payment and fiscal credentials out of checked-in YAML. Configure
+  provider accounts with `providerCode=http_gateway`, exact HTTPS endpoints,
+  `secretRef=env:PEAK_PAYMENT_GATEWAY_CREDENTIAL` or
+  `env:PEAK_FISCAL_GATEWAY_CREDENTIAL`, and
+  `webhookSecretRef=env:PEAK_PAYMENT_WEBHOOK_SECRET`.
+- Set `PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS` to the exact comma-separated DNS
+  hosts certified for payment and fiscal traffic. Wildcards, URLs, localhost,
+  and IP literals are forbidden; tenant-configured endpoints outside this
+  operator allowlist are rejected before any network request.
+- Enforce the same restriction at the host/network egress layer using the
+  provider-published destination ranges. The application allowlist does not
+  replace DNS and firewall controls.
+- Certify the provider-neutral gateway against the selected mobile-money and
+  TRA/EFD/VFD providers before enabling those accounts. Contract mocks cannot
+  start under the production profile.
 - Reject placeholder secrets and short passwords with `ops/scripts/validate-production-env.sh`.
 - Store production secrets outside Git; `.env` is ignored and is only a local operator input file.
 - Generate `PEAK_GUEST_IDENTITY_HASH_KEY` from at least 32 cryptographically
@@ -94,6 +125,7 @@ Create a backup:
 
 ```sh
 ops/scripts/backup-postgres.sh
+ops/scripts/backup-keycloak.sh
 ```
 
 Dry-run restore into a disposable environment before every production restore:
@@ -101,7 +133,11 @@ Dry-run restore into a disposable environment before every production restore:
 1. Start a disposable PostgreSQL container or a separate Podman Compose project.
 2. Set `COMPOSE_FILE`, `ENV_FILE`, and `POSTGRES_DB` to the disposable target.
 3. Run `ops/scripts/restore-postgres.sh backups/<backup>.sql.gz`.
-4. Run `ops/scripts/smoke-test.sh` against the disposable API after migrations are applied.
+4. Restore the Keycloak backup with
+   `ops/scripts/restore-keycloak.sh backups/<keycloak-backup>.sql.gz` against a
+   disposable Keycloak database when identity recovery is in scope.
+5. Run `ops/scripts/verify-keycloak-realm.sh` and `ops/scripts/smoke-test.sh`
+   against the disposable environment after migrations are applied.
 
 Never test restore against the live production database.
 
@@ -155,3 +191,9 @@ validation errors. For identity operations, alert when provider
 `unavailable` outcomes persist for five minutes, manual fallback exceeds the
 normal property baseline, blocked check-ins exceed ten in five minutes, or
 provider p95 latency exceeds the configured read timeout.
+
+Realtime alerts should include journal polling stalls, replay growth,
+connection-limit rejections, send failures, and abrupt disconnect spikes.
+Payment/fiscal alerts should include provider outbox retries, webhook signature
+failures, reconciliation variance, rejected fiscal receipts, and provider
+latency above the configured request timeout.

@@ -1,55 +1,50 @@
 package com.mwombeki.peak.pos.internal.web
 
-import com.mwombeki.peak.pos.api.*
+import com.mwombeki.peak.pos.api.AddPosOrderItemRequest
+import com.mwombeki.peak.pos.api.CreatePosOrderRequest
+import com.mwombeki.peak.pos.api.PosOrderResponse
+import com.mwombeki.peak.pos.api.SettlePosOrderRequest
 import com.mwombeki.peak.pos.internal.PosOrderService
-import org.springframework.http.ResponseEntity
-import org.springframework.security.access.prepost.PreAuthorize
-import org.springframework.web.bind.annotation.*
+import jakarta.validation.Valid
 import java.util.UUID
+import org.springframework.http.HttpStatus
+import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.ResponseStatus
+import org.springframework.web.bind.annotation.RestController
 
 @RestController
 @RequestMapping("/api/v1/properties/{propertyId}/pos-orders")
 class PosOrderController(
-    private val posOrderService: PosOrderService
+    private val posOrderService: PosOrderService,
 ) {
     @PostMapping
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN', 'ROLE_PROPERTY_MANAGER', 'ROLE_CASHIER')")
+    @ResponseStatus(HttpStatus.CREATED)
     fun createOrder(
         @PathVariable propertyId: UUID,
-        @RequestBody request: CreateOrderRequest
-    ): ResponseEntity<Map<String, UUID>> {
-        val orderId = posOrderService.createOrder(propertyId, request)
-        return ResponseEntity.ok(mapOf("orderId" to orderId))
-    }
+        @Valid @RequestBody request: CreatePosOrderRequest,
+    ): PosOrderResponse = posOrderService.createOrder(propertyId, request)
 
     @PostMapping("/{orderId}/items")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN', 'ROLE_PROPERTY_MANAGER', 'ROLE_CASHIER')")
     fun addItem(
         @PathVariable propertyId: UUID,
         @PathVariable orderId: UUID,
-        @RequestBody request: AddOrderItemRequest
-    ): ResponseEntity<Map<String, String>> {
-        posOrderService.addItemToOrder(orderId, request)
-        return ResponseEntity.ok(mapOf("status" to "Item added successfully."))
-    }
+        @Valid @RequestBody request: AddPosOrderItemRequest,
+    ): PosOrderResponse = posOrderService.addItem(propertyId, orderId, request)
 
     @GetMapping("/{orderId}")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN', 'ROLE_PROPERTY_MANAGER', 'ROLE_CASHIER')")
     fun getOrder(
         @PathVariable propertyId: UUID,
-        @PathVariable orderId: UUID
-    ): ResponseEntity<PosOrderResponse> {
-        return ResponseEntity.ok(posOrderService.getOrder(orderId))
-    }
+        @PathVariable orderId: UUID,
+    ): PosOrderResponse = posOrderService.getOrder(propertyId, orderId)
 
     @PostMapping("/{orderId}/settle")
-    @PreAuthorize("hasAnyRole('ROLE_TENANT_ADMIN', 'ROLE_PROPERTY_MANAGER', 'ROLE_CASHIER')")
     fun settleOrder(
         @PathVariable propertyId: UUID,
         @PathVariable orderId: UUID,
-        @RequestBody request: PosOrderSettlementRequest
-    ): ResponseEntity<Map<String, String>> {
-        posOrderService.settleOrder(orderId, request)
-        return ResponseEntity.ok(mapOf("status" to "Order settled successfully."))
-    }
+        @Valid @RequestBody request: SettlePosOrderRequest,
+    ): PosOrderResponse = posOrderService.settleOrder(propertyId, orderId, request)
 }

@@ -1,7 +1,13 @@
 @ApplicationModule(
         id = "usermanagement",
         displayName = "User Management",
-        allowedDependencies = {"shared::context", "shared::security", "audit::api", "reliability::api"}
+        allowedDependencies = {
+                "shared::context",
+                "shared::security",
+                "shared::secrets",
+                "audit::api",
+                "reliability::api"
+        }
 )
 package com.mwombeki.peak.usermanagement;
 

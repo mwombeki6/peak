@@ -26,6 +26,7 @@ data class NightAuditRunResponse(
     val tenantId: UUID,
     val propertyId: UUID,
     val auditDate: LocalDate,
+    val attemptNo: Int,
     val status: String,
     val startedAt: Instant?,
     val completedAt: Instant?,

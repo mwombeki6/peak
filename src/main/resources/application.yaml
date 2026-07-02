@@ -35,8 +35,32 @@ peak:
       connect-timeout: ${PEAK_NIDA_CONNECT_TIMEOUT:3s}
       read-timeout: ${PEAK_NIDA_READ_TIMEOUT:8s}
   realtime:
+    fanout:
+      parallelism: ${PEAK_REALTIME_FANOUT_PARALLELISM:4}
+      queue-capacity-per-shard: ${PEAK_REALTIME_FANOUT_QUEUE_CAPACITY_PER_SHARD:500}
     websocket:
       allowed-origins: ${PEAK_REALTIME_WEBSOCKET_ALLOWED_ORIGINS:}
+      max-connections: ${PEAK_REALTIME_WEBSOCKET_MAX_CONNECTIONS:500}
+    sse:
+      max-connections-per-property: ${PEAK_REALTIME_SSE_MAX_CONNECTIONS_PER_PROPERTY:100}
+      timeout: ${PEAK_REALTIME_SSE_TIMEOUT:30m}
+      heartbeat-interval-ms: ${PEAK_REALTIME_SSE_HEARTBEAT_INTERVAL_MS:15000}
+    journal:
+      fanout-enabled: ${PEAK_REALTIME_JOURNAL_FANOUT_ENABLED:true}
+      poll-batch-size: ${PEAK_REALTIME_JOURNAL_POLL_BATCH_SIZE:500}
+      replay-limit: ${PEAK_REALTIME_JOURNAL_REPLAY_LIMIT:500}
+      poll-interval-ms: ${PEAK_REALTIME_JOURNAL_POLL_INTERVAL_MS:250}
+      cleanup-interval-ms: ${PEAK_REALTIME_JOURNAL_CLEANUP_INTERVAL_MS:60000}
+  payment:
+    providers:
+      http-gateway:
+        connect-timeout: ${PEAK_PAYMENT_HTTP_CONNECT_TIMEOUT:3s}
+        request-timeout: ${PEAK_PAYMENT_HTTP_REQUEST_TIMEOUT:15s}
+  fiscal:
+    providers:
+      http-gateway:
+        connect-timeout: ${PEAK_FISCAL_HTTP_CONNECT_TIMEOUT:3s}
+        request-timeout: ${PEAK_FISCAL_HTTP_REQUEST_TIMEOUT:20s}
   reliability:
     outbox:
       worker:
@@ -53,12 +77,20 @@ peak:
         stale-lock-timeout: ${PEAK_OUTBOX_WORKER_STALE_LOCK_TIMEOUT:15m}
         stale-reclaim-interval: ${PEAK_OUTBOX_WORKER_STALE_RECLAIM_INTERVAL:1m}
         stale-reclaim-limit: ${PEAK_OUTBOX_WORKER_STALE_RECLAIM_LIMIT:500}
+        heartbeat-interval: ${PEAK_OUTBOX_WORKER_HEARTBEAT_INTERVAL:15s}
+        heartbeat-stale-after: ${PEAK_OUTBOX_WORKER_HEARTBEAT_STALE_AFTER:45s}
+        health-required: ${PEAK_OUTBOX_WORKER_HEALTH_REQUIRED:false}
   security:
+    envelope:
+      key-reference: ${PEAK_ENVELOPE_KEY_REFERENCE:literal:cGVhay1sb2NhbC1lbnZlbG9wZS1rZXktMzItYnl0ZSE=}
+      previous-key-reference: ${PEAK_ENVELOPE_PREVIOUS_KEY_REFERENCE:}
     http:
       jwt:
         enabled: ${PEAK_SECURITY_JWT_ENABLED:false}
         issuer-uri: ${PEAK_SECURITY_JWT_ISSUER_URI:}
         audience: ${PEAK_SECURITY_JWT_AUDIENCE:}
+        discovery-health-timeout: ${PEAK_SECURITY_JWT_DISCOVERY_HEALTH_TIMEOUT:3s}
+        discovery-health-cache-ttl: ${PEAK_SECURITY_JWT_DISCOVERY_HEALTH_CACHE_TTL:30s}
       cors:
         allowed-origins: ${PEAK_CORS_ALLOWED_ORIGINS:}
         allowed-headers:
@@ -66,8 +98,6 @@ peak:
           - Content-Type
           - Idempotency-Key
           - X-Correlation-Id
-          - X-Peak-Public-Tenant-Id
-          - X-Peak-Public-Property-Id
         exposed-headers:
           - X-Correlation-Id
     request-context:
@@ -77,9 +107,10 @@ peak:
       enabled: ${PEAK_ROUTE_GUARD_ENABLED:true}
       deny-unregistered-api-routes: ${PEAK_ROUTE_GUARD_DENY_UNREGISTERED:true}
       rule-cache-ttl: ${PEAK_ROUTE_GUARD_RULE_CACHE_TTL:30s}
-  fiscal:
-    simulator:
-      enabled: ${PEAK_FISCAL_SIMULATOR_ENABLED:true}
+  communication:
+    invitation:
+      acceptance-base-url: ${PEAK_INVITATION_ACCEPTANCE_BASE_URL:http://localhost:3000/invitations/accept}
+      expose-token-in-response: ${PEAK_INVITATION_EXPOSE_TOKEN_IN_RESPONSE:false}
 management:
   otlp:
     metrics:

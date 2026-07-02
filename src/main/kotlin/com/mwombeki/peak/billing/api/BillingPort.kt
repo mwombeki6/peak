@@ -26,6 +26,13 @@ interface BillingPort {
         idempotencyKeyId: UUID?,
     ): UUID
 
+    fun reverseConfirmedPayment(
+        tenantId: UUID,
+        propertyId: UUID,
+        request: ConfirmedPaymentReversalRequest,
+        idempotencyKeyId: UUID,
+    ): UUID
+
     fun checkoutFinancialState(
         tenantId: UUID,
         propertyId: UUID,
@@ -41,7 +48,13 @@ interface BillingPort {
     fun listFolios(propertyId: UUID): List<FolioResponse>
     fun getFolio(propertyId: UUID, folioId: UUID): FolioResponse?
     fun postCharge(propertyId: UUID, folioId: UUID, request: PostChargeRequest): BillingMutationReceipt
-    fun postPayment(propertyId: UUID, folioId: UUID, request: PostPaymentRequest): BillingMutationReceipt
+    fun postPosCharge(
+        tenantId: UUID,
+        propertyId: UUID,
+        folioId: UUID,
+        request: PostChargeRequest,
+        idempotencyKeyId: UUID,
+    ): UUID
     fun reverseCharge(
         propertyId: UUID,
         folioId: UUID,

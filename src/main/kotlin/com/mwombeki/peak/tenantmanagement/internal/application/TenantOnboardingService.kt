@@ -120,46 +120,6 @@ class TenantOnboardingService(
         return response(tenant, profile)
     }
 
-    @Transactional
-    override fun updateTenantStatus(id: UUID, status: TenantStatus): TenantResponse {
-        val operatorId = bindPlatformContext()
-        return idempotentMutation(
-            operationType = "platform.tenant.status.${status.databaseValue}",
-            requestPayload = mapOf("tenantId" to id, "status" to status.databaseValue),
-        ) { idempotencyKeyId ->
-            val before = tenantRepository.findById(id)
-                ?: throw IllegalArgumentException("Tenant was not found")
-
-            tenantRepository.updateStatus(id, status)
-            tenantRepository.recordLifecycleEvent(
-                tenantId = id,
-                eventType = status.lifecycleEventType(),
-                reason = "Tenant status changed from ${before.status.databaseValue} to ${status.databaseValue}",
-                platformUserId = operatorId,
-                metadata = mapOf(
-                    "previousStatus" to before.status.databaseValue,
-                    "newStatus" to status.databaseValue,
-                ),
-            )
-
-            val tenant = tenantRepository.findById(id)
-                ?: throw IllegalStateException("Tenant disappeared after status update")
-            val profile = tenantProfileRepository.findByTenantId(id)
-                ?: throw IllegalStateException("Tenant profile is missing for tenant $id")
-            recordSideEffects(
-                tenantId = id,
-                action = "platform.tenants.status.changed",
-                payload = mapOf(
-                    "tenantId" to id,
-                    "previousStatus" to before.status.databaseValue,
-                    "newStatus" to status.databaseValue,
-                ),
-                idempotencyKeyId = idempotencyKeyId,
-            )
-            response(tenant, profile)
-        }
-    }
-
     private fun idempotentMutation(
         operationType: String,
         requestPayload: Any,
@@ -260,15 +220,4 @@ class TenantOnboardingService(
         return "tenant_${tenantId.toString().replace("-", "")}"
     }
 
-    private fun TenantStatus.lifecycleEventType(): String {
-        return when (this) {
-            TenantStatus.TRIAL -> "created"
-            TenantStatus.ACTIVE -> "activated"
-            TenantStatus.SUSPENDED -> "suspended"
-            TenantStatus.FROZEN -> "frozen"
-            TenantStatus.ARCHIVED -> "archived"
-            TenantStatus.TERMINATED -> "terminated"
-            TenantStatus.CANCELLED -> "cancelled"
-        }
-    }
 }

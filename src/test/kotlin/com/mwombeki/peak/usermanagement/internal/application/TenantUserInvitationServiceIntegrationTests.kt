@@ -1,6 +1,8 @@
 package com.mwombeki.peak.usermanagement.internal.application
 
 import com.mwombeki.peak.TestcontainersConfiguration
+import com.mwombeki.peak.reliability.api.OutboxDestination
+import com.mwombeki.peak.reliability.internal.OutboxWorkerProcessor
 import com.mwombeki.peak.shared.context.RequestContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
@@ -38,6 +40,9 @@ class TenantUserInvitationServiceIntegrationTests {
 
     @Autowired
     private lateinit var jdbcTemplate: JdbcTemplate
+
+    @Autowired
+    private lateinit var outboxWorkerProcessor: OutboxWorkerProcessor
 
     @AfterTest
     fun clearContext() {
@@ -117,7 +122,7 @@ class TenantUserInvitationServiceIntegrationTests {
 
         val outbox = jdbcTemplate.queryForMap(
             """
-            SELECT tenant_id, aggregate_type, aggregate_id, event_type,
+            SELECT id, tenant_id, aggregate_type, aggregate_id, event_type,
                    destination, payload::text AS payload, idempotency_key_id
             FROM outbox_events
             WHERE aggregate_id = ?
@@ -132,6 +137,28 @@ class TenantUserInvitationServiceIntegrationTests {
         assertEquals("email", outbox["destination"])
         assertEquals(idempotency["id"], outbox["idempotency_key_id"])
         assertFalse(outbox["payload"].toString().contains(receipt.invitationToken))
+
+        outboxWorkerProcessor.processBatchBlocking(OutboxDestination.EMAIL)
+        assertEquals(
+            "delivered",
+            jdbcTemplate.queryForObject(
+                "SELECT status FROM outbox_events WHERE id = ?",
+                String::class.java,
+                outbox["id"],
+            ),
+        )
+        assertEquals(
+            "delivered",
+            jdbcTemplate.queryForObject(
+                """
+                SELECT status
+                FROM communication_delivery_requests
+                WHERE original_outbox_event_id = ?
+                """.trimIndent(),
+                String::class.java,
+                outbox["id"],
+            ),
+        )
     }
 
     @Test
@@ -450,7 +477,7 @@ class TenantUserInvitationServiceIntegrationTests {
             )
         }
 
-        assertTrue(error.message.orEmpty().contains("Invitation token is invalid"))
+        assertEquals("Invitation acceptance was rejected", error.message)
     }
 
     @Test
@@ -487,7 +514,7 @@ class TenantUserInvitationServiceIntegrationTests {
             )
         }
 
-        assertTrue(error.message.orEmpty().contains("Invitation has expired"))
+        assertEquals("Invitation acceptance was rejected", error.message)
     }
 
     @Test
@@ -536,7 +563,7 @@ class TenantUserInvitationServiceIntegrationTests {
             )
         }
 
-        assertTrue(error.message.orEmpty().contains("OIDC identity is already linked"))
+        assertEquals("Invitation acceptance was rejected", error.message)
     }
 
     private fun tenantFixture(): TenantFixture {

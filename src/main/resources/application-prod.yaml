@@ -16,6 +16,17 @@ spring:
     add-properties: false
 
 peak:
+  communication:
+    invitation:
+      acceptance-base-url: ${PEAK_INVITATION_ACCEPTANCE_BASE_URL:}
+  payment:
+    providers:
+      contract-mock:
+        enabled: false
+  fiscal:
+    providers:
+      contract-mock:
+        enabled: false
   guest-identity:
     hash-key: ${PEAK_GUEST_IDENTITY_HASH_KEY:}
     hash-key-version: ${PEAK_GUEST_IDENTITY_HASH_KEY_VERSION:v1}
@@ -25,6 +36,11 @@ peak:
     websocket:
       allowed-origins: ${PEAK_REALTIME_WEBSOCKET_ALLOWED_ORIGINS}
   security:
+    envelope:
+      key-reference: ${PEAK_ENVELOPE_KEY_REFERENCE:}
+      previous-key-reference: ${PEAK_ENVELOPE_PREVIOUS_KEY_REFERENCE:}
+    outbound:
+      allowed-provider-hosts: ${PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS:}
     http:
       jwt:
         enabled: true
@@ -41,20 +57,21 @@ peak:
       client-secret: ${PEAK_NIDA_CLIENT_SECRET:}
       connect-timeout: ${PEAK_NIDA_CONNECT_TIMEOUT:3s}
       read-timeout: ${PEAK_NIDA_READ_TIMEOUT:8s}
-    payment:
-      providers:
-        vodacom-mpesa:
-          base-url: ${PEAK_PAYMENT_VODACOM_MPESA_URL:}
-          api-key: ${PEAK_PAYMENT_VODACOM_MPESA_API_KEY:}
-          api-secret: ${PEAK_PAYMENT_VODACOM_MPESA_API_SECRET:}
-
 springdoc:
   api-docs:
     enabled: false
   swagger-ui:
     enabled: false
 
+server:
+  forward-headers-strategy: native
+
 management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
   endpoints:
     web:
       exposure:

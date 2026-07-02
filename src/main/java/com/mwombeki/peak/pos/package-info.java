@@ -1,7 +1,14 @@
 @ApplicationModule(
         id = "pos",
-        displayName = "Financial POS & Cashier Session Module",
-        allowedDependencies = {"shared::context"}
+        displayName = "Point of Sale",
+        allowedDependencies = {
+                "shared::context",
+                "shared::exception",
+                "audit::api",
+                "reliability::api",
+                "billing::api",
+                "payment::api"
+        }
 )
 package com.mwombeki.peak.pos;
 

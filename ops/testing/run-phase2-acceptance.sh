@@ -290,7 +290,7 @@ tenant_token="$(token_for "phase2-tenant-admin" "$tenant_password")"
 api POST "/api/v1/platform/tenants/$tenant_id/profile/verify" "$platform_token" 200 \
   "tenant-profile-verify"
 
-for module in property communications realtime booking_engine; do
+for module in property communications realtime; do
   api POST "/api/v1/tenants/$tenant_id/modules" "$tenant_token" 200 \
     "tenant-module-$module" "$(jq -nc --arg module "$module" '{moduleId: $module}')"
 done
@@ -303,7 +303,7 @@ api POST "/api/v1/properties" "$tenant_token" 200 "property-create" '{
 }'
 property_id="$(jq -r '.propertyId' <<<"$API_BODY")"
 
-for module in property booking_engine realtime; do
+for module in property realtime; do
   api POST "/api/v1/properties/$property_id/modules" "$tenant_token" 200 \
     "property-module-$module" "$(jq -nc --arg module "$module" '{moduleId: $module}')"
 done
