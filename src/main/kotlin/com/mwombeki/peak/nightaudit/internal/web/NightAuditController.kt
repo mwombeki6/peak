@@ -3,6 +3,7 @@ package com.mwombeki.peak.nightaudit.internal.web
 import com.mwombeki.peak.nightaudit.api.NightAuditNotFoundException
 import com.mwombeki.peak.nightaudit.api.NightAuditPort
 import com.mwombeki.peak.nightaudit.api.NightAuditRunResponse
+import com.mwombeki.peak.nightaudit.api.OverrideNightAuditIssueRequest
 import com.mwombeki.peak.nightaudit.api.RunNightAuditRequest
 import java.util.UUID
 import org.springframework.web.bind.annotation.GetMapping
@@ -37,5 +38,23 @@ class NightAuditController(
     ): NightAuditRunResponse {
         return nightAuditPort.getRun(propertyId, runId)
             ?: throw NightAuditNotFoundException("Night audit run was not found")
+    }
+
+    @PostMapping("/{runId}/issues/{issueId}/override")
+    fun overrideIssue(
+        @PathVariable propertyId: UUID,
+        @PathVariable runId: UUID,
+        @PathVariable issueId: UUID,
+        @RequestBody request: OverrideNightAuditIssueRequest,
+    ): NightAuditRunResponse {
+        return nightAuditPort.overrideIssue(propertyId, runId, issueId, request)
+    }
+
+    @PostMapping("/{runId}/complete")
+    fun complete(
+        @PathVariable propertyId: UUID,
+        @PathVariable runId: UUID,
+    ): NightAuditRunResponse {
+        return nightAuditPort.complete(propertyId, runId)
     }
 }

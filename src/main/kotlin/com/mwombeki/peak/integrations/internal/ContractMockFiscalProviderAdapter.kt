@@ -1,5 +1,9 @@
-package com.mwombeki.peak.fiscal.internal
+package com.mwombeki.peak.integrations.internal
 
+// Non-production contract adapter retained for deterministic local acceptance.
+import com.mwombeki.peak.fiscal.api.FiscalProvider
+import com.mwombeki.peak.fiscal.api.FiscalSubmissionCommand
+import com.mwombeki.peak.fiscal.api.FiscalSubmissionResult
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Component
 
@@ -10,7 +14,7 @@ import org.springframework.stereotype.Component
     havingValue = "true",
     matchIfMissing = true,
 )
-class ContractMockFiscalProviderAdapter : FiscalProviderAdapter {
+class ContractMockFiscalProviderAdapter : FiscalProvider {
     override val providerCode = "contract_mock"
 
     override fun submit(command: FiscalSubmissionCommand): FiscalSubmissionResult {

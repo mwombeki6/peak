@@ -39,6 +39,11 @@ interface PaymentPort {
         transactionId: UUID,
         request: ReversePaymentRequest,
     ): PaymentTransactionResponse
+    fun refundPayment(
+        propertyId: UUID,
+        transactionId: UUID,
+        request: RefundPaymentRequest,
+    ): PaymentTransactionResponse
 
     fun getTransaction(propertyId: UUID, transactionId: UUID): PaymentTransactionResponse?
     fun listTransactions(propertyId: UUID, limit: Int = 100): List<PaymentTransactionResponse>
@@ -57,15 +62,32 @@ interface PaymentPort {
         propertyId: UUID,
         reconciliationId: UUID,
     ): PaymentReconciliationResponse
+    fun listReconciliations(
+        propertyId: UUID,
+        limit: Int = 100,
+    ): List<PaymentReconciliationResponse>
+    fun getReconciliation(
+        propertyId: UUID,
+        reconciliationId: UUID,
+    ): PaymentReconciliationResponse?
+    fun importReconciliation(
+        propertyId: UUID,
+        request: ImportPaymentReconciliationRequest,
+    ): PaymentReconciliationImportResponse
 }
 
 @NamedInterface("api")
 interface PaymentWebhookPort {
     fun receive(
         providerAccountId: UUID,
-        providerEventId: String,
-        timestamp: String,
-        signature: String,
         payload: String,
     ): PaymentWebhookReceipt
+}
+
+@NamedInterface("api")
+interface PaymentStatusPort {
+    fun nightAuditSummary(
+        tenantId: UUID,
+        propertyId: UUID,
+    ): PaymentNightAuditSummary
 }

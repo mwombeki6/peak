@@ -1,13 +1,16 @@
-package com.mwombeki.peak.fiscal.internal
+package com.mwombeki.peak.fiscal.api
 
 import java.math.BigDecimal
 import java.util.UUID
+import org.springframework.modulith.NamedInterface
 
-interface FiscalProviderAdapter {
+@NamedInterface("api")
+interface FiscalProvider {
     val providerCode: String
     fun submit(command: FiscalSubmissionCommand): FiscalSubmissionResult
 }
 
+@NamedInterface("api")
 data class FiscalSubmissionCommand(
     val receiptId: UUID,
     val invoiceId: UUID,
@@ -21,14 +24,17 @@ data class FiscalSubmissionCommand(
     val taxTotal: BigDecimal,
     val total: BigDecimal,
     val items: List<FiscalInvoiceItem>,
+    val correctionOfReceiptId: UUID? = null,
 )
 
+@NamedInterface("api")
 data class FiscalInvoiceItem(
     val description: String,
     val amount: BigDecimal,
     val taxAmount: BigDecimal,
 )
 
+@NamedInterface("api")
 data class FiscalSubmissionResult(
     val accepted: Boolean,
     val providerDocumentId: String?,

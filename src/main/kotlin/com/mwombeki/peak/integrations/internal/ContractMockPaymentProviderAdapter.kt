@@ -1,5 +1,10 @@
-package com.mwombeki.peak.payment.internal
+package com.mwombeki.peak.integrations.internal
 
+// Non-production contract adapter retained for deterministic local acceptance.
+import com.mwombeki.peak.payment.api.PaymentProvider
+import com.mwombeki.peak.payment.api.ProviderCollectionCommand
+import com.mwombeki.peak.payment.api.ProviderCollectionResult
+import com.mwombeki.peak.payment.api.ProviderWebhookNotification
 import java.util.UUID
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Component
@@ -14,7 +19,7 @@ import tools.jackson.databind.ObjectMapper
 )
 class ContractMockPaymentProviderAdapter(
     private val objectMapper: ObjectMapper,
-) : PaymentProviderAdapter {
+) : PaymentProvider {
     override val providerCode = "contract_mock"
 
     override fun initiate(command: ProviderCollectionCommand): ProviderCollectionResult {
@@ -27,12 +32,22 @@ class ContractMockPaymentProviderAdapter(
     override fun parseWebhook(payload: String): ProviderWebhookNotification {
         val node = objectMapper.readTree(payload)
         return ProviderWebhookNotification(
+            eventKey = node.path("eventId").asString(
+                node.requiredText("providerReference"),
+            ),
+            eventType = node.path("eventType").asString(
+                "collection.updated",
+            ),
             internalReference = node.requiredText("internalReference"),
             providerReference = node.requiredText("providerReference"),
             status = node.requiredText("status").lowercase(),
             amount = node.requiredText("amount").toBigDecimal(),
             feeAmount = node.path("feeAmount").asString("0").toBigDecimal(),
             currency = node.requiredText("currency").uppercase(),
+            clientId = node.path("clientId").asString(null),
+            providerTimestamp = node.path("updatedAt").asString(null)
+                ?.let(java.time.Instant::parse),
+            checksumMethod = node.path("checksumMethod").asString(null),
             metadata = mapOf("contractVersion" to node.path("contractVersion").asString("1")),
         )
     }

@@ -10,9 +10,9 @@ Owns property outlet cashier sessions and POS orders.
   Clients cannot supply prices or settlement amounts.
 - Order and session mutations lock the aggregate row and use idempotency,
   audit, outbox events, and command metrics.
-- Cash settlement creates a confirmed payment transaction and increments the
+- Cash settlement creates a posted payment transaction and increments the
   session's expected cash atomically.
-- Mobile-money settlement remains pending until a signed provider webhook
+- Mobile-money settlement remains pending until a checksum-verified provider webhook
   confirms it. A POS outbox handler then closes the order.
 - Room charges use the billing API and preserve the POS order as the charge
   source.
@@ -22,6 +22,9 @@ Owns property outlet cashier sessions and POS orders.
 
 | Method | Route | Permission |
 |---|---|---|
+| `POST` | `/api/v1/properties/{propertyId}/pos-config/outlets` | `pos.configure` |
+| `POST` | `/api/v1/properties/{propertyId}/pos-config/menu-categories` | `pos.configure` |
+| `POST` | `/api/v1/properties/{propertyId}/pos-config/menu-items` | `pos.configure` |
 | `POST` | `/api/v1/properties/{propertyId}/pos-sessions/open` | `pos.session.manage` |
 | `GET` | `/api/v1/properties/{propertyId}/pos-sessions/{sessionId}` | `pos.view` |
 | `POST` | `/api/v1/properties/{propertyId}/pos-sessions/{sessionId}/close` | `pos.session.manage` |

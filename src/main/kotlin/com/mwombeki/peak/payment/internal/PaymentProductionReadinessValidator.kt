@@ -31,6 +31,25 @@ class PaymentProductionReadinessValidator(
             check(activeMocks == 0L) {
                 "Active contract_mock payment provider accounts are forbidden in prod"
             }
+            val approvedCodes = environment.getProperty(
+                "peak.payment.production-approved-provider-codes",
+                "",
+            )
+            val unsafe = jdbcTemplate.queryForObject(
+                """
+                SELECT unsafe_payment_account_count
+                FROM production_provider_readiness_counts(
+                    string_to_array(?, ','),
+                    ARRAY[]::text[]
+                )
+                """.trimIndent(),
+                Long::class.java,
+                approvedCodes,
+            ) ?: 0L
+            check(unsafe == 0L) {
+                "Production payment provider accounts require explicit ClickPesa approval, " +
+                        "secret references, and sandbox certification"
+            }
         }
     }
 

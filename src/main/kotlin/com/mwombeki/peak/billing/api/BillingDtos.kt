@@ -86,6 +86,36 @@ data class IssueInvoiceRequest(
     val dueDateDays: Int = 0,
 )
 
+data class VoidInvoiceRequest(
+    val reason: String,
+)
+
+data class CreateCreditNoteRequest(
+    val reason: String,
+    val lines: List<CreditNoteLineRequest>,
+)
+
+data class CreditNoteLineRequest(
+    val invoiceItemId: UUID,
+    val amount: BigDecimal,
+    val taxAmount: BigDecimal = BigDecimal.ZERO,
+)
+
+data class CreditNoteResponse(
+    val id: UUID,
+    val propertyId: UUID,
+    val invoiceId: UUID,
+    val creditNoteNumber: String,
+    val reason: String,
+    val subtotal: BigDecimal,
+    val taxAmount: BigDecimal,
+    val totalAmount: BigDecimal,
+    val status: String,
+    val fiscalStatus: String,
+    val issuedAt: Instant?,
+    val replayed: Boolean = false,
+)
+
 data class ConfirmedPaymentRequest(
     val folioId: UUID,
     val paymentMethod: String,
@@ -107,6 +137,16 @@ data class ConfirmedPaymentReversalRequest(
     val cashSessionId: UUID? = null,
 )
 
+data class ConfirmedPaymentRefundRequest(
+    val originalPaymentTransactionId: UUID,
+    val refundPaymentTransactionId: UUID,
+    val amount: BigDecimal,
+    val processedBy: UUID,
+    val reason: String,
+    val referenceNumber: String,
+    val cashSessionId: UUID? = null,
+)
+
 data class BillingMutationReceipt(
     val propertyId: UUID,
     val folioId: UUID,
@@ -118,11 +158,48 @@ data class BillingMutationReceipt(
 
 data class CheckoutFinancialState(
     val folioId: UUID,
+    val invoiceId: UUID?,
     val totalAmount: BigDecimal,
     val totalPaid: BigDecimal,
     val balanceDue: BigDecimal,
     val hasIssuedInvoice: Boolean,
-    val hasAcceptedFiscalReceipt: Boolean,
+)
+
+data class BillingNightAuditSummary(
+    val openUnpaidFolios: Int,
+    val foliosMissingIssuedInvoice: Int,
+    val pendingFolioPayments: Int,
+    val issuedInvoiceIds: List<UUID>,
+)
+
+data class FiscalInvoiceSnapshot(
+    val id: UUID,
+    val number: String,
+    val currency: String,
+    val subtotal: BigDecimal,
+    val taxTotal: BigDecimal,
+    val total: BigDecimal,
+    val status: String,
+    val items: List<FiscalInvoiceLineSnapshot>,
+)
+
+data class FiscalInvoiceLineSnapshot(
+    val id: UUID,
+    val description: String,
+    val amount: BigDecimal,
+    val taxAmount: BigDecimal,
+)
+
+data class FiscalCreditNoteSnapshot(
+    val id: UUID,
+    val invoiceId: UUID,
+    val number: String,
+    val subtotal: BigDecimal,
+    val taxTotal: BigDecimal,
+    val total: BigDecimal,
+    val status: String,
+    val fiscalStatus: String,
+    val lines: List<FiscalInvoiceLineSnapshot>,
 )
 
 sealed class BillingException(

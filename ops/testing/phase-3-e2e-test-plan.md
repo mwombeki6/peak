@@ -18,9 +18,9 @@ night audit.
 - The test user has `module.manage` plus property-scoped Phase 3 permissions.
 - Room type, `vacant_clean` room, revenue center, tax, and base rate ids are
   available from Phase 2 API responses.
-- For local acceptance only, `contract_mock` payment/fiscal adapters may be
-  enabled. Staging/production acceptance must use the certified
-  `http_gateway`.
+- Local fiscal acceptance uses `signed_simulator`. The protected payment
+  acceptance workflow uses ClickPesa sandbox. Mock/simulator providers are
+  forbidden under `prod`.
 - NIDA remains disabled until the approved CIG contract is available; use the
   audited physical-document verification route with an authorized verifier.
 
@@ -122,16 +122,16 @@ these commands before business operations.
 
 Run both paths where applicable:
 
-1. Configure `http_gateway` with an HTTPS endpoint and environment-backed
-   secret references.
-2. Initiate collection and confirm the worker sends one idempotent provider
-   request.
-3. Submit a signed callback over the raw body using the provider account id,
-   unique event id, current timestamp, and HMAC signature.
+1. Configure `clickpesa` with its official HTTPS endpoint plus API-key and
+   checksum-key secret references.
+2. Initiate collection, expect `202` and `CREATED`, then confirm provider
+   acceptance advances it to `INITIATED`/`PENDING`.
+3. Submit a checksum callback with recursively canonicalized JSON and
+   HMAC-SHA256, excluding `checksum` and `checksumMethod`.
 4. Confirm the callback resolves scope from the database account and posts one
    folio payment.
 5. Replay the provider event; expect `replayed=true` and no duplicate payment.
-6. Send a stale timestamp, invalid signature, amount mismatch, currency
+6. Send a stale provider timestamp, invalid checksum, amount mismatch, currency
    mismatch, and unknown account; each must be rejected.
 7. Record a manual reference only with evidence and the dedicated permission;
    duplicate provider reference must conflict.
@@ -158,14 +158,14 @@ Run both paths where applicable:
 
 ### 10. Fiscalization
 
-1. Configure the fiscal `http_gateway` with an HTTPS endpoint and
-   environment-backed credential.
+1. Configure `signed_simulator` for local Podman acceptance; use only an
+   explicitly approved, certified adapter in production.
 2. Issue the invoice and retain `invoiceId`.
 3. Poll fiscal receipts while the worker submits the outbox event.
 4. Confirm every attempt is persisted.
 5. Accepted response must include the provider document/receipt identifiers.
-6. Force one rejected response in a non-production provider sandbox, then use
-   the explicit retry route and confirm a new attempt.
+6. Exercise signed accept, reject, timeout, retry, and line-linked credit-note
+   correction scenarios.
 7. Confirm accepted fiscal receipt fields cannot be mutated.
 
 ### 11. Checkout And Night Audit
@@ -178,7 +178,8 @@ Run both paths where applicable:
 4. Close the cash session with counted cash and verify expected cash/variance.
 5. Run night audit without supplying `auditDate`; confirm property timezone and
    business-day offset determine the date.
-6. Confirm a clean run is `completed`.
+6. Confirm a clean run is `ready`, call the explicit completion API, then
+   confirm `completed` and one business-date advance.
 7. Re-run concurrently; attempts must serialize and retain immutable attempt
    numbers.
 
@@ -212,6 +213,17 @@ Execute with Postman Runner or Newman in parallel:
   transaction.
 - Cash variance approval by the closing user is rejected.
 - Concurrent night audit: serialized attempts with no deleted history.
+
+## Phase 3 Closure Gate
+
+- Upgrade a V40 database containing `confirmed` and `cancelled` transactions;
+  verify `posted`/`expired` mapping and canonical timestamps.
+- Prove partial and full refunds cannot exceed the remaining amount.
+- Prove fiscalized invoices reject void and use line-linked credit notes.
+- Prove unpaid checkout leaves the folio open and night audit blocked.
+- Prove ClickPesa webhook replay and reconciliation import remain idempotent.
+- Run `ops/testing/run-clickpesa-sandbox-acceptance.sh` through the protected
+  `clickpesa-sandbox` GitHub environment and retain its evidence artifact.
 
 ## Pass Criteria
 

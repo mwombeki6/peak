@@ -1,5 +1,10 @@
-package com.mwombeki.peak.payment.internal
+package com.mwombeki.peak.integrations.internal
 
+// Provider-owned HTTP gateway implementation lives outside the payment domain.
+import com.mwombeki.peak.payment.api.PaymentProvider
+import com.mwombeki.peak.payment.api.ProviderCollectionCommand
+import com.mwombeki.peak.payment.api.ProviderCollectionResult
+import com.mwombeki.peak.payment.api.ProviderWebhookNotification
 import com.mwombeki.peak.shared.outbound.BoundedJsonHttpClient
 import com.mwombeki.peak.shared.outbound.OutboundEndpointPolicy
 import java.net.URI
@@ -55,7 +60,7 @@ class JdkPaymentGatewayHttpTransport(
 class HttpPaymentProviderAdapter(
     private val objectMapper: ObjectMapper,
     private val transport: PaymentGatewayHttpTransport,
-) : PaymentProviderAdapter {
+) : PaymentProvider {
     override val providerCode = "http_gateway"
 
     override fun initiate(command: ProviderCollectionCommand): ProviderCollectionResult {
@@ -64,7 +69,7 @@ class HttpPaymentProviderAdapter(
             mapOf(
                 "transactionId" to command.transactionId,
                 "internalReference" to command.internalReference,
-                "merchantId" to command.merchantId,
+                "merchantId" to command.clientId,
                 "payerIdentifier" to command.payerIdentifier,
                 "amount" to command.amount,
                 "currency" to command.currency,
@@ -72,7 +77,7 @@ class HttpPaymentProviderAdapter(
         )
         val response = transport.post(
             endpoint = endpoint,
-            credential = command.credential,
+            credential = command.apiKey,
             idempotencyKey = command.transactionId.toString(),
             payload = payload,
         )
@@ -86,12 +91,22 @@ class HttpPaymentProviderAdapter(
     override fun parseWebhook(payload: String): ProviderWebhookNotification {
         val node = objectMapper.readTree(payload)
         return ProviderWebhookNotification(
+            eventKey = node.path("eventId").asString(
+                node.requiredText("providerReference"),
+            ),
+            eventType = node.path("eventType").asString(
+                "collection.updated",
+            ),
             internalReference = node.requiredText("internalReference"),
             providerReference = node.requiredText("providerReference"),
             status = node.requiredText("status").lowercase(),
             amount = node.requiredText("amount").toBigDecimal(),
             feeAmount = node.path("feeAmount").asString("0").toBigDecimal(),
             currency = node.requiredText("currency").uppercase(),
+            clientId = node.path("clientId").asString(null),
+            providerTimestamp = node.path("updatedAt").asString(null)
+                ?.let(java.time.Instant::parse),
+            checksumMethod = node.path("checksumMethod").asString(null),
             metadata = mapOf(
                 "providerEventType" to node.path("eventType").asString("collection.updated"),
             ),

@@ -1,7 +1,15 @@
 @ApplicationModule(
         id = "integrations",
         displayName = "Integrations",
-        allowedDependencies = {"shared::context", "reliability::api", "reservations::api"}
+        allowedDependencies = {
+                "shared::context",
+                "shared::outbound",
+                "shared::secrets",
+                "reliability::api",
+                "reservations::api",
+                "payment::api",
+                "fiscal::api"
+        }
 )
 package com.mwombeki.peak.integrations;
 

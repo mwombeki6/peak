@@ -122,6 +122,7 @@ for name in \
   PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_BASE_URL \
   PEAK_INVITATION_ACCEPTANCE_BASE_URL \
   PEAK_ENVELOPE_KEY_REFERENCE \
+  PEAK_PAYMENT_PRODUCTION_APPROVED_PROVIDER_CODES \
   PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS \
   PEAK_DB_POOL_MAX_SIZE \
   PEAK_DB_POOL_MIN_IDLE \
@@ -180,11 +181,28 @@ for name in \
   PEAK_ENVELOPE_KEY_BASE64 \
   PEAK_PAYMENT_GATEWAY_CREDENTIAL \
   PEAK_PAYMENT_WEBHOOK_SECRET \
+  PEAK_CLICKPESA_API_KEY \
+  PEAK_CLICKPESA_CHECKSUM_KEY \
   PEAK_FISCAL_GATEWAY_CREDENTIAL \
   PEAK_GUEST_IDENTITY_HASH_KEY
 do
   require_secret "$name"
 done
+
+if [ "$(value_of PEAK_PAYMENT_PRODUCTION_APPROVED_PROVIDER_CODES)" != "clickpesa" ]; then
+  fail "PEAK_PAYMENT_PRODUCTION_APPROVED_PROVIDER_CODES must be exactly clickpesa"
+fi
+
+case ",$(value_of PEAK_FISCAL_PRODUCTION_APPROVED_PROVIDER_CODES)," in
+  *,contract_mock,*|*,signed_simulator,*)
+    fail "mock and simulator fiscal providers cannot be approved in production"
+    ;;
+esac
+
+case ",$(value_of PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS)," in
+  *,api.clickpesa.com,*) ;;
+  *) fail "PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS must include api.clickpesa.com" ;;
+esac
 
 guest_identity_hash_key="$(value_of PEAK_GUEST_IDENTITY_HASH_KEY)"
 if [ -n "$guest_identity_hash_key" ] && [ "${#guest_identity_hash_key}" -lt 32 ]; then

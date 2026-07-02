@@ -17,6 +17,7 @@ data class OutboxEventCommand(
     val idempotencyKeyId: UUID? = null,
     val priority: Int = 5,
     val maxAttempts: Int = 10,
+    val availableAt: Instant? = null,
 ) {
     init {
         require(aggregateType.isNotBlank()) {

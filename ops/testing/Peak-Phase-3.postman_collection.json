@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "ac5e82ab-c786-4d67-a78f-6f463cc91d4f",
     "name": "Peak Phase 3 End-to-End",
-    "description": "Authenticated Phase 3 stay lifecycle. Run Phase 2 setup first and provide property resource ids. Contract mocks are local/test only.",
+    "description": "Authenticated Phase 3 stay lifecycle. Run Phase 2 setup first and provide property resource ids. The signed fiscal simulator is acceptance-only.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -389,7 +389,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"chargeType\": \"ROOM\",\n  \"description\": \"Phase 3 room charge\",\n  \"revenueCenterId\": \"{{revenueCenterId}}\",\n  \"quantity\": 1,\n  \"unitPrice\": 200000.00,\n  \"taxRate\": 18.00\n}"
+              "raw": "{\n  \"chargeType\": \"ROOM\",\n  \"description\": \"Phase 3 room charge\",\n  \"revenueCenterId\": \"{{revenueCenterId}}\",\n  \"quantity\": 1,\n  \"unitPrice\": 200000.00,\n  \"taxRate\": 0.18\n}"
             },
             "url": "{{baseUrl}}/api/v1/properties/{{propertyId}}/folios/{{folioId}}/charges"
           }
@@ -461,7 +461,7 @@
                 "exec": [
                   "pm.response.to.have.status(200);",
                   "const body = pm.response.json();",
-                  "pm.expect(body.status).to.eql('confirmed');",
+                  "pm.expect(body.status).to.eql('POSTED');",
                   "pm.collectionVariables.set('paymentTransactionId', body.id);"
                 ]
               }
@@ -648,7 +648,7 @@
       "name": "06 Fiscal And Checkout",
       "item": [
         {
-          "name": "Configure Local Fiscal Contract Adapter",
+          "name": "Configure Signed Fiscal Simulator",
           "request": {
             "method": "POST",
             "header": [
@@ -657,7 +657,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"providerCode\": \"contract_mock\",\n  \"providerName\": \"Local Fiscal Contract\",\n  \"authorityName\": \"Tanzania Revenue Authority\",\n  \"environment\": \"sandbox\",\n  \"endpointUrl\": \"https://fiscal.invalid/v1/receipts\",\n  \"secretRef\": \"literal:phase3-fiscal-test-secret\",\n  \"taxpayerIdentifier\": \"123-456-789\",\n  \"isDefault\": true\n}"
+              "raw": "{\n  \"providerCode\": \"signed_simulator\",\n  \"providerName\": \"Signed Fiscal Simulator\",\n  \"authorityName\": \"Tanzania Revenue Authority Acceptance\",\n  \"environment\": \"sandbox\",\n  \"endpointUrl\": \"https://fiscal.invalid/scenario/accept\",\n  \"secretRef\": \"literal:phase3-fiscal-test-secret\",\n  \"taxpayerIdentifier\": \"123-456-789\",\n  \"isDefault\": true\n}"
             },
             "description": "Local/test profile only. Use http_gateway and env-backed secrets in staging/production.",
             "url": "{{baseUrl}}/api/v1/properties/{{propertyId}}/fiscal/provider-configs"
@@ -702,9 +702,16 @@
                 "exec": [
                   "pm.response.to.have.status(200);",
                   "const receipt = pm.response.json().find(r => r.invoiceId === pm.collectionVariables.get('invoiceId'));",
-                  "pm.expect(receipt, 'worker has produced fiscal receipt').to.exist;",
-                  "pm.expect(receipt.status).to.eql('accepted');",
-                  "pm.collectionVariables.set('fiscalReceiptId', receipt.id);"
+                  "const attempt = Number(pm.collectionVariables.get('fiscalPollAttempt') || 0);",
+                  "if ((!receipt || receipt.status !== 'accepted') && attempt < 15) {",
+                  "  pm.collectionVariables.set('fiscalPollAttempt', attempt + 1);",
+                  "  setTimeout(() => pm.execution.setNextRequest(pm.info.requestName), 1000);",
+                  "} else {",
+                  "  pm.expect(receipt, 'worker has produced fiscal receipt').to.exist;",
+                  "  pm.expect(receipt.status).to.eql('accepted');",
+                  "  pm.collectionVariables.set('fiscalReceiptId', receipt.id);",
+                  "  pm.collectionVariables.unset('fiscalPollAttempt');",
+                  "}"
                 ]
               }
             }
@@ -783,12 +790,160 @@
                 "exec": [
                   "pm.response.to.have.status(200);",
                   "const body = pm.response.json();",
-                  "pm.expect(body.status).to.eql('completed');",
+                  "pm.expect(body.status).to.eql('ready');",
                   "pm.collectionVariables.set('nightAuditRunId', body.id);"
                 ]
               }
             }
           ]
+        },
+        {
+          "name": "Complete Ready Night Audit",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "night-audit-complete-{{$guid}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": "{{baseUrl}}/api/v1/properties/{{propertyId}}/night-audit/{{nightAuditRunId}}/complete"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.response.to.have.status(200);",
+                  "pm.expect(pm.response.json().status).to.eql('completed');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 Phase 3 Closure Operations",
+      "description": "Opt-in destructive/exception paths. Set runClosureExtensions=true and supply the referenced ids.",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "if (pm.collectionVariables.get('runClosureExtensions') !== 'true') {",
+              "  pm.execution.skipRequest();",
+              "}"
+            ]
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "Refund Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "refund-{{$guid}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 1.00,\n  \"reason\": \"Phase 3 controlled partial refund\",\n  \"cashSessionId\": \"{{cashSessionId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/properties/{{propertyId}}/payments/transactions/{{paymentTransactionId}}/refund"
+          }
+        },
+        {
+          "name": "List Reconciliations",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/properties/{{propertyId}}/payments/reconciliations"
+          }
+        },
+        {
+          "name": "Get Reconciliation",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/properties/{{propertyId}}/payments/reconciliations/{{reconciliationId}}"
+          }
+        },
+        {
+          "name": "Import ClickPesa Statement",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "reconciliation-import-{{$guid}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"providerAccountId\": \"{{providerAccountId}}\",\n  \"startDate\": \"{{checkInDate}}\",\n  \"endDate\": \"{{checkOutDate}}\",\n  \"currency\": \"TZS\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/properties/{{propertyId}}/payments/reconciliations/import"
+          }
+        },
+        {
+          "name": "Void Pre-Fiscal Invoice",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "invoice-void-{{$guid}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Invoice issued in error before fiscal acceptance\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/properties/{{propertyId}}/invoices/{{invoiceId}}/void"
+          }
+        },
+        {
+          "name": "Issue Fiscal Credit Note",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "credit-note-{{$guid}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Correct a fiscalized invoice line\",\n  \"lines\": [{\n    \"invoiceItemId\": \"{{invoiceItemId}}\",\n    \"amount\": 1.00,\n    \"taxAmount\": 0.00\n  }]\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/properties/{{propertyId}}/invoices/{{invoiceId}}/credit-notes"
+          }
+        },
+        {
+          "name": "Exceptional Unpaid Checkout",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "unpaid-checkout-{{$guid}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Supervisor-authorized emergency departure with debt follow-up\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/properties/{{propertyId}}/checkouts/{{stayId}}/unpaid-override"
+          }
+        },
+        {
+          "name": "Override Night Audit Issue",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "night-audit-override-{{$guid}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Supervisor reviewed and accepted the operational exception\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/properties/{{propertyId}}/night-audit/{{nightAuditRunId}}/issues/{{nightAuditIssueId}}/override"
+          }
         }
       ]
     }
@@ -815,12 +970,17 @@
     { "key": "cashSessionId", "value": "" },
     { "key": "expectedCash", "value": "" },
     { "key": "paymentTransactionId", "value": "" },
+    { "key": "providerAccountId", "value": "" },
+    { "key": "reconciliationId", "value": "" },
     { "key": "posSessionId", "value": "" },
     { "key": "posOrderId", "value": "" },
     { "key": "posExpectedCash", "value": "" },
     { "key": "posPaymentTransactionId", "value": "" },
     { "key": "invoiceId", "value": "" },
+    { "key": "invoiceItemId", "value": "" },
     { "key": "fiscalReceiptId", "value": "" },
-    { "key": "nightAuditRunId", "value": "" }
+    { "key": "nightAuditRunId", "value": "" },
+    { "key": "nightAuditIssueId", "value": "" },
+    { "key": "runClosureExtensions", "value": "false" }
   ]
 }

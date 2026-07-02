@@ -7,7 +7,7 @@ RUN apk upgrade --no-cache \
   && addgroup -S peak \
   && adduser -S -G peak peak
 
-COPY --chown=peak:peak build/libs/peak-*.jar /app/peak.jar
+COPY --chown=peak:peak build/libs/peak.jar /app/peak.jar
 
 USER peak:peak
 

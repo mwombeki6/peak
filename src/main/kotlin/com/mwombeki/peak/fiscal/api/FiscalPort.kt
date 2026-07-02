@@ -13,3 +13,24 @@ interface FiscalPort {
     fun getReceipt(propertyId: UUID, receiptId: UUID): FiscalReceiptResponse?
     fun retryReceipt(propertyId: UUID, receiptId: UUID): FiscalReceiptResponse
 }
+
+@org.springframework.modulith.NamedInterface("api")
+interface FiscalStatusPort {
+    fun hasAcceptedReceipt(
+        tenantId: UUID,
+        propertyId: UUID,
+        invoiceId: UUID,
+    ): Boolean
+
+    fun hasFiscalActivity(
+        tenantId: UUID,
+        propertyId: UUID,
+        invoiceId: UUID,
+    ): Boolean
+
+    fun nightAuditSummary(
+        tenantId: UUID,
+        propertyId: UUID,
+    ): FiscalNightAuditSummary
+
+}

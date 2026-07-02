@@ -5,6 +5,7 @@ import com.mwombeki.peak.audit.api.AuditResource
 import com.mwombeki.peak.audit.api.TenantAuditEvent
 import com.mwombeki.peak.billing.api.BillingPort
 import com.mwombeki.peak.billing.api.ConfirmedPaymentRequest
+import com.mwombeki.peak.billing.api.ConfirmedPaymentRefundRequest
 import com.mwombeki.peak.billing.api.ConfirmedPaymentReversalRequest
 import com.mwombeki.peak.payment.api.CashSessionResponse
 import com.mwombeki.peak.payment.api.CloseCashSessionRequest
@@ -19,11 +20,18 @@ import com.mwombeki.peak.payment.api.PaymentConflictException
 import com.mwombeki.peak.payment.api.PaymentNotFoundException
 import com.mwombeki.peak.payment.api.PaymentPort
 import com.mwombeki.peak.payment.api.PaymentProviderAccountResponse
+import com.mwombeki.peak.payment.api.PaymentProvider
 import com.mwombeki.peak.payment.api.PaymentReconciliationResponse
 import com.mwombeki.peak.payment.api.PaymentRejectedException
+import com.mwombeki.peak.payment.api.PaymentStatus
 import com.mwombeki.peak.payment.api.PaymentTransactionResponse
+import com.mwombeki.peak.payment.api.PaymentNightAuditSummary
+import com.mwombeki.peak.payment.api.PaymentStatusPort
 import com.mwombeki.peak.payment.api.RecordManualMobileMoneyPaymentRequest
+import com.mwombeki.peak.payment.api.RefundPaymentRequest
 import com.mwombeki.peak.payment.api.ReversePaymentRequest
+import com.mwombeki.peak.payment.api.ImportPaymentReconciliationRequest
+import com.mwombeki.peak.payment.api.PaymentReconciliationImportResponse
 import com.mwombeki.peak.reliability.api.IdempotencyCommand
 import com.mwombeki.peak.reliability.api.IdempotencyPort
 import com.mwombeki.peak.reliability.api.IdempotencyReservation
@@ -38,8 +46,10 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 import java.net.URI
 import java.sql.ResultSet
+import java.sql.Timestamp
 import java.util.UUID
 import io.micrometer.core.instrument.MeterRegistry
+import org.springframework.core.env.Environment
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
@@ -59,9 +69,29 @@ class PaymentService(
     private val secretResolver: SecretReferenceResolver,
     private val outboundEndpointPolicy: OutboundEndpointPolicy,
     private val meterRegistry: MeterRegistry,
-    adapters: List<PaymentProviderAdapter>,
-) : PaymentPort {
+    private val environment: Environment,
+    adapters: List<PaymentProvider>,
+) : PaymentPort, PaymentStatusPort {
     private val providerCodes = adapters.mapTo(mutableSetOf()) { it.providerCode }
+
+    override fun nightAuditSummary(
+        tenantId: UUID,
+        propertyId: UUID,
+    ): PaymentNightAuditSummary {
+        val count = jdbcTemplate.queryForObject(
+            """
+            SELECT COUNT(*)
+            FROM payment_transactions
+            WHERE tenant_id = ?
+              AND property_id = ?
+              AND status IN ('created', 'initiated', 'pending')
+            """.trimIndent(),
+            Int::class.java,
+            tenantId,
+            propertyId,
+        ) ?: 0
+        return PaymentNightAuditSummary(nonTerminalTransactions = count)
+    }
 
     override fun openCashSession(
         propertyId: UUID,
@@ -243,10 +273,12 @@ class PaymentService(
                 INSERT INTO payment_transactions (
                     id, tenant_id, property_id, folio_id, initiated_by,
                     idempotency_key_id, transaction_direction, transaction_type,
-                    internal_reference, amount, currency, status, confirmed_at,
+                    internal_reference, amount, currency, status, posted_at,
+                    confirmed_at,
                     metadata
                 )
-                VALUES (?, ?, ?, ?, ?, ?, 'inbound', 'collection', ?, ?, ?, 'confirmed', now(), ?::jsonb)
+                VALUES (?, ?, ?, ?, ?, ?, 'inbound', 'collection', ?, ?, ?,
+                        'posted', now(), now(), ?::jsonb)
                 """.trimIndent(),
                 transactionId,
                 actor.tenantId,
@@ -351,9 +383,11 @@ class PaymentService(
                     id, tenant_id, property_id, folio_id, provider_account_id,
                     initiated_by, idempotency_key_id, transaction_direction,
                     transaction_type, internal_reference, payer_identifier,
-                    amount, currency, status
+                    amount, currency, status, expires_at, next_status_check_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'inbound', 'collection', ?, ?, ?, ?, 'initiated')
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'inbound', 'collection', ?, ?, ?, ?,
+                        'created', now() + interval '15 minutes',
+                        now() + interval '15 seconds')
                 """.trimIndent(),
                 transactionId,
                 actor.tenantId,
@@ -436,10 +470,11 @@ class PaymentService(
                         id, tenant_id, property_id, folio_id, provider_account_id,
                         initiated_by, idempotency_key_id, transaction_direction,
                         transaction_type, provider_reference, internal_reference,
-                        payer_identifier, amount, currency, status, confirmed_at, metadata
+                        payer_identifier, amount, currency, status, posted_at,
+                        confirmed_at, metadata
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, 'inbound', 'collection', ?, ?, ?, ?, ?,
-                            'confirmed', now(), ?::jsonb)
+                            'posted', now(), now(), ?::jsonb)
                     """.trimIndent(),
                     transactionId,
                     actor.tenantId,
@@ -526,11 +561,12 @@ class PaymentService(
             INSERT INTO payment_transactions (
                 id, tenant_id, property_id, pos_order_id, initiated_by,
                 idempotency_key_id, transaction_direction, transaction_type,
-                internal_reference, amount, currency, status, confirmed_at,
+                internal_reference, amount, currency, status, posted_at,
+                confirmed_at,
                 metadata
             )
             VALUES (?, ?, ?, ?, ?, ?, 'inbound', 'collection', ?, ?, 'TZS',
-                    'confirmed', now(), ?::jsonb)
+                    'posted', now(), now(), ?::jsonb)
             """.trimIndent(),
             transactionId,
             actor.tenantId,
@@ -585,10 +621,12 @@ class PaymentService(
                 id, tenant_id, property_id, pos_order_id, provider_account_id,
                 initiated_by, idempotency_key_id, transaction_direction,
                 transaction_type, internal_reference, payer_identifier,
-                amount, currency, status, metadata
+                amount, currency, status, expires_at, next_status_check_at,
+                metadata
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, 'inbound', 'collection', ?, ?, ?,
-                    'TZS', 'initiated', ?::jsonb)
+                    'TZS', 'created', now() + interval '15 minutes',
+                    now() + interval '15 seconds', ?::jsonb)
             """.trimIndent(),
             transactionId,
             actor.tenantId,
@@ -660,8 +698,11 @@ class PaymentService(
                 transactionId = transactionId,
                 lock = true,
             )
-            require(original.transactionType == "collection" && original.status == "confirmed") {
-                "Only a confirmed collection can be reversed"
+            require(
+                original.transactionType == "collection" &&
+                        original.status == PaymentStatus.POSTED,
+            ) {
+                "Only an unreconciled posted collection can be reversed"
             }
             require(original.folioId != null && original.posOrderId == null) {
                 "POS payments must be reversed through a dedicated POS void/refund workflow"
@@ -718,10 +759,11 @@ class PaymentService(
                     id, tenant_id, property_id, folio_id, provider_account_id,
                     initiated_by, idempotency_key_id, reversal_of_transaction_id,
                     transaction_direction, transaction_type, provider_reference,
-                    internal_reference, amount, currency, status, confirmed_at, metadata
+                    internal_reference, amount, currency, status, posted_at,
+                    confirmed_at, metadata
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'outbound', 'reversal', ?, ?, ?, ?,
-                        'confirmed', now(), ?::jsonb)
+                        'posted', now(), now(), ?::jsonb)
                 """.trimIndent(),
                 reversalId,
                 actor.tenantId,
@@ -762,7 +804,7 @@ class PaymentService(
                 SET status = 'reversed',
                     reversed_at = now(),
                     updated_at = now()
-                WHERE tenant_id = ? AND id = ? AND status = 'confirmed'
+                WHERE tenant_id = ? AND id = ? AND status = 'posted'
                 """.trimIndent(),
                 actor.tenantId,
                 transactionId,
@@ -811,6 +853,216 @@ class PaymentService(
         }
     }
 
+    override fun refundPayment(
+        propertyId: UUID,
+        transactionId: UUID,
+        request: RefundPaymentRequest,
+    ): PaymentTransactionResponse {
+        return mutate(
+            propertyId = propertyId,
+            operationType = "payments.transaction.refund",
+            requestPayload = mapOf(
+                "transactionId" to transactionId,
+                "request" to request,
+            ),
+            resourceType = PAYMENT_TRANSACTIONS,
+            replayType = PaymentTransactionResponse::class.java,
+        ) { actor, idempotencyKeyId ->
+            val amount = request.amount.positiveMoney("amount")
+            val reason = request.reason.normalizedRequired("reason")
+            require(reason.length in MIN_REFUND_REASON_LENGTH..MAX_REFUND_REASON_LENGTH) {
+                "Refund reason must be between $MIN_REFUND_REASON_LENGTH and " +
+                        "$MAX_REFUND_REASON_LENGTH characters"
+            }
+            val original = requireTransaction(
+                actor.tenantId,
+                propertyId,
+                transactionId,
+                lock = true,
+            )
+            require(original.transactionType == "collection") {
+                "Only collection transactions can be refunded"
+            }
+            require(
+                original.status in setOf(
+                    PaymentStatus.POSTED,
+                    PaymentStatus.RECONCILED,
+                    PaymentStatus.PARTIALLY_REFUNDED,
+                ),
+            ) {
+                "Payment is not refundable in its current state"
+            }
+            require(original.folioId != null && original.posOrderId == null) {
+                "POS refunds require the dedicated POS refund workflow"
+            }
+            val remaining = original.amount.subtract(original.refundedAmount).money()
+            require(amount <= remaining) {
+                "Refund amount exceeds the remaining refundable amount"
+            }
+
+            val isCash = original.providerAccountId == null
+            val cashSession = if (isCash) {
+                val cashSessionId = requireNotNull(request.cashSessionId) {
+                    "Cash refunds require an open cashier session"
+                }
+                require(request.providerEvidence.isNullOrBlank()) {
+                    "Cash refunds do not accept provider evidence"
+                }
+                requireCashSession(
+                    actor.tenantId,
+                    propertyId,
+                    cashSessionId,
+                    lock = true,
+                ).also {
+                    require(
+                        it.status == "open" &&
+                                it.cashierId == actor.tenantUserId,
+                    ) {
+                        "Cash refund must use the current cashier's open session"
+                    }
+                    require(it.expectedCash >= amount) {
+                        "Cash session does not contain enough expected cash"
+                    }
+                }
+            } else {
+                require(request.cashSessionId == null) {
+                    "Mobile-money refunds cannot use a cash session"
+                }
+                null
+            }
+            val providerEvidence = if (isCash) {
+                null
+            } else {
+                requireNotNull(request.providerEvidence) {
+                    "Mobile-money refunds require external provider evidence"
+                }
+                    .normalizedRequired("providerEvidence")
+                    .normalizedProviderReference()
+            }
+
+            val refundId = UUID.randomUUID()
+            val refundReference = paymentReference(refundId)
+            jdbcTemplate.update(
+                """
+                INSERT INTO payment_transactions (
+                    id, tenant_id, property_id, folio_id, provider_account_id,
+                    initiated_by, idempotency_key_id, refund_of_transaction_id,
+                    transaction_direction, transaction_type, provider_reference,
+                    internal_reference, amount, currency, status, posted_at,
+                    confirmed_at, external_refund_evidence, refund_reason,
+                    metadata
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'outbound', 'refund', ?, ?, ?,
+                        ?, 'posted', now(), now(), ?, ?, ?::jsonb)
+                """.trimIndent(),
+                refundId,
+                actor.tenantId,
+                propertyId,
+                original.folioId,
+                original.providerAccountId,
+                actor.tenantUserId,
+                idempotencyKeyId,
+                transactionId,
+                providerEvidence,
+                refundReference,
+                amount,
+                original.currency,
+                providerEvidence,
+                reason,
+                objectMapper.writeValueAsString(
+                    mapOf(
+                        "method" to if (isCash) "cash" else "mobile_money",
+                        "cashSessionId" to cashSession?.id,
+                    ),
+                ),
+            )
+            val folioRefundId = billingPort.postConfirmedRefund(
+                tenantId = actor.tenantId,
+                propertyId = propertyId,
+                request = ConfirmedPaymentRefundRequest(
+                    originalPaymentTransactionId = transactionId,
+                    refundPaymentTransactionId = refundId,
+                    amount = amount,
+                    processedBy = actor.tenantUserId,
+                    reason = reason,
+                    referenceNumber = providerEvidence ?: refundReference,
+                    cashSessionId = cashSession?.id,
+                ),
+                idempotencyKeyId = idempotencyKeyId,
+            )
+            val cumulativeRefund = original.refundedAmount.add(amount).money()
+            val nextStatus = if (cumulativeRefund == original.amount) {
+                PaymentStatus.REFUNDED
+            } else {
+                PaymentStatus.PARTIALLY_REFUNDED
+            }
+            jdbcTemplate.update(
+                """
+                UPDATE payment_transactions
+                SET refunded_amount = ?,
+                    status = ?,
+                    updated_at = now()
+                WHERE tenant_id = ? AND id = ?
+                """.trimIndent(),
+                cumulativeRefund,
+                nextStatus.databaseValue,
+                actor.tenantId,
+                transactionId,
+            )
+            jdbcTemplate.update(
+                """
+                UPDATE payment_transactions
+                SET folio_payment_id = ?, updated_at = now()
+                WHERE tenant_id = ? AND id = ?
+                """.trimIndent(),
+                folioRefundId,
+                actor.tenantId,
+                refundId,
+            )
+            if (cashSession != null) {
+                jdbcTemplate.update(
+                    """
+                    UPDATE cash_sessions
+                    SET expected_cash = expected_cash - ?, updated_at = now()
+                    WHERE tenant_id = ? AND id = ? AND status = 'open'
+                    """.trimIndent(),
+                    amount,
+                    actor.tenantId,
+                    cashSession.id,
+                )
+            }
+            meterRegistry.counter(
+                "peak.payment.refund",
+                "method",
+                if (isCash) "cash" else "mobile_money",
+                "result",
+                "posted",
+            ).increment()
+            requireTransaction(
+                actor.tenantId,
+                propertyId,
+                refundId,
+                lock = false,
+            ).also {
+                recordSideEffects(
+                    actor = actor,
+                    propertyId = propertyId,
+                    action = "payments.transaction.refunded",
+                    aggregateType = PAYMENT_TRANSACTIONS,
+                    aggregateId = refundId,
+                    payload = mapOf(
+                        "refundTransactionId" to refundId,
+                        "refundOfTransactionId" to transactionId,
+                        "amount" to amount,
+                        "originalStatus" to nextStatus.databaseValue,
+                        "reason" to reason,
+                    ),
+                    idempotencyKeyId = idempotencyKeyId,
+                )
+            }
+        }
+    }
+
     override fun getTransaction(
         propertyId: UUID,
         transactionId: UUID,
@@ -855,14 +1107,62 @@ class PaymentService(
             resourceType = PAYMENT_PROVIDER_ACCOUNTS,
             replayType = PaymentProviderAccountResponse::class.java,
         ) { actor, idempotencyKeyId ->
-            secretResolver.validate(request.secretRef)
-            secretResolver.validate(request.webhookSecretRef)
             val providerCode = request.providerCode.normalizedCode()
             require(providerCode in providerCodes) {
                 "Payment provider adapter is unavailable for $providerCode"
             }
+            if (environment.activeProfiles.contains("prod")) {
+                require(providerCode != CONTRACT_MOCK_PROVIDER) {
+                    "Mock payment providers are forbidden in production"
+                }
+            }
+            val apiKeySecretRef = (
+                request.apiKeySecretRef ?: request.secretRef
+            )?.normalizedRequired("apiKeySecretRef")
+                ?: throw PaymentRejectedException("apiKeySecretRef is required")
+            val checksumKeySecretRef = (
+                request.checksumKeySecretRef ?: request.webhookSecretRef
+            )?.normalizedRequired("checksumKeySecretRef")
+                ?: throw PaymentRejectedException(
+                    "checksumKeySecretRef is required",
+                )
+            secretResolver.validate(apiKeySecretRef)
+            secretResolver.validate(checksumKeySecretRef)
+            val clientId = (
+                request.clientId ?: request.merchantId
+            )?.normalizedRequired("clientId")
+                ?: throw PaymentRejectedException("clientId is required")
+            val providerEnvironment = request.environment.trim().lowercase()
+            require(providerEnvironment in setOf("sandbox", "production")) {
+                "environment must be sandbox or production"
+            }
+            if (environment.activeProfiles.contains("prod")) {
+                require(providerEnvironment == "production") {
+                    "Sandbox payment accounts are forbidden in production"
+                }
+            }
+            if (providerEnvironment == "production") {
+                require(
+                    providerCode in environment.approvedProviderCodes(
+                        "peak.payment.production-approved-provider-codes",
+                    ),
+                ) {
+                    "Payment provider is not approved for production"
+                }
+                require(
+                    request.sandboxCertifiedAt != null &&
+                            !request.sandboxEvidenceRef.isNullOrBlank(),
+                ) {
+                    "Production provider accounts require sandbox certification evidence"
+                }
+            }
             val endpointUrl = request.endpointUrl.trimmedOrNull()
-            if (providerCode == HTTP_GATEWAY_PROVIDER) {
+                ?: if (providerCode == CLICKPESA_PROVIDER) {
+                    CLICKPESA_ENDPOINT
+                } else {
+                    null
+                }
+            if (providerCode in setOf(HTTP_GATEWAY_PROVIDER, CLICKPESA_PROVIDER)) {
                 outboundEndpointPolicy.requireAllowedProviderEndpoint(
                     URI.create(endpointUrl.orEmpty()),
                 )
@@ -904,9 +1204,13 @@ class PaymentService(
                     INSERT INTO payment_provider_accounts (
                         id, tenant_id, property_id, provider_id, account_name,
                         endpoint_url, merchant_id, wallet_number, secret_ref,
-                        webhook_secret_ref, is_default, is_active
+                        webhook_secret_ref, client_id, api_key_secret_ref,
+                        checksum_key_secret_ref, environment,
+                        sandbox_certified_at, sandbox_evidence_ref,
+                        is_default, is_active
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, true)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                            true)
                     """.trimIndent(),
                     accountId,
                     actor.tenantId,
@@ -914,10 +1218,16 @@ class PaymentService(
                     providerId,
                     request.accountName.normalizedRequired("accountName"),
                     endpointUrl,
-                    request.merchantId.trimmedOrNull(),
+                    clientId,
                     request.walletNumber.trimmedOrNull(),
-                    request.secretRef.trim(),
-                    request.webhookSecretRef.trim(),
+                    apiKeySecretRef,
+                    checksumKeySecretRef,
+                    clientId,
+                    apiKeySecretRef,
+                    checksumKeySecretRef,
+                    providerEnvironment,
+                    request.sandboxCertifiedAt?.let(Timestamp::from),
+                    request.sandboxEvidenceRef.trimmedOrNull(),
                     request.isDefault,
                 )
             } catch (ex: DuplicateKeyException) {
@@ -996,7 +1306,7 @@ class PaymentService(
                       AND property_id = ?
                       AND provider_account_id = ?
                       AND provider_reference = ?
-                      AND status = 'confirmed'
+                      AND status IN ('posted', 'reconciled')
                     """.trimIndent(),
                     { rs, _ ->
                         ReconciliationMatch(
@@ -1069,7 +1379,7 @@ class PaymentService(
                     transaction?.transactionId,
                     transaction?.folioPaymentId,
                     providerReference,
-                    item.itemDate,
+                    Timestamp.from(item.itemDate),
                     providerAmount,
                     systemAmount,
                     matchStatus,
@@ -1136,6 +1446,25 @@ class PaymentService(
                 propertyId,
                 reconciliationId,
             )
+            jdbcTemplate.update(
+                """
+                UPDATE payment_transactions pt
+                SET status = 'reconciled',
+                    reconciled_at = now(),
+                    updated_at = now()
+                FROM payment_reconciliation_items pri
+                WHERE pri.tenant_id = pt.tenant_id
+                  AND pri.payment_transaction_id = pt.id
+                  AND pri.reconciliation_id = ?
+                  AND pri.match_status = 'matched'
+                  AND pt.tenant_id = ?
+                  AND pt.property_id = ?
+                  AND pt.status = 'posted'
+                """.trimIndent(),
+                reconciliationId,
+                actor.tenantId,
+                propertyId,
+            )
             requireReconciliation(actor.tenantId, propertyId, reconciliationId, lock = false)
                 .also {
                     recordSideEffects(
@@ -1151,6 +1480,112 @@ class PaymentService(
                         idempotencyKeyId = idempotencyKeyId,
                     )
                 }
+        }
+    }
+
+    override fun listReconciliations(
+        propertyId: UUID,
+        limit: Int,
+    ): List<PaymentReconciliationResponse> {
+        require(limit in 1..200) {
+            "limit must be between 1 and 200"
+        }
+        return read(propertyId) { actor ->
+            jdbcTemplate.query(
+                """
+                SELECT id, property_id, provider_account_id,
+                       reconciliation_date, statement_reference,
+                       provider_total, system_total, variance, status
+                FROM payment_reconciliations
+                WHERE tenant_id = ? AND property_id = ?
+                ORDER BY reconciliation_date DESC, created_at DESC
+                LIMIT ?
+                """.trimIndent(),
+                ::mapReconciliation,
+                actor.tenantId,
+                propertyId,
+                limit,
+            )
+        }
+    }
+
+    override fun getReconciliation(
+        propertyId: UUID,
+        reconciliationId: UUID,
+    ): PaymentReconciliationResponse? {
+        return read(propertyId) { actor ->
+            jdbcTemplate.query(
+                """
+                SELECT id, property_id, provider_account_id,
+                       reconciliation_date, statement_reference,
+                       provider_total, system_total, variance, status
+                FROM payment_reconciliations
+                WHERE tenant_id = ?
+                  AND property_id = ?
+                  AND id = ?
+                """.trimIndent(),
+                ::mapReconciliation,
+                actor.tenantId,
+                propertyId,
+                reconciliationId,
+            ).singleOrNull()
+        }
+    }
+
+    override fun importReconciliation(
+        propertyId: UUID,
+        request: ImportPaymentReconciliationRequest,
+    ): PaymentReconciliationImportResponse {
+        return mutate(
+            propertyId = propertyId,
+            operationType = "payments.reconciliation.import",
+            requestPayload = request,
+            resourceType = PAYMENT_RECONCILIATIONS,
+            replayType = PaymentReconciliationImportResponse::class.java,
+        ) { actor, idempotencyKeyId ->
+            require(!request.endDate.isBefore(request.startDate)) {
+                "endDate must not be before startDate"
+            }
+            require(request.endDate.toEpochDay() - request.startDate.toEpochDay() <= 31) {
+                "Statement import range cannot exceed 31 days"
+            }
+            require(request.currency.uppercase() == "TZS") {
+                "Only TZS statement imports are supported"
+            }
+            val account = requireProviderAccount(
+                actor.tenantId,
+                propertyId,
+                request.providerAccountId,
+                lock = false,
+            )
+            require(account.providerCode == CLICKPESA_PROVIDER) {
+                "Statement imports are supported only for ClickPesa"
+            }
+            val importId = UUID.randomUUID()
+            outboxPort.enqueue(
+                OutboxEventCommand(
+                    aggregateType = PAYMENT_RECONCILIATIONS,
+                    aggregateId = importId,
+                    tenantId = actor.tenantId,
+                    propertyId = propertyId,
+                    eventType = PAYMENT_RECONCILIATION_IMPORT_REQUESTED,
+                    destination = OutboxDestination.PAYMENT,
+                    payload = mapOf(
+                        "importId" to importId,
+                        "providerAccountId" to request.providerAccountId,
+                        "startDate" to request.startDate,
+                        "endDate" to request.endDate,
+                        "currency" to "TZS",
+                    ),
+                    idempotencyKeyId = idempotencyKeyId,
+                    priority = 3,
+                ),
+            )
+            PaymentReconciliationImportResponse(
+                importId = importId,
+                providerAccountId = request.providerAccountId,
+                status = "accepted",
+            )
         }
     }
 
@@ -1447,10 +1882,17 @@ class PaymentService(
             amount = rs.getBigDecimal("amount").money(),
             feeAmount = rs.getBigDecimal("fee_amount").money(),
             currency = rs.getString("currency").trim(),
-            status = rs.getString("status"),
+            status = PaymentStatus.fromDatabase(rs.getString("status")),
             initiatedAt = rs.getTimestamp("initiated_at").toInstant(),
+            postedAt = rs.getTimestamp("posted_at")?.toInstant(),
             confirmedAt = rs.getTimestamp("confirmed_at")?.toInstant(),
             failedAt = rs.getTimestamp("failed_at")?.toInstant(),
+            expiresAt = rs.getTimestamp("expires_at")?.toInstant(),
+            refundedAmount = rs.getBigDecimal("refunded_amount").money(),
+            refundOfTransactionId = rs.getObject(
+                "refund_of_transaction_id",
+                UUID::class.java,
+            ),
             reversalOfTransactionId = rs.getObject(
                 "reversal_of_transaction_id",
                 UUID::class.java,
@@ -1469,9 +1911,13 @@ class PaymentService(
             providerName = rs.getString("provider_name"),
             accountName = rs.getString("account_name"),
             merchantId = rs.getString("merchant_id"),
+            clientId = rs.getString("client_id"),
             walletNumber = rs.getString("wallet_number"),
             isDefault = rs.getBoolean("is_default"),
             isActive = rs.getBoolean("is_active"),
+            environment = rs.getString("environment"),
+            sandboxCertifiedAt = rs.getTimestamp("sandbox_certified_at")
+                ?.toInstant(),
         )
     }
 
@@ -1498,6 +1944,7 @@ class PaymentService(
             is PaymentTransactionResponse -> response.id
             is PaymentProviderAccountResponse -> response.id
             is PaymentReconciliationResponse -> response.id
+            is PaymentReconciliationImportResponse -> response.importId
             else -> null
         }
     }
@@ -1509,6 +1956,7 @@ class PaymentService(
             is PaymentTransactionResponse -> copy(replayed = true) as T
             is PaymentProviderAccountResponse -> copy(replayed = true) as T
             is PaymentReconciliationResponse -> copy(replayed = true) as T
+            is PaymentReconciliationImportResponse -> copy(replayed = true) as T
             else -> this
         }
     }
@@ -1549,6 +1997,14 @@ class PaymentService(
         return this?.trim()?.takeIf { it.isNotEmpty() }
     }
 
+    private fun Environment.approvedProviderCodes(property: String): Set<String> {
+        return getProperty(property, "")
+            .split(',')
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .toSet()
+    }
+
     private fun String.tanzanianE164(): String {
         val digits = filter(Char::isDigit)
         val normalized = when {
@@ -1587,26 +2043,33 @@ class PaymentService(
     )
 
     private companion object {
+        const val CONTRACT_MOCK_PROVIDER = "contract_mock"
         const val HTTP_GATEWAY_PROVIDER = "http_gateway"
         const val CASH_SESSIONS = "cash_sessions"
         const val PAYMENT_TRANSACTIONS = "payment_transactions"
         const val PAYMENT_PROVIDER_ACCOUNTS = "payment_provider_accounts"
         const val PAYMENT_RECONCILIATIONS = "payment_reconciliations"
         const val PAYMENT_COLLECTION_REQUESTED = "payment.collection.requested"
+        const val PAYMENT_RECONCILIATION_IMPORT_REQUESTED =
+            "payment.reconciliation.import.requested"
+        const val CLICKPESA_PROVIDER = "clickpesa"
+        const val CLICKPESA_ENDPOINT = "https://api.clickpesa.com/third-parties"
         val PROVIDER_CODE = Regex("[a-z0-9_]{3,50}")
         val TANZANIAN_PHONE = Regex("^\\+255[67][0-9]{8}$")
         val PROVIDER_REFERENCE = Regex("[A-Za-z0-9._:/-]{3,200}")
         val PAYMENT_TRANSACTION_SELECT = """
             SELECT id, property_id, folio_id, pos_order_id, provider_account_id, transaction_type,
                    provider_reference, internal_reference, amount, fee_amount,
-                   currency, status, initiated_at, confirmed_at, failed_at,
-                   reversal_of_transaction_id
+                   currency, status, initiated_at, posted_at, confirmed_at,
+                   failed_at, expires_at, refunded_amount,
+                   refund_of_transaction_id, reversal_of_transaction_id
             FROM payment_transactions
         """.trimIndent()
         val PAYMENT_PROVIDER_ACCOUNT_SELECT = """
             SELECT ppa.id, ppa.property_id, pp.provider_code,
                    pp.name AS provider_name, ppa.account_name, ppa.merchant_id,
-                   ppa.wallet_number, ppa.is_default, ppa.is_active
+                   ppa.client_id, ppa.wallet_number, ppa.is_default,
+                   ppa.is_active, ppa.environment, ppa.sandbox_certified_at
             FROM payment_provider_accounts ppa
             JOIN payment_providers pp
               ON pp.tenant_id = ppa.tenant_id
@@ -1614,5 +2077,7 @@ class PaymentService(
         """.trimIndent()
         const val MIN_REVERSAL_REASON_LENGTH = 10
         const val MAX_REVERSAL_REASON_LENGTH = 500
+        const val MIN_REFUND_REASON_LENGTH = 10
+        const val MAX_REFUND_REASON_LENGTH = 500
     }
 }

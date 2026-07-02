@@ -62,11 +62,10 @@ ops/scripts/deploy.sh
 - Import and verify the Keycloak realm before allowing tenant users to authenticate.
 - Keep `PEAK_SECURITY_JWT_ISSUER_URI` equal to the Keycloak realm issuer and `PEAK_SECURITY_JWT_AUDIENCE=peak-api`.
 - Resolve tenant and platform users through active OIDC `identity_links`; do not rely on client-editable user attributes for authorization.
-- Keep payment and fiscal credentials out of checked-in YAML. Configure
-  provider accounts with `providerCode=http_gateway`, exact HTTPS endpoints,
-  `secretRef=env:PEAK_PAYMENT_GATEWAY_CREDENTIAL` or
-  `env:PEAK_FISCAL_GATEWAY_CREDENTIAL`, and
-  `webhookSecretRef=env:PEAK_PAYMENT_WEBHOOK_SECRET`.
+- Keep payment and fiscal credentials out of checked-in YAML. Phase 3 payment
+  accounts use `providerCode=clickpesa`,
+  `apiKeySecretRef=env:PEAK_CLICKPESA_API_KEY`, and
+  `checksumKeySecretRef=env:PEAK_CLICKPESA_CHECKSUM_KEY`.
 - Set `PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS` to the exact comma-separated DNS
   hosts certified for payment and fiscal traffic. Wildcards, URLs, localhost,
   and IP literals are forbidden; tenant-configured endpoints outside this
@@ -74,9 +73,11 @@ ops/scripts/deploy.sh
 - Enforce the same restriction at the host/network egress layer using the
   provider-published destination ranges. The application allowlist does not
   replace DNS and firewall controls.
-- Certify the provider-neutral gateway against the selected mobile-money and
-  TRA/EFD/VFD providers before enabling those accounts. Contract mocks cannot
-  start under the production profile.
+- Set `PEAK_PAYMENT_PRODUCTION_APPROVED_PROVIDER_CODES=clickpesa` only after the
+  protected sandbox workflow passes and certification evidence is recorded.
+- Keep `PEAK_FISCAL_PRODUCTION_APPROVED_PROVIDER_CODES` empty until a TRA vendor
+  adapter is selected and certified. Contract mocks and the signed simulator
+  cannot run under the production profile.
 - Reject placeholder secrets and short passwords with `ops/scripts/validate-production-env.sh`.
 - Store production secrets outside Git; `.env` is ignored and is only a local operator input file.
 - Generate `PEAK_GUEST_IDENTITY_HASH_KEY` from at least 32 cryptographically
@@ -194,6 +195,7 @@ provider p95 latency exceeds the configured read timeout.
 
 Realtime alerts should include journal polling stalls, replay growth,
 connection-limit rejections, send failures, and abrupt disconnect spikes.
-Payment/fiscal alerts should include provider outbox retries, webhook signature
-failures, reconciliation variance, rejected fiscal receipts, and provider
-latency above the configured request timeout.
+Phase 3 dashboard, alert rules, and the incident procedure are in
+`ops/observability`. Payment/fiscal alerts include ClickPesa token failures,
+poll backlog, checksum/webhook failures, reconciliation backlog, fiscal
+corrections, POS variance, and night-audit blockers.

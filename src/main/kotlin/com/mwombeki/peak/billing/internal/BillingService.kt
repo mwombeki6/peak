@@ -8,12 +8,21 @@ import com.mwombeki.peak.billing.api.BillingInProgressException
 import com.mwombeki.peak.billing.api.BillingMutationReceipt
 import com.mwombeki.peak.billing.api.BillingNotFoundException
 import com.mwombeki.peak.billing.api.BillingPort
+import com.mwombeki.peak.billing.api.BillingSnapshotPort
+import com.mwombeki.peak.billing.api.BillingNightAuditSummary
 import com.mwombeki.peak.billing.api.CheckoutFinancialState
 import com.mwombeki.peak.billing.api.ConfirmedPaymentRequest
+import com.mwombeki.peak.billing.api.ConfirmedPaymentRefundRequest
 import com.mwombeki.peak.billing.api.ConfirmedPaymentReversalRequest
 import com.mwombeki.peak.billing.api.FolioChargeResponse
 import com.mwombeki.peak.billing.api.FolioPaymentResponse
 import com.mwombeki.peak.billing.api.FolioResponse
+import com.mwombeki.peak.billing.api.FiscalInvoiceLineSnapshot
+import com.mwombeki.peak.billing.api.FiscalInvoiceSnapshot
+import com.mwombeki.peak.billing.api.FiscalCreditNoteSnapshot
+import com.mwombeki.peak.billing.api.CreateCreditNoteRequest
+import com.mwombeki.peak.billing.api.CreditNoteResponse
+import com.mwombeki.peak.billing.api.VoidInvoiceRequest
 import com.mwombeki.peak.billing.api.InvoiceResponse
 import com.mwombeki.peak.billing.api.IssueInvoiceRequest
 import com.mwombeki.peak.billing.api.PostChargeRequest
@@ -48,7 +57,226 @@ class BillingService(
     private val transactionTemplate: TransactionTemplate,
     private val objectMapper: ObjectMapper,
     private val meterRegistry: MeterRegistry,
-) : BillingPort {
+) : BillingPort, BillingSnapshotPort {
+
+    override fun nightAuditSummary(
+        tenantId: UUID,
+        propertyId: UUID,
+    ): BillingNightAuditSummary {
+        requireActiveContext(tenantId, propertyId)
+        val openUnpaid = count(
+            """
+            SELECT COUNT(*)
+            FROM folios
+            WHERE tenant_id = ?
+              AND property_id = ?
+              AND status = 'open'
+              AND total_amount > total_paid
+              AND deleted_at IS NULL
+            """.trimIndent(),
+            tenantId,
+            propertyId,
+        )
+        val missingInvoice = count(
+            """
+            SELECT COUNT(*)
+            FROM folios f
+            WHERE f.tenant_id = ?
+              AND f.property_id = ?
+              AND f.status = 'open'
+              AND f.total_amount > 0
+              AND f.deleted_at IS NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM invoices i
+                  WHERE i.tenant_id = f.tenant_id
+                    AND i.property_id = f.property_id
+                    AND i.folio_id = f.id
+                    AND i.status IN ('issued', 'sent', 'paid')
+                    AND i.deleted_at IS NULL
+              )
+            """.trimIndent(),
+            tenantId,
+            propertyId,
+        )
+        val pendingPayments = count(
+            """
+            SELECT COUNT(*)
+            FROM folio_payments
+            WHERE tenant_id = ?
+              AND property_id = ?
+              AND status = 'PENDING'
+              AND deleted_at IS NULL
+            """.trimIndent(),
+            tenantId,
+            propertyId,
+        )
+        val issuedInvoiceIds = jdbcTemplate.query(
+            """
+            SELECT id
+            FROM invoices
+            WHERE tenant_id = ?
+              AND property_id = ?
+              AND status IN ('issued', 'sent', 'paid')
+              AND deleted_at IS NULL
+            ORDER BY id
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("id", UUID::class.java) },
+            tenantId,
+            propertyId,
+        )
+        return BillingNightAuditSummary(
+            openUnpaidFolios = openUnpaid,
+            foliosMissingIssuedInvoice = missingInvoice,
+            pendingFolioPayments = pendingPayments,
+            issuedInvoiceIds = issuedInvoiceIds,
+        )
+    }
+
+    override fun fiscalInvoiceSnapshot(
+        tenantId: UUID,
+        propertyId: UUID,
+        invoiceId: UUID,
+    ): FiscalInvoiceSnapshot {
+        requireActiveContext(tenantId, propertyId)
+        val invoice = jdbcTemplate.query(
+            """
+            SELECT id, invoice_number_formatted, currency_code, subtotal,
+                   vat_total, service_charge, tourism_levy, total, status
+            FROM invoices
+            WHERE tenant_id = ?
+              AND property_id = ?
+              AND id = ?
+              AND deleted_at IS NULL
+            """.trimIndent(),
+            { rs, _ ->
+                FiscalInvoiceSnapshot(
+                    id = rs.getObject("id", UUID::class.java),
+                    number = rs.getString("invoice_number_formatted").orEmpty(),
+                    currency = rs.getString("currency_code").trim(),
+                    subtotal = rs.getBigDecimal("subtotal").money(),
+                    taxTotal = rs.getBigDecimal("vat_total")
+                        .add(rs.getBigDecimal("service_charge"))
+                        .add(rs.getBigDecimal("tourism_levy"))
+                        .money(),
+                    total = rs.getBigDecimal("total").money(),
+                    status = rs.getString("status"),
+                    items = emptyList(),
+                )
+            },
+            tenantId,
+            propertyId,
+            invoiceId,
+        ).singleOrNull() ?: throw BillingNotFoundException("Fiscal invoice was not found")
+        val items = jdbcTemplate.query(
+            """
+            SELECT id, description, amount, vat_amount
+            FROM invoice_items
+            WHERE tenant_id = ?
+              AND property_id = ?
+              AND invoice_id = ?
+              AND status = 'POSTED'
+            ORDER BY created_at, id
+            """.trimIndent(),
+            { rs, _ ->
+                FiscalInvoiceLineSnapshot(
+                    id = rs.getObject("id", UUID::class.java),
+                    description = rs.getString("description"),
+                    amount = rs.getBigDecimal("amount").money(),
+                    taxAmount = rs.getBigDecimal("vat_amount").money(),
+                )
+            },
+            tenantId,
+            propertyId,
+            invoiceId,
+        )
+        return invoice.copy(items = items)
+    }
+
+    override fun fiscalCreditNoteSnapshot(
+        tenantId: UUID,
+        propertyId: UUID,
+        creditNoteId: UUID,
+    ): FiscalCreditNoteSnapshot {
+        requireActiveContext(tenantId, propertyId)
+        val creditNote = jdbcTemplate.query(
+            """
+            SELECT id, invoice_id, credit_note_number, subtotal, tax_amount,
+                   total_amount, status, fiscal_status
+            FROM credit_notes
+            WHERE tenant_id = ?
+              AND property_id = ?
+              AND id = ?
+            """.trimIndent(),
+            { rs, _ ->
+                FiscalCreditNoteSnapshot(
+                    id = rs.getObject("id", UUID::class.java),
+                    invoiceId = rs.getObject("invoice_id", UUID::class.java),
+                    number = rs.getString("credit_note_number"),
+                    subtotal = rs.getBigDecimal("subtotal").money(),
+                    taxTotal = rs.getBigDecimal("tax_amount").money(),
+                    total = rs.getBigDecimal("total_amount").money(),
+                    status = rs.getString("status"),
+                    fiscalStatus = rs.getString("fiscal_status"),
+                    lines = emptyList(),
+                )
+            },
+            tenantId,
+            propertyId,
+            creditNoteId,
+        ).singleOrNull() ?: throw BillingNotFoundException(
+            "Credit note was not found",
+        )
+        val lines = jdbcTemplate.query(
+            """
+            SELECT id, description, amount, tax_amount
+            FROM credit_note_items
+            WHERE tenant_id = ?
+              AND property_id = ?
+              AND credit_note_id = ?
+            ORDER BY created_at, id
+            """.trimIndent(),
+            { rs, _ ->
+                FiscalInvoiceLineSnapshot(
+                    id = rs.getObject("id", UUID::class.java),
+                    description = rs.getString("description"),
+                    amount = rs.getBigDecimal("amount").money(),
+                    taxAmount = rs.getBigDecimal("tax_amount").money(),
+                )
+            },
+            tenantId,
+            propertyId,
+            creditNoteId,
+        )
+        return creditNote.copy(lines = lines)
+    }
+
+    override fun markCreditNoteFiscalStatus(
+        tenantId: UUID,
+        propertyId: UUID,
+        creditNoteId: UUID,
+        status: String,
+    ) {
+        require(
+            status in setOf("pending", "submitted", "accepted", "rejected"),
+        ) {
+            "Invalid credit-note fiscal status"
+        }
+        val changed = jdbcTemplate.update(
+            """
+            UPDATE credit_notes
+            SET fiscal_status = ?, updated_at = now()
+            WHERE tenant_id = ? AND property_id = ? AND id = ?
+            """.trimIndent(),
+            status,
+            tenantId,
+            propertyId,
+            creditNoteId,
+        )
+        if (changed != 1) {
+            throw BillingNotFoundException("Credit note was not found")
+        }
+    }
 
     override fun openReservationFolio(
         tenantId: UUID,
@@ -317,6 +545,149 @@ class BillingService(
         return reversalPaymentId
     }
 
+    override fun postConfirmedRefund(
+        tenantId: UUID,
+        propertyId: UUID,
+        request: ConfirmedPaymentRefundRequest,
+        idempotencyKeyId: UUID,
+    ): UUID {
+        requireActiveContext(tenantId, propertyId)
+        val amount = request.amount.requirePositiveMoney("amount")
+        val original = jdbcTemplate.query(
+            """
+            SELECT fp.id,
+                   fp.folio_id,
+                   fp.payment_method,
+                   fp.amount,
+                   fp.cash_session_id,
+                   fp.status,
+                   fp.is_reversed,
+                   f.status AS folio_status
+            FROM folio_payments fp
+            JOIN folios f
+              ON f.tenant_id = fp.tenant_id
+             AND f.id = fp.folio_id
+             AND f.property_id = ?
+             AND f.status IN ('open', 'closed')
+             AND f.deleted_at IS NULL
+            WHERE fp.tenant_id = ?
+              AND fp.property_id = ?
+              AND fp.payment_transaction_id = ?
+              AND fp.reversal_of IS NULL
+              AND fp.deleted_at IS NULL
+            FOR UPDATE OF fp, f
+            """.trimIndent(),
+            { rs, _ ->
+                PaymentRefundSource(
+                    paymentId = rs.getObject("id", UUID::class.java),
+                    folioId = rs.getObject("folio_id", UUID::class.java),
+                    paymentMethod = rs.getString("payment_method"),
+                    amount = rs.getBigDecimal("amount").money(),
+                    status = rs.getString("status"),
+                    folioStatus = rs.getString("folio_status"),
+                )
+            },
+            propertyId,
+            tenantId,
+            propertyId,
+            request.originalPaymentTransactionId,
+        ).singleOrNull() ?: throw BillingNotFoundException(
+            "Posted payment was not found",
+        )
+        require(original.status == "POSTED") {
+            "Only posted folio payments can be refunded"
+        }
+        val alreadyRefunded = jdbcTemplate.queryForObject(
+            """
+            SELECT COALESCE(sum(amount), 0)
+            FROM folio_payments
+            WHERE tenant_id = ?
+              AND reversal_of = ?
+              AND status = 'POSTED'
+              AND deleted_at IS NULL
+            """.trimIndent(),
+            BigDecimal::class.java,
+            tenantId,
+            original.paymentId,
+        )?.money() ?: BigDecimal.ZERO.setScale(2)
+        require(alreadyRefunded.add(amount) <= original.amount) {
+            "Refund amount exceeds the remaining refundable amount"
+        }
+
+        val refundPaymentId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO folio_payments (
+                id, tenant_id, property_id, folio_id, payment_method, amount,
+                payment_transaction_id, cash_session_id, reference_number,
+                idempotency_key, status, reversal_of, paid_at,
+                processed_by, created_by, notes
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'POSTED', ?, now(), ?, ?, ?)
+            """.trimIndent(),
+            refundPaymentId,
+            tenantId,
+            propertyId,
+            original.folioId,
+            original.paymentMethod,
+            amount,
+            request.refundPaymentTransactionId,
+            request.cashSessionId,
+            request.referenceNumber.trim(),
+            idempotencyKeyId.toString(),
+            original.paymentId,
+            request.processedBy,
+            request.processedBy,
+            request.reason.trim(),
+        )
+        val fullyRefunded = alreadyRefunded.add(amount) == original.amount
+        if (fullyRefunded) {
+            jdbcTemplate.update(
+                """
+                UPDATE folio_payments
+                SET is_reversed = true, updated_at = now()
+                WHERE tenant_id = ? AND id = ?
+                """.trimIndent(),
+                tenantId,
+                original.paymentId,
+            )
+        }
+        if (original.folioStatus == "open") {
+            recalculateFolio(original.folioId)
+        } else {
+            jdbcTemplate.update(
+                """
+                UPDATE folios
+                SET total_paid = total_paid - ?, updated_at = now()
+                WHERE tenant_id = ? AND property_id = ? AND id = ?
+                """.trimIndent(),
+                amount,
+                tenantId,
+                propertyId,
+                original.folioId,
+            )
+        }
+        recordSideEffects(
+            tenantId = tenantId,
+            propertyId = propertyId,
+            action = "billing.payment.refunded",
+            eventType = "billing.payment.refunded",
+            aggregateType = "folio_payments",
+            aggregateId = refundPaymentId,
+            payload = mapOf(
+                "propertyId" to propertyId,
+                "folioId" to original.folioId,
+                "originalPaymentId" to original.paymentId,
+                "refundPaymentId" to refundPaymentId,
+                "amount" to amount,
+                "reason" to request.reason.trim(),
+            ),
+            idempotencyKeyId = idempotencyKeyId,
+            destination = OutboxDestination.PLATFORM,
+        )
+        return refundPaymentId
+    }
+
     override fun checkoutFinancialState(
         tenantId: UUID,
         propertyId: UUID,
@@ -347,47 +718,30 @@ class BillingService(
             reservationId,
         ).singleOrNull() ?: throw BillingNotFoundException("Open reservation folio was not found")
 
-        val hasIssuedInvoice = exists(
+        val invoiceId = jdbcTemplate.query(
             """
-            SELECT EXISTS (
-                SELECT 1
-                FROM invoices
-                WHERE tenant_id = ?
-                  AND property_id = ?
-                  AND folio_id = ?
-                  AND status IN ('issued', 'sent', 'paid')
-                  AND deleted_at IS NULL
-            )
+            SELECT id
+            FROM invoices
+            WHERE tenant_id = ?
+              AND property_id = ?
+              AND folio_id = ?
+              AND status IN ('issued', 'sent', 'paid')
+              AND deleted_at IS NULL
+            ORDER BY issued_at DESC
+            LIMIT 1
             """.trimIndent(),
+            { rs, _ -> rs.getObject("id", UUID::class.java) },
             tenantId,
             propertyId,
             folio.id,
-        )
-        val hasAcceptedFiscalReceipt = exists(
-            """
-            SELECT EXISTS (
-                SELECT 1
-                FROM invoices i
-                JOIN fiscal_receipts fr ON fr.tenant_id = i.tenant_id AND fr.invoice_id = i.id
-                WHERE i.tenant_id = ?
-                  AND i.property_id = ?
-                  AND i.folio_id = ?
-                  AND i.status IN ('issued', 'sent', 'paid')
-                  AND fr.status = 'accepted'
-                  AND i.deleted_at IS NULL
-            )
-            """.trimIndent(),
-            tenantId,
-            propertyId,
-            folio.id,
-        )
+        ).singleOrNull()
         return CheckoutFinancialState(
             folioId = folio.id,
+            invoiceId = invoiceId,
             totalAmount = folio.totalAmount,
             totalPaid = folio.totalPaid,
             balanceDue = folio.totalAmount.subtract(folio.totalPaid).money(),
-            hasIssuedInvoice = hasIssuedInvoice,
-            hasAcceptedFiscalReceipt = hasAcceptedFiscalReceipt,
+            hasIssuedInvoice = invoiceId != null,
         )
     }
 
@@ -692,6 +1046,251 @@ class BillingService(
         }
     }
 
+    override fun voidInvoice(
+        propertyId: UUID,
+        invoiceId: UUID,
+        request: VoidInvoiceRequest,
+        hasFiscalAcceptance: Boolean,
+    ): InvoiceResponse {
+        return mutate(
+            propertyId = propertyId,
+            operationType = "billing.invoice.void",
+            requestPayload = mapOf("invoiceId" to invoiceId, "request" to request),
+            resourceType = INVOICES,
+            replayType = InvoiceResponse::class.java,
+        ) { actor, idempotencyKeyId ->
+            require(!hasFiscalAcceptance) {
+                "Invoices with fiscal activity cannot be voided; issue a credit note"
+            }
+            val reason = request.reason.normalizedRequired("reason")
+            require(reason.length in 10..500) {
+                "Void reason must be between 10 and 500 characters"
+            }
+            val changed = jdbcTemplate.update(
+                """
+                UPDATE invoices
+                SET status = 'voided',
+                    voided_at = now(),
+                    voided_by = ?,
+                    void_reason = ?,
+                    updated_at = now()
+                WHERE tenant_id = ?
+                  AND property_id = ?
+                  AND id = ?
+                  AND status IN ('issued', 'sent', 'paid', 'overdue')
+                  AND deleted_at IS NULL
+                """.trimIndent(),
+                actor.tenantUserId,
+                reason,
+                actor.tenantId,
+                propertyId,
+                invoiceId,
+            )
+            if (changed != 1) {
+                throw BillingConflictException(
+                    "Invoice is not eligible for voiding",
+                )
+            }
+            getInvoiceInContext(actor.tenantId, propertyId, invoiceId)
+                ?.also {
+                    recordSideEffects(
+                        tenantId = actor.tenantId,
+                        propertyId = propertyId,
+                        action = "billing.invoice.voided",
+                        eventType = "billing.invoice.voided",
+                        aggregateType = INVOICES,
+                        aggregateId = invoiceId,
+                        payload = mapOf(
+                            "invoiceId" to invoiceId,
+                            "reason" to reason,
+                        ),
+                        idempotencyKeyId = idempotencyKeyId,
+                        destination = OutboxDestination.PLATFORM,
+                    )
+                }
+                ?: error("Voided invoice was not readable")
+        }
+    }
+
+    override fun createCreditNote(
+        propertyId: UUID,
+        invoiceId: UUID,
+        request: CreateCreditNoteRequest,
+        fiscalCorrectionRequired: Boolean,
+    ): CreditNoteResponse {
+        return mutate(
+            propertyId = propertyId,
+            operationType = "billing.invoice.credit_note",
+            requestPayload = mapOf("invoiceId" to invoiceId, "request" to request),
+            resourceType = CREDIT_NOTES,
+            replayType = CreditNoteResponse::class.java,
+        ) { actor, idempotencyKeyId ->
+            val reason = request.reason.normalizedRequired("reason")
+            require(reason.length in 10..500) {
+                "Credit-note reason must be between 10 and 500 characters"
+            }
+            require(request.lines.isNotEmpty() && request.lines.size <= 100) {
+                "Credit note requires between 1 and 100 invoice lines"
+            }
+            val invoice = getInvoiceInContext(
+                actor.tenantId,
+                propertyId,
+                invoiceId,
+            ) ?: throw BillingNotFoundException("Invoice was not found")
+            require(invoice.status in setOf("issued", "sent", "paid", "overdue")) {
+                "Invoice is not eligible for a credit note"
+            }
+            val duplicateIds = request.lines.groupBy { it.invoiceItemId }
+                .filterValues { it.size > 1 }
+                .keys
+            require(duplicateIds.isEmpty()) {
+                "Credit-note invoice lines must be unique"
+            }
+            val lines = request.lines.map { requested ->
+                val amount = requested.amount.requireNonNegativeMoney("amount")
+                val taxAmount = requested.taxAmount
+                    .requireNonNegativeMoney("taxAmount")
+                require(amount.add(taxAmount) > BigDecimal.ZERO) {
+                    "Credit-note line total must be positive"
+                }
+                val source = jdbcTemplate.query(
+                    """
+                    SELECT id, description, amount, vat_amount
+                    FROM invoice_items
+                    WHERE tenant_id = ?
+                      AND property_id = ?
+                      AND invoice_id = ?
+                      AND id = ?
+                      AND status = 'POSTED'
+                    FOR UPDATE
+                    """.trimIndent(),
+                    { rs, _ ->
+                        CreditNoteSourceLine(
+                            id = rs.getObject("id", UUID::class.java),
+                            description = rs.getString("description"),
+                            amount = rs.getBigDecimal("amount").money(),
+                            taxAmount = rs.getBigDecimal("vat_amount").money(),
+                        )
+                    },
+                    actor.tenantId,
+                    propertyId,
+                    invoiceId,
+                    requested.invoiceItemId,
+                ).singleOrNull() ?: throw BillingNotFoundException(
+                    "Invoice item ${requested.invoiceItemId} was not found",
+                )
+                val credited = jdbcTemplate.query(
+                    """
+                    SELECT COALESCE(sum(cni.amount), 0) AS amount,
+                           COALESCE(sum(cni.tax_amount), 0) AS tax_amount
+                    FROM credit_note_items cni
+                    JOIN credit_notes cn
+                      ON cn.tenant_id = cni.tenant_id
+                     AND cn.id = cni.credit_note_id
+                    WHERE cni.tenant_id = ?
+                      AND cni.invoice_item_id = ?
+                      AND cn.status IN ('issued', 'applied')
+                    """.trimIndent(),
+                    { rs, _ ->
+                        rs.getBigDecimal("amount").money() to
+                                rs.getBigDecimal("tax_amount").money()
+                    },
+                    actor.tenantId,
+                    source.id,
+                ).single()
+                require(credited.first.add(amount) <= source.amount) {
+                    "Credit amount exceeds remaining invoice-line amount"
+                }
+                require(credited.second.add(taxAmount) <= source.taxAmount) {
+                    "Credit tax exceeds remaining invoice-line tax"
+                }
+                CreditNoteLine(source, amount, taxAmount)
+            }
+            val subtotal = lines.fold(BigDecimal.ZERO) { total, line ->
+                total.add(line.amount)
+            }.money()
+            val taxTotal = lines.fold(BigDecimal.ZERO) { total, line ->
+                total.add(line.taxAmount)
+            }.money()
+            val total = subtotal.add(taxTotal).money()
+            val creditNoteId = UUID.randomUUID()
+            val number = "CN-" + creditNoteId.toString()
+                .replace("-", "")
+                .take(16)
+                .uppercase()
+            jdbcTemplate.update(
+                """
+                INSERT INTO credit_notes (
+                    id, tenant_id, property_id, invoice_id, credit_note_number,
+                    reason, subtotal, tax_amount, total_amount, currency,
+                    status, fiscal_status, issued_at, approved_by, created_by,
+                    idempotency_key_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'TZS', 'issued', ?, now(),
+                        ?, ?, ?)
+                """.trimIndent(),
+                creditNoteId,
+                actor.tenantId,
+                propertyId,
+                invoiceId,
+                number,
+                reason,
+                subtotal,
+                taxTotal,
+                total,
+                if (fiscalCorrectionRequired) "pending" else "not_required",
+                actor.tenantUserId,
+                actor.tenantUserId,
+                idempotencyKeyId,
+            )
+            lines.forEach { line ->
+                jdbcTemplate.update(
+                    """
+                    INSERT INTO credit_note_items (
+                        id, tenant_id, property_id, credit_note_id,
+                        invoice_item_id, description, amount, tax_amount
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """.trimIndent(),
+                    UUID.randomUUID(),
+                    actor.tenantId,
+                    propertyId,
+                    creditNoteId,
+                    line.source.id,
+                    line.source.description,
+                    line.amount,
+                    line.taxAmount,
+                )
+            }
+            requireCreditNote(
+                actor.tenantId,
+                propertyId,
+                creditNoteId,
+            ).also {
+                recordSideEffects(
+                    tenantId = actor.tenantId,
+                    propertyId = propertyId,
+                    action = "billing.credit_note.issued",
+                    eventType = "billing.credit_note.issued",
+                    aggregateType = CREDIT_NOTES,
+                    aggregateId = creditNoteId,
+                    payload = mapOf(
+                        "creditNoteId" to creditNoteId,
+                        "invoiceId" to invoiceId,
+                        "total" to total,
+                        "fiscalCorrectionRequired" to fiscalCorrectionRequired,
+                    ),
+                    idempotencyKeyId = idempotencyKeyId,
+                    destination = if (fiscalCorrectionRequired) {
+                        OutboxDestination.FISCAL
+                    } else {
+                        OutboxDestination.PLATFORM
+                    },
+                )
+            }
+        }
+    }
+
     private fun postChargeInternal(
         actor: TenantActor,
         propertyId: UUID,
@@ -984,6 +1583,44 @@ class BillingService(
         ).singleOrNull()
     }
 
+    private fun requireCreditNote(
+        tenantId: UUID,
+        propertyId: UUID,
+        creditNoteId: UUID,
+    ): CreditNoteResponse {
+        return jdbcTemplate.query(
+            """
+            SELECT id, property_id, invoice_id, credit_note_number, reason,
+                   subtotal, tax_amount, total_amount, status, fiscal_status,
+                   issued_at
+            FROM credit_notes
+            WHERE tenant_id = ?
+              AND property_id = ?
+              AND id = ?
+            """.trimIndent(),
+            { rs, _ ->
+                CreditNoteResponse(
+                    id = rs.getObject("id", UUID::class.java),
+                    propertyId = rs.getObject("property_id", UUID::class.java),
+                    invoiceId = rs.getObject("invoice_id", UUID::class.java),
+                    creditNoteNumber = rs.getString("credit_note_number"),
+                    reason = rs.getString("reason"),
+                    subtotal = rs.getBigDecimal("subtotal").money(),
+                    taxAmount = rs.getBigDecimal("tax_amount").money(),
+                    totalAmount = rs.getBigDecimal("total_amount").money(),
+                    status = rs.getString("status"),
+                    fiscalStatus = rs.getString("fiscal_status"),
+                    issuedAt = rs.getTimestamp("issued_at")?.toInstant(),
+                )
+            },
+            tenantId,
+            propertyId,
+            creditNoteId,
+        ).singleOrNull() ?: throw BillingNotFoundException(
+            "Credit note was not found",
+        )
+    }
+
     private fun requireFolio(
         tenantId: UUID,
         propertyId: UUID,
@@ -1254,6 +1891,7 @@ class BillingService(
     private fun <T : Any> T.withReplayFlag(): T {
         return when (this) {
             is BillingMutationReceipt -> copy(replayed = true) as T
+            is CreditNoteResponse -> copy(replayed = true) as T
             else -> this
         }
     }
@@ -1262,6 +1900,7 @@ class BillingService(
         return when (response) {
             is BillingMutationReceipt -> response.resourceId
             is InvoiceResponse -> response.id
+            is CreditNoteResponse -> response.id
             else -> null
         }
     }
@@ -1398,10 +2037,33 @@ class BillingService(
         val reversed: Boolean,
     )
 
+    private data class PaymentRefundSource(
+        val paymentId: UUID,
+        val folioId: UUID,
+        val paymentMethod: String,
+        val amount: BigDecimal,
+        val status: String,
+        val folioStatus: String,
+    )
+
+    private data class CreditNoteSourceLine(
+        val id: UUID,
+        val description: String,
+        val amount: BigDecimal,
+        val taxAmount: BigDecimal,
+    )
+
+    private data class CreditNoteLine(
+        val source: CreditNoteSourceLine,
+        val amount: BigDecimal,
+        val taxAmount: BigDecimal,
+    )
+
     companion object {
         const val FOLIOS = "folios"
         const val FOLIO_CHARGES = "folio_charges"
         const val INVOICES = "invoices"
+        const val CREDIT_NOTES = "credit_notes"
         val VALID_CHARGE_TYPES = setOf("ROOM", "F&B", "LAUNDRY", "MINIBAR", "SPA", "PARKING", "TELEPHONE", "TRANSFER", "TAX", "FEE", "MISC")
         val VALID_PAYMENT_METHODS = setOf("cash", "mobile_money")
     }

@@ -1,5 +1,6 @@
-package com.mwombeki.peak.payment.internal
+package com.mwombeki.peak.integrations.internal
 
+import com.mwombeki.peak.payment.api.ProviderCollectionCommand
 import java.math.BigDecimal
 import java.net.URI
 import java.util.UUID
@@ -29,11 +30,12 @@ class HttpPaymentProviderAdapterTests {
                 transactionId = transactionId,
                 internalReference = "PAY-123",
                 endpointUrl = "https://gateway.example.test/v1/collections",
-                merchantId = "merchant-1",
+                clientId = "merchant-1",
                 payerIdentifier = "255712345678",
                 amount = BigDecimal("12500.00"),
                 currency = "TZS",
-                credential = "secret-token",
+                apiKey = "secret-token",
+                checksumKey = "checksum-token",
             ),
         )
 
@@ -59,11 +61,12 @@ class HttpPaymentProviderAdapterTests {
                     transactionId = UUID.randomUUID(),
                     internalReference = "PAY-123",
                     endpointUrl = "http://gateway.example.test/collections",
-                    merchantId = null,
+                    clientId = "merchant-1",
                     payerIdentifier = "255712345678",
                     amount = BigDecimal.ONE,
                     currency = "TZS",
-                    credential = "secret-token",
+                    apiKey = "secret-token",
+                    checksumKey = "checksum-token",
                 ),
             )
         }

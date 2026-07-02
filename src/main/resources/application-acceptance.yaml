@@ -1,0 +1,22 @@
+spring:
+  flyway:
+    enabled: false
+
+peak:
+  fiscal:
+    providers:
+      signed-simulator:
+        enabled: true
+      contract-mock:
+        enabled: false
+  payment:
+    providers:
+      contract-mock:
+        enabled: false
+  security:
+    http:
+      jwt:
+        enabled: true
+    request-context:
+      allow-header-identity: false
+      allow-trusted-jwt-identity-claims: false

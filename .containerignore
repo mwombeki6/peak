@@ -15,7 +15,7 @@ gradle
 build/*
 !build/libs/
 build/libs/*
-!build/libs/peak-*.jar
+!build/libs/peak.jar
 
 HELP.md
 README.md

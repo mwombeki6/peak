@@ -49,6 +49,10 @@ data class CheckoutRequest(
     val reason: String? = null,
 )
 
+data class UnpaidCheckoutOverrideRequest(
+    val reason: String,
+)
+
 data class StayResponse(
     val id: UUID,
     val tenantId: UUID,

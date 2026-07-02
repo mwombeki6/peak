@@ -1,5 +1,7 @@
-package com.mwombeki.peak.fiscal.internal
+package com.mwombeki.peak.integrations.internal
 
+import com.mwombeki.peak.fiscal.api.FiscalInvoiceItem
+import com.mwombeki.peak.fiscal.api.FiscalSubmissionCommand
 import java.math.BigDecimal
 import java.net.URI
 import java.util.UUID

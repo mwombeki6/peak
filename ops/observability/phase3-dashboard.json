@@ -1,0 +1,91 @@
+{
+  "title": "Peak Phase 3 Closure",
+  "uid": "peak-phase3",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "ClickPesa Accounts",
+      "targets": [
+        {
+          "expr": "peak_clickpesa_accounts",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Payment Poll Backlog",
+      "targets": [
+        {
+          "expr": "peak_payment_poll_backlog",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Webhook Outcomes",
+      "targets": [
+        {
+          "expr": "peak_payment_webhook_failures",
+          "legendFormat": "failures",
+          "refId": "A"
+        },
+        {
+          "expr": "peak_payment_webhook_replays",
+          "legendFormat": "replays",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Refunds And Reconciliation",
+      "targets": [
+        {
+          "expr": "peak_payment_refunds",
+          "legendFormat": "refunds",
+          "refId": "A"
+        },
+        {
+          "expr": "peak_payment_reconciliation_backlog",
+          "legendFormat": "reconciliation backlog",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Fiscal, POS, And Night Audit",
+      "targets": [
+        {
+          "expr": "peak_fiscal_backlog",
+          "legendFormat": "fiscal backlog",
+          "refId": "A"
+        },
+        {
+          "expr": "peak_pos_variance_backlog",
+          "legendFormat": "POS variances",
+          "refId": "B"
+        },
+        {
+          "expr": "peak_night_audit_blockers",
+          "legendFormat": "night-audit blockers",
+          "refId": "C"
+        }
+      ]
+    }
+  ]
+}

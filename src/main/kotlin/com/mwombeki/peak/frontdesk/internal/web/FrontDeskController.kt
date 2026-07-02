@@ -7,6 +7,7 @@ import com.mwombeki.peak.frontdesk.api.FrontDeskNotFoundException
 import com.mwombeki.peak.frontdesk.api.FrontDeskPort
 import com.mwombeki.peak.frontdesk.api.StayResponse
 import com.mwombeki.peak.frontdesk.api.WalkInRequest
+import com.mwombeki.peak.frontdesk.api.UnpaidCheckoutOverrideRequest
 import java.util.UUID
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -66,5 +67,18 @@ class FrontDeskController(
         @RequestBody request: CheckoutRequest,
     ): FrontDeskMutationReceipt {
         return frontDeskPort.checkOutWithFiscalOverride(propertyId, stayId, request)
+    }
+
+    @PostMapping("/checkouts/{stayId}/unpaid-override")
+    fun checkOutWithUnpaidOverride(
+        @PathVariable propertyId: UUID,
+        @PathVariable stayId: UUID,
+        @RequestBody request: UnpaidCheckoutOverrideRequest,
+    ): FrontDeskMutationReceipt {
+        return frontDeskPort.checkOutWithUnpaidOverride(
+            propertyId,
+            stayId,
+            request,
+        )
     }
 }

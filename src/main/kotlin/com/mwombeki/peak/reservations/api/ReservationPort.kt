@@ -36,3 +36,48 @@ interface ReservationPort {
     fun listReservations(propertyId: UUID): List<ReservationResponse>
     fun getReservation(propertyId: UUID, reservationId: UUID): ReservationResponse?
 }
+
+@NamedInterface("api")
+interface ReservationTransitionPort {
+    fun requireCheckInSnapshot(
+        tenantId: UUID,
+        propertyId: UUID,
+        reservationId: UUID,
+    ): ReservationCheckInSnapshot
+
+    fun markCheckedIn(
+        tenantId: UUID,
+        propertyId: UUID,
+        reservationId: UUID,
+        reservationRoomId: UUID,
+        roomId: UUID,
+    )
+
+    fun markCheckedOut(
+        tenantId: UUID,
+        propertyId: UUID,
+        reservationId: UUID,
+    )
+
+    fun operationalSummary(
+        tenantId: UUID,
+        propertyId: UUID,
+        businessDate: java.time.LocalDate,
+    ): ReservationOperationalSummary
+}
+
+@NamedInterface("api")
+data class ReservationCheckInSnapshot(
+    val reservationId: UUID,
+    val checkInDate: java.time.LocalDate,
+    val checkOutDate: java.time.LocalDate,
+    val reservationRoomId: UUID,
+    val roomTypeId: UUID,
+    val roomId: UUID?,
+    val folioId: UUID?,
+)
+
+@NamedInterface("api")
+data class ReservationOperationalSummary(
+    val overdueCheckedInStays: Int,
+)

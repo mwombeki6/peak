@@ -1,0 +1,64 @@
+name: ClickPesa Sandbox Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Public Peak sandbox API base URL
+        required: true
+        type: string
+      property_id:
+        description: Sandbox property UUID
+        required: true
+        type: string
+      folio_id:
+        description: Open sandbox folio UUID with the requested balance
+        required: true
+        type: string
+      provider_account_id:
+        description: Certified ClickPesa sandbox provider-account UUID
+        required: true
+        type: string
+      client_id:
+        description: ClickPesa sandbox client id
+        required: true
+        type: string
+      phone_number:
+        description: Phone that will approve the USSD prompt
+        required: true
+        type: string
+      amount:
+        description: TZS collection amount
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    environment: clickpesa-sandbox
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run protected ClickPesa sandbox acceptance
+        env:
+          PEAK_BASE_URL: ${{ inputs.base_url }}
+          PEAK_PROPERTY_ID: ${{ inputs.property_id }}
+          PEAK_FOLIO_ID: ${{ inputs.folio_id }}
+          PEAK_PROVIDER_ACCOUNT_ID: ${{ inputs.provider_account_id }}
+          CLICKPESA_CLIENT_ID: ${{ inputs.client_id }}
+          CLICKPESA_PHONE_NUMBER: ${{ inputs.phone_number }}
+          CLICKPESA_AMOUNT: ${{ inputs.amount }}
+          PEAK_ACCESS_TOKEN: ${{ secrets.PEAK_SANDBOX_ACCESS_TOKEN }}
+          CLICKPESA_CHECKSUM_KEY: ${{ secrets.CLICKPESA_CHECKSUM_KEY }}
+        run: ops/testing/run-clickpesa-sandbox-acceptance.sh
+
+      - name: Upload acceptance evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: clickpesa-sandbox-${{ github.run_id }}
+          path: build/evidence/clickpesa/*.json
+          if-no-files-found: error

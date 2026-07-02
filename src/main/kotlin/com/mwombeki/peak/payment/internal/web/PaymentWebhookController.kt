@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 
 @RestController
-@RequestMapping("/api/v1/payments/webhooks")
+@RequestMapping("/api/v1/payments/webhooks/clickpesa")
 class PaymentWebhookController(
     private val paymentWebhookPort: PaymentWebhookPort,
 ) {
@@ -23,16 +23,10 @@ class PaymentWebhookController(
     )
     fun receive(
         @PathVariable providerAccountId: UUID,
-        @RequestHeader("X-Peak-Provider-Event-Id") providerEventId: String,
-        @RequestHeader("X-Peak-Provider-Timestamp") timestamp: String,
-        @RequestHeader("X-Peak-Provider-Signature") signature: String,
         @RequestBody payload: String,
     ): PaymentWebhookReceipt {
         return paymentWebhookPort.receive(
             providerAccountId = providerAccountId,
-            providerEventId = providerEventId,
-            timestamp = timestamp,
-            signature = signature,
             payload = payload,
         )
     }

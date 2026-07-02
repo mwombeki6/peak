@@ -7,7 +7,8 @@
                 "shared::outbound",
                 "shared::secrets",
                 "audit::api",
-                "reliability::api"
+                "reliability::api",
+                "billing::api"
         }
 )
 package com.mwombeki.peak.fiscal;

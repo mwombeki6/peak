@@ -51,9 +51,13 @@ class JdbcOutboxPort(
                 correlation_id,
                 idempotency_key_id,
                 priority,
-                max_attempts
+                max_attempts,
+                next_attempt_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?)
+            VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?,
+                COALESCE(?, now())
+            )
             """.trimIndent(),
             id,
             command.tenantId,
@@ -68,6 +72,7 @@ class JdbcOutboxPort(
             command.idempotencyKeyId,
             command.priority,
             command.maxAttempts,
+            command.availableAt?.let(Timestamp::from),
         )
 
         return id
