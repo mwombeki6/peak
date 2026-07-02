@@ -6,6 +6,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 import org.springframework.http.HttpStatus
+import org.springframework.modulith.NamedInterface
 
 data class OpenCashSessionRequest(
     val openingFloat: BigDecimal = BigDecimal.ZERO,
@@ -54,11 +55,13 @@ data class RecordManualMobileMoneyPaymentRequest(
     val notes: String? = null,
 )
 
+@NamedInterface("api")
 data class CollectPosCashPaymentRequest(
     val posOrderId: UUID,
     val amount: BigDecimal,
 )
 
+@NamedInterface("api")
 data class InitiatePosMobileMoneyRequest(
     val posOrderId: UUID,
     val providerAccountId: UUID,
@@ -72,6 +75,7 @@ data class ReversePaymentRequest(
     val cashSessionId: UUID? = null,
 )
 
+@NamedInterface("api")
 data class PaymentTransactionResponse(
     val id: UUID,
     val propertyId: UUID,

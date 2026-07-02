@@ -10,6 +10,8 @@ import java.math.BigDecimal
 import java.util.UUID
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
 import org.springframework.transaction.support.TransactionTemplate
@@ -33,6 +35,12 @@ class PaymentOutboxHandler(
     }
 
     override suspend fun handle(event: ClaimedOutboxEvent) {
+        withContext(Dispatchers.IO) {
+            handleBlocking(event)
+        }
+    }
+
+    private fun handleBlocking(event: ClaimedOutboxEvent) {
         val tenantId = requireNotNull(event.tenantId) {
             "Payment collection events must be tenant scoped"
         }

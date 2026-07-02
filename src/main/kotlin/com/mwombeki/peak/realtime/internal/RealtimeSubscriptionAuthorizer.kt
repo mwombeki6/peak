@@ -35,7 +35,7 @@ class RealtimeSubscriptionAuthorizer(
                 REALTIME_MODULE_ID,
                 REALTIME_STREAM_PERMISSION,
             ) == true
-        } == true
+        }
     }
 
     private companion object {

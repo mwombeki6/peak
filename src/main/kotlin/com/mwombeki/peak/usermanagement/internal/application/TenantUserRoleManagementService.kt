@@ -576,9 +576,7 @@ class TenantUserRoleManagementService(
 
     private fun requireActiveTenantRole(tenantId: UUID, tenantRoleId: UUID) {
         val role = findTenantRole(tenantId, tenantRoleId, activeOnly = true)
-        if (role == null) {
-            throw TenantUserRoleManagementNotFoundException("Active tenant role was not found")
-        }
+            ?: throw TenantUserRoleManagementNotFoundException("Active tenant role was not found")
         require(!role.isSystem) {
             "System tenant roles cannot be assigned or revoked through tenant role management"
         }
@@ -586,9 +584,7 @@ class TenantUserRoleManagementService(
 
     private fun requireTenantRole(tenantId: UUID, tenantRoleId: UUID) {
         val role = findTenantRole(tenantId, tenantRoleId, activeOnly = false)
-        if (role == null) {
-            throw TenantUserRoleManagementNotFoundException("Tenant role was not found")
-        }
+            ?: throw TenantUserRoleManagementNotFoundException("Tenant role was not found")
         require(!role.isSystem) {
             "System tenant roles cannot be assigned or revoked through tenant role management"
         }

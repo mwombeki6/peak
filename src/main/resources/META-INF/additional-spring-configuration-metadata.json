@@ -11,6 +11,24 @@
       "type": "java.lang.Boolean",
       "description": "Enables the platform operations outbox event handler.",
       "defaultValue": true
+    },
+    {
+      "name": "peak.realtime.journal.fanout-enabled",
+      "type": "java.lang.Boolean",
+      "description": "Enables polling and fanout of persisted realtime events.",
+      "defaultValue": true
+    },
+    {
+      "name": "peak.realtime.journal.poll-interval-ms",
+      "type": "java.lang.Long",
+      "description": "Delay in milliseconds between realtime journal polls.",
+      "defaultValue": 250
+    },
+    {
+      "name": "peak.realtime.journal.cleanup-interval-ms",
+      "type": "java.lang.Long",
+      "description": "Delay in milliseconds between realtime journal retention cleanup runs.",
+      "defaultValue": 60000
     }
   ]
 }

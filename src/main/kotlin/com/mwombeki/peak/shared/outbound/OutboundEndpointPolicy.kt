@@ -3,6 +3,7 @@ package com.mwombeki.peak.shared.outbound
 import java.net.URI
 import java.util.Locale
 import org.springframework.boot.context.properties.ConfigurationProperties
+import org.springframework.modulith.NamedInterface
 import org.springframework.stereotype.Component
 
 @ConfigurationProperties(prefix = "peak.security.outbound")
@@ -10,6 +11,7 @@ data class OutboundEndpointProperties(
     val allowedProviderHosts: Set<String> = emptySet(),
 )
 
+@NamedInterface("outbound")
 @Component
 class OutboundEndpointPolicy(
     properties: OutboundEndpointProperties,

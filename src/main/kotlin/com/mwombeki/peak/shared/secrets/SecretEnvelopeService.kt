@@ -95,7 +95,7 @@ class SecretEnvelopeService(
         const val KEY_LENGTH = 32
         const val NONCE_LENGTH = 12
         const val TAG_LENGTH_BITS = 128
-        val encoder = Base64.getUrlEncoder().withoutPadding()
-        val decoder = Base64.getUrlDecoder()
+        val encoder: Base64.Encoder = Base64.getUrlEncoder().withoutPadding()
+        val decoder: Base64.Decoder = Base64.getUrlDecoder()
     }
 }

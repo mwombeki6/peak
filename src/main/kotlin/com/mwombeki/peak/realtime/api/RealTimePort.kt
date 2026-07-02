@@ -15,14 +15,3 @@ data class BroadcastEventRequest(
 interface RealtimePort {
     fun broadcastLiveEvent(request: BroadcastEventRequest)
 }
-
-/**
- * Domain event that should be broadcasted via Real-time streams.
- */
-@NamedInterface("api")
-data class RealtimeEvent(
-    val tenantId: UUID,
-    val propertyId: UUID,
-    val eventType: String,
-    val payload: Map<String, Any?>
-)

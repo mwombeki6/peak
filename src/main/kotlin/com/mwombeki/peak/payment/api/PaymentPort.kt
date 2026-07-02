@@ -1,7 +1,9 @@
 package com.mwombeki.peak.payment.api
 
 import java.util.UUID
+import org.springframework.modulith.NamedInterface
 
+@NamedInterface("api")
 interface PaymentPort {
     fun openCashSession(propertyId: UUID, request: OpenCashSessionRequest): CashSessionResponse
     fun currentCashSession(propertyId: UUID): CashSessionResponse?
@@ -57,6 +59,7 @@ interface PaymentPort {
     ): PaymentReconciliationResponse
 }
 
+@NamedInterface("api")
 interface PaymentWebhookPort {
     fun receive(
         providerAccountId: UUID,

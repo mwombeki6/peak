@@ -72,12 +72,12 @@ class ProductionReadinessValidator(
             validateOutboundProviderHosts()
             requireTrue(
                 !environment.getProperty(
-                    "peak.communication.invitation.expose-token-in-response",
+                    "peak.usermanagement.invitation.expose-token-in-response",
                     Boolean::class.java,
                     false,
                 ),
             ) {
-                "peak.communication.invitation.expose-token-in-response must be false in prod"
+                "peak.usermanagement.invitation.expose-token-in-response must be false in prod"
             }
         }
 

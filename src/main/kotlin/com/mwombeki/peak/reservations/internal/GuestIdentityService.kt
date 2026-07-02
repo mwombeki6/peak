@@ -957,7 +957,7 @@ class GuestIdentityService(
               )
             ${if (lock) "FOR UPDATE" else ""}
             """.trimIndent(),
-            ::mapGuest,
+            GuestResponseRowMapper,
             tenantId,
             guestId,
             propertyId,
@@ -1129,22 +1129,6 @@ class GuestIdentityService(
         val actor = tenantRequestContext.bind()
         tenantRequestContext.requirePropertyUsable(actor.tenantId, propertyId)
         return actor
-    }
-
-    private fun mapGuest(rs: ResultSet, rowNumber: Int): GuestResponse {
-        return GuestResponse(
-            id = rs.getObject("id", UUID::class.java),
-            tenantId = rs.getObject("tenant_id", UUID::class.java),
-            fullName = rs.getString("full_name"),
-            firstName = rs.getString("first_name"),
-            lastName = rs.getString("last_name"),
-            email = rs.getString("email"),
-            phonePrimary = rs.getString("phone_primary"),
-            dateOfBirth = rs.getObject("date_of_birth", LocalDate::class.java),
-            nationality = rs.getString("nationality"),
-            vipLevel = rs.getString("vip_level"),
-            blacklisted = rs.getBoolean("blacklisted"),
-        )
     }
 
     private fun mapDocument(rs: ResultSet, rowNumber: Int): GuestIdentityDocumentResponse {

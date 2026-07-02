@@ -40,7 +40,7 @@ class RealtimeSecurityAuditService(
                         tenantId = identity.tenantId,
                         action = "realtime.subscription_denied",
                         resource = AuditResource("realtime_stream", targetPropertyId),
-                        outcome = AuditOutcome.FAILURE,
+                        outcome = AuditOutcome.DENIED,
                         after = mapOf(
                             "attempted_destination" to destination,
                             "target_tenant_id" to targetTenantId,

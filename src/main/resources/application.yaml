@@ -110,6 +110,8 @@ peak:
   communication:
     invitation:
       acceptance-base-url: ${PEAK_INVITATION_ACCEPTANCE_BASE_URL:http://localhost:3000/invitations/accept}
+  usermanagement:
+    invitation:
       expose-token-in-response: ${PEAK_INVITATION_EXPOSE_TOKEN_IN_RESPONSE:false}
 management:
   otlp:

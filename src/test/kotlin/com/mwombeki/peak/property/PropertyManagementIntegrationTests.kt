@@ -334,21 +334,6 @@ class PropertyManagementIntegrationTests {
             .andExpect(jsonPath("$.enabled").value(true))
     }
 
-    private fun enablePropertyModule(
-        fixture: PropertyFixture,
-        propertyId: UUID,
-        moduleId: String,
-    ) {
-        mockMvc.perform(
-            post("/api/v1/properties/$propertyId/modules")
-                .secureJson("""{"moduleId": "$moduleId"}""")
-                .headersFor(fixture, "corr-property-module-$moduleId", "idem-property-module-$moduleId-${fixture.tenantId}"),
-        )
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.moduleId").value(moduleId))
-            .andExpect(jsonPath("$.enabled").value(true))
-    }
-
     private fun postForResourceId(
         fixture: PropertyFixture,
         path: String,
