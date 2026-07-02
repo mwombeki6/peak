@@ -165,6 +165,10 @@ kotlin {
     }
 }
 
+kapt {
+    includeCompileClasspath = false
+}
+
 tasks.withType<Test>().configureEach {
     systemProperty(
         "spring.profiles.active",

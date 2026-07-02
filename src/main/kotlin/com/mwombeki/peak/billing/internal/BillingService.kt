@@ -472,6 +472,27 @@ class BillingService(
         }
     }
 
+    override fun postPosCharge(
+        tenantId: UUID,
+        propertyId: UUID,
+        folioId: UUID,
+        request: PostChargeRequest,
+        idempotencyKeyId: UUID,
+    ): UUID {
+        val actor = tenantRequestContext.bind()
+        require(actor.tenantId == tenantId) {
+            "POS charge tenant must match the active tenant context"
+        }
+        tenantRequestContext.requirePropertyUsable(tenantId, propertyId, lock = false)
+        return postChargeInternal(
+            actor = actor,
+            propertyId = propertyId,
+            folioId = folioId,
+            request = request,
+            idempotencyKeyId = idempotencyKeyId,
+        )
+    }
+
     override fun reverseCharge(
         propertyId: UUID,
         folioId: UUID,

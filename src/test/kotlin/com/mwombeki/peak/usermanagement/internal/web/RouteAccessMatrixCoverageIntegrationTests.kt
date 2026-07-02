@@ -103,7 +103,7 @@ class RouteAccessMatrixCoverageIntegrationTests {
     private fun String.toSamplePath(): String {
         return PATH_VARIABLE_PATTERN.replace(this) { match ->
             val variableName = match.groupValues[1].substringBefore(":")
-            SAMPLE_UUIDS.getValue(variableName)
+            SAMPLE_UUIDS[variableName] ?: DEFAULT_SAMPLE_UUID
         }
     }
 
@@ -155,6 +155,8 @@ class RouteAccessMatrixCoverageIntegrationTests {
         )
 
         val PATH_VARIABLE_PATTERN = Regex("\\{([^}]+)}")
+        val DEFAULT_SAMPLE_UUID =
+            UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").toString()
 
         val SAMPLE_UUIDS = mapOf(
             "id" to UUID.fromString("11111111-1111-1111-1111-111111111111").toString(),

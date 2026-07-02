@@ -14,9 +14,19 @@ Owns Phase 3 property close checks and blocking issue capture.
 
 ## API
 
-- `POST /api/v1/properties/{propertyId}/night-audit`
-- `GET /api/v1/properties/{propertyId}/night-audit`
-- `GET /api/v1/properties/{propertyId}/night-audit/{runId}`
+- `POST /api/v1/properties/{propertyId}/night-audit`: Runs the audit for the current business date.
+- `GET /api/v1/properties/{propertyId}/night-audit`: Lists recent audit runs.
+- `GET /api/v1/properties/{propertyId}/night-audit/{runId}`: Gets details of a specific run and its issues.
+
+## Operations
+
+1. **Blocker Checks**: The audit checks for open POS sessions, pending payments,
+   unpaid folios, missing invoices, missing fiscal receipts, and overdue stays.
+2. **Immutable Attempts**: Each attempt is retained under a property and
+   business date; a property/date advisory lock serializes concurrent runs.
+3. **Business Date Control**: Business date is read from the property close
+   configuration. Room-charge posting remains an explicit billing operation and
+   is not silently retried or swallowed by night audit.
 
 ## Status Semantics
 

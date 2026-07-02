@@ -9,9 +9,11 @@ import com.mwombeki.peak.billing.api.ConfirmedPaymentReversalRequest
 import com.mwombeki.peak.payment.api.CashSessionResponse
 import com.mwombeki.peak.payment.api.CloseCashSessionRequest
 import com.mwombeki.peak.payment.api.CollectCashPaymentRequest
+import com.mwombeki.peak.payment.api.CollectPosCashPaymentRequest
 import com.mwombeki.peak.payment.api.ConfigurePaymentProviderRequest
 import com.mwombeki.peak.payment.api.CreatePaymentReconciliationRequest
 import com.mwombeki.peak.payment.api.InitiateMobileMoneyRequest
+import com.mwombeki.peak.payment.api.InitiatePosMobileMoneyRequest
 import com.mwombeki.peak.payment.api.OpenCashSessionRequest
 import com.mwombeki.peak.payment.api.PaymentConflictException
 import com.mwombeki.peak.payment.api.PaymentNotFoundException
@@ -507,6 +509,135 @@ class PaymentService(
         }
     }
 
+    override fun collectPosCash(
+        tenantId: UUID,
+        propertyId: UUID,
+        request: CollectPosCashPaymentRequest,
+        idempotencyKeyId: UUID,
+    ): PaymentTransactionResponse {
+        val actor = bindActor(propertyId, lockProperty = false)
+        require(actor.tenantId == tenantId) {
+            "POS payment tenant must match the active tenant context"
+        }
+        val amount = request.amount.positiveMoney("amount")
+        val transactionId = UUID.randomUUID()
+        val internalReference = paymentReference(transactionId)
+        jdbcTemplate.update(
+            """
+            INSERT INTO payment_transactions (
+                id, tenant_id, property_id, pos_order_id, initiated_by,
+                idempotency_key_id, transaction_direction, transaction_type,
+                internal_reference, amount, currency, status, confirmed_at,
+                metadata
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 'inbound', 'collection', ?, ?, 'TZS',
+                    'confirmed', now(), ?::jsonb)
+            """.trimIndent(),
+            transactionId,
+            actor.tenantId,
+            propertyId,
+            request.posOrderId,
+            actor.tenantUserId,
+            idempotencyKeyId,
+            internalReference,
+            amount,
+            objectMapper.writeValueAsString(mapOf("method" to "pos_cash")),
+        )
+        return requireTransaction(actor.tenantId, propertyId, transactionId, lock = false)
+            .also {
+                recordSideEffects(
+                    actor = actor,
+                    propertyId = propertyId,
+                    action = "payments.pos.cash.collected",
+                    aggregateType = PAYMENT_TRANSACTIONS,
+                    aggregateId = transactionId,
+                    payload = mapOf(
+                        "transactionId" to transactionId,
+                        "posOrderId" to request.posOrderId,
+                        "amount" to amount,
+                    ),
+                    idempotencyKeyId = idempotencyKeyId,
+                )
+            }
+    }
+
+    override fun initiatePosMobileMoney(
+        tenantId: UUID,
+        propertyId: UUID,
+        request: InitiatePosMobileMoneyRequest,
+        idempotencyKeyId: UUID,
+    ): PaymentTransactionResponse {
+        val actor = bindActor(propertyId, lockProperty = false)
+        require(actor.tenantId == tenantId) {
+            "POS payment tenant must match the active tenant context"
+        }
+        val amount = request.amount.positiveMoney("amount")
+        requireProviderAccount(
+            actor.tenantId,
+            propertyId,
+            request.providerAccountId,
+            lock = false,
+        )
+        val transactionId = UUID.randomUUID()
+        val internalReference = paymentReference(transactionId)
+        jdbcTemplate.update(
+            """
+            INSERT INTO payment_transactions (
+                id, tenant_id, property_id, pos_order_id, provider_account_id,
+                initiated_by, idempotency_key_id, transaction_direction,
+                transaction_type, internal_reference, payer_identifier,
+                amount, currency, status, metadata
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'inbound', 'collection', ?, ?, ?,
+                    'TZS', 'initiated', ?::jsonb)
+            """.trimIndent(),
+            transactionId,
+            actor.tenantId,
+            propertyId,
+            request.posOrderId,
+            request.providerAccountId,
+            actor.tenantUserId,
+            idempotencyKeyId,
+            internalReference,
+            request.phoneNumber.tanzanianE164(),
+            amount,
+            objectMapper.writeValueAsString(mapOf("method" to "pos_mobile_money")),
+        )
+        outboxPort.enqueue(
+            OutboxEventCommand(
+                aggregateType = PAYMENT_TRANSACTIONS,
+                aggregateId = transactionId,
+                tenantId = actor.tenantId,
+                propertyId = propertyId,
+                eventType = PAYMENT_COLLECTION_REQUESTED,
+                destination = OutboxDestination.PAYMENT,
+                payload = mapOf(
+                    "transactionId" to transactionId,
+                    "posOrderId" to request.posOrderId,
+                    "providerAccountId" to request.providerAccountId,
+                ),
+                idempotencyKeyId = idempotencyKeyId,
+                priority = 2,
+            ),
+        )
+        return requireTransaction(actor.tenantId, propertyId, transactionId, lock = false)
+            .also {
+                auditPort.recordTenantEvent(
+                    TenantAuditEvent(
+                        tenantId = actor.tenantId,
+                        action = "payments.pos.mobile_money.initiated",
+                        resource = AuditResource(PAYMENT_TRANSACTIONS, transactionId),
+                        after = mapOf(
+                            "transactionId" to transactionId,
+                            "posOrderId" to request.posOrderId,
+                            "providerAccountId" to request.providerAccountId,
+                            "amount" to amount,
+                        ),
+                    ),
+                )
+            }
+    }
+
     override fun reversePayment(
         propertyId: UUID,
         transactionId: UUID,
@@ -532,6 +663,9 @@ class PaymentService(
             )
             require(original.transactionType == "collection" && original.status == "confirmed") {
                 "Only a confirmed collection can be reversed"
+            }
+            require(original.folioId != null && original.posOrderId == null) {
+                "POS payments must be reversed through a dedicated POS void/refund workflow"
             }
             val existingReversal = jdbcTemplate.queryForObject(
                 """
@@ -1306,6 +1440,7 @@ class PaymentService(
             id = rs.getObject("id", UUID::class.java),
             propertyId = rs.getObject("property_id", UUID::class.java),
             folioId = rs.getObject("folio_id", UUID::class.java),
+            posOrderId = rs.getObject("pos_order_id", UUID::class.java),
             providerAccountId = rs.getObject("provider_account_id", UUID::class.java),
             transactionType = rs.getString("transaction_type"),
             providerReference = rs.getString("provider_reference"),
@@ -1463,7 +1598,7 @@ class PaymentService(
         val TANZANIAN_PHONE = Regex("^\\+255[67][0-9]{8}$")
         val PROVIDER_REFERENCE = Regex("[A-Za-z0-9._:/-]{3,200}")
         val PAYMENT_TRANSACTION_SELECT = """
-            SELECT id, property_id, folio_id, provider_account_id, transaction_type,
+            SELECT id, property_id, folio_id, pos_order_id, provider_account_id, transaction_type,
                    provider_reference, internal_reference, amount, fee_amount,
                    currency, status, initiated_at, confirmed_at, failed_at,
                    reversal_of_transaction_id

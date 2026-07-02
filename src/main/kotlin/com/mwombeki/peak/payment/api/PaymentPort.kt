@@ -20,6 +20,18 @@ interface PaymentPort {
         propertyId: UUID,
         request: RecordManualMobileMoneyPaymentRequest,
     ): PaymentTransactionResponse
+    fun collectPosCash(
+        tenantId: UUID,
+        propertyId: UUID,
+        request: CollectPosCashPaymentRequest,
+        idempotencyKeyId: UUID,
+    ): PaymentTransactionResponse
+    fun initiatePosMobileMoney(
+        tenantId: UUID,
+        propertyId: UUID,
+        request: InitiatePosMobileMoneyRequest,
+        idempotencyKeyId: UUID,
+    ): PaymentTransactionResponse
     fun reversePayment(
         propertyId: UUID,
         transactionId: UUID,

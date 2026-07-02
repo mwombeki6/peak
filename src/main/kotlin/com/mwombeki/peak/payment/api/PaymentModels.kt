@@ -54,6 +54,18 @@ data class RecordManualMobileMoneyPaymentRequest(
     val notes: String? = null,
 )
 
+data class CollectPosCashPaymentRequest(
+    val posOrderId: UUID,
+    val amount: BigDecimal,
+)
+
+data class InitiatePosMobileMoneyRequest(
+    val posOrderId: UUID,
+    val providerAccountId: UUID,
+    val phoneNumber: String,
+    val amount: BigDecimal,
+)
+
 data class ReversePaymentRequest(
     val reason: String,
     val externalReference: String? = null,
@@ -63,7 +75,8 @@ data class ReversePaymentRequest(
 data class PaymentTransactionResponse(
     val id: UUID,
     val propertyId: UUID,
-    val folioId: UUID,
+    val folioId: UUID?,
+    val posOrderId: UUID? = null,
     val providerAccountId: UUID?,
     val transactionType: String,
     val providerReference: String?,

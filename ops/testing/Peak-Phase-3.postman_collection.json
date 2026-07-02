@@ -140,6 +140,18 @@
           }
         },
         {
+          "name": "Enable Tenant POS",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "phase3-tenant-{{tenantId}}-pos" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"moduleId\":\"pos\"}" },
+            "url": "{{baseUrl}}/api/v1/tenants/{{tenantId}}/modules"
+          }
+        },
+        {
           "name": "Enable Property Reservations",
           "request": {
             "method": "POST",
@@ -208,6 +220,18 @@
               { "key": "Idempotency-Key", "value": "phase3-property-{{propertyId}}-night-audit" }
             ],
             "body": { "mode": "raw", "raw": "{\"moduleId\":\"night_audit\"}" },
+            "url": "{{baseUrl}}/api/v1/properties/{{propertyId}}/modules"
+          }
+        },
+        {
+          "name": "Enable Property POS",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "phase3-property-{{propertyId}}-pos" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"moduleId\":\"pos\"}" },
             "url": "{{baseUrl}}/api/v1/properties/{{propertyId}}/modules"
           }
         }
@@ -465,7 +489,163 @@
       ]
     },
     {
-      "name": "05 Fiscal And Checkout",
+      "name": "05 Point Of Sale",
+      "item": [
+        {
+          "name": "Open POS Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "pos-session-{{runId}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"outletId\":\"{{outletId}}\",\"openingFloat\":100.00}"
+            },
+            "url": "{{baseUrl}}/api/v1/properties/{{propertyId}}/pos-sessions/open"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.response.to.have.status(201);",
+                  "pm.collectionVariables.set('posSessionId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create POS Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "pos-order-{{runId}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"sessionId\":\"{{posSessionId}}\",\"orderType\":\"dine_in\",\"tableNumber\":\"A1\"}"
+            },
+            "url": "{{baseUrl}}/api/v1/properties/{{propertyId}}/pos-orders"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.response.to.have.status(201);",
+                  "pm.collectionVariables.set('posOrderId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Add Server-Priced POS Item",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "pos-item-{{runId}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"menuItemId\":\"{{menuItemId}}\",\"quantity\":1}"
+            },
+            "url": "{{baseUrl}}/api/v1/properties/{{propertyId}}/pos-orders/{{posOrderId}}/items"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.response.to.have.status(200);",
+                  "const body = pm.response.json();",
+                  "pm.expect(body.totalAmount).to.be.above(0);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Settle POS Order With Cash",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "pos-settle-{{runId}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"paymentMethod\":\"cash\"}" },
+            "url": "{{baseUrl}}/api/v1/properties/{{propertyId}}/pos-orders/{{posOrderId}}/settle"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.response.to.have.status(200);",
+                  "const body = pm.response.json();",
+                  "pm.expect(body.status).to.eql('closed');",
+                  "pm.expect(body.settlementStatus).to.eql('confirmed');",
+                  "pm.collectionVariables.set('posPaymentTransactionId', body.paymentTransactionId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read POS Session Summary",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/properties/{{propertyId}}/pos-sessions/{{posSessionId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.response.to.have.status(200);",
+                  "const body = pm.response.json();",
+                  "pm.expect(body.closedOrderCount).to.eql(1);",
+                  "pm.collectionVariables.set('posExpectedCash', body.session.expectedCash);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Close Balanced POS Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "pos-close-{{runId}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"actualCash\":{{posExpectedCash}}}"
+            },
+            "url": "{{baseUrl}}/api/v1/properties/{{propertyId}}/pos-sessions/{{posSessionId}}/close"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.response.to.have.status(200);",
+                  "pm.expect(pm.response.json().status).to.eql('closed');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 Fiscal And Checkout",
       "item": [
         {
           "name": "Configure Local Fiscal Contract Adapter",
@@ -622,6 +802,8 @@
     { "key": "roomTypeId", "value": "" },
     { "key": "roomId", "value": "" },
     { "key": "revenueCenterId", "value": "" },
+    { "key": "outletId", "value": "" },
+    { "key": "menuItemId", "value": "" },
     { "key": "checkInDate", "value": "2026-12-01" },
     { "key": "checkOutDate", "value": "2026-12-03" },
     { "key": "guestId", "value": "" },
@@ -633,6 +815,10 @@
     { "key": "cashSessionId", "value": "" },
     { "key": "expectedCash", "value": "" },
     { "key": "paymentTransactionId", "value": "" },
+    { "key": "posSessionId", "value": "" },
+    { "key": "posOrderId", "value": "" },
+    { "key": "posExpectedCash", "value": "" },
+    { "key": "posPaymentTransactionId", "value": "" },
     { "key": "invoiceId", "value": "" },
     { "key": "fiscalReceiptId", "value": "" },
     { "key": "nightAuditRunId", "value": "" }

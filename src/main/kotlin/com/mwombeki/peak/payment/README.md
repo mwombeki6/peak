@@ -34,6 +34,11 @@ Provider callbacks use
 `POST /api/v1/payments/webhooks/{providerAccountId}`. Scope is resolved from the
 provider account in the database, never from callback headers or JSON.
 
+POS uses internal `PaymentPort` commands rather than exposing a second payment
+HTTP surface. Cash creates a confirmed transaction linked by `pos_order_id`.
+Mobile money follows the same provider outbox and signed-callback flow; a
+dedicated POS outbox event closes the order only after confirmation.
+
 ## Metrics
 
 - `peak.payment.command{operation,result}`

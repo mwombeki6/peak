@@ -48,6 +48,13 @@ interface BillingPort {
     fun listFolios(propertyId: UUID): List<FolioResponse>
     fun getFolio(propertyId: UUID, folioId: UUID): FolioResponse?
     fun postCharge(propertyId: UUID, folioId: UUID, request: PostChargeRequest): BillingMutationReceipt
+    fun postPosCharge(
+        tenantId: UUID,
+        propertyId: UUID,
+        folioId: UUID,
+        request: PostChargeRequest,
+        idempotencyKeyId: UUID,
+    ): UUID
     fun reverseCharge(
         propertyId: UUID,
         folioId: UUID,

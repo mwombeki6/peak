@@ -5,7 +5,8 @@
 Prove that a configured property can execute a complete accountable stay using
 only authenticated APIs: guest registration and identity readiness,
 reservation, check-in, folio charging, cash/mobile-money payment, fiscal
-submission, checkout, reconciliation evidence, and night audit.
+submission, outlet POS settlement, checkout, reconciliation evidence, and
+night audit.
 
 ## Required Runtime
 
@@ -43,9 +44,10 @@ Use unique values per run:
 - Check-in/check-out dates valid for the property business date.
 - One room rate and one additional folio charge.
 - Cash float and counted closing amount.
+- Active outlet, menu category, menu item, and applicable tax rate.
 
 Set Postman variables `baseUrl`, `accessToken`, `tenantId`, `propertyId`,
-`roomTypeId`, `roomId`, and `revenueCenterId`.
+`roomTypeId`, `roomId`, `revenueCenterId`, `outletId`, and `menuItemId`.
 
 ## Execution
 
@@ -59,9 +61,9 @@ Set Postman variables `baseUrl`, `accessToken`, `tenantId`, `propertyId`,
 
 ### 2. Phase 3 Module Activation
 
-1. Enable `reservations`, `frontdesk`, `billing`, `payments`, `fiscal`, and
-   `night_audit` for the tenant.
-2. Enable the same six modules for the property.
+1. Enable `reservations`, `frontdesk`, `billing`, `payments`, `fiscal`,
+   `night_audit`, and `pos` for the tenant.
+2. Enable the same seven modules for the property.
 3. Replay every activation with the same scoped idempotency key; expect success
    without duplicate state.
 4. List enabled modules and confirm every Phase 3 module is active at both
@@ -134,7 +136,27 @@ Run both paths where applicable:
 7. Record a manual reference only with evidence and the dedicated permission;
    duplicate provider reference must conflict.
 
-### 9. Fiscalization
+### 9. Point Of Sale
+
+1. Open an outlet session with an opening float.
+2. Replay the same command and confirm no duplicate session is created.
+3. Create an order under that session and add an available menu item.
+4. Confirm item name, unit price, tax, and total came from server-side menu and
+   tax configuration; no client price is accepted.
+5. Settle a disposable order with cash and confirm a linked
+   `payment_transactions.pos_order_id`, closed order, and incremented expected
+   cash.
+6. Initiate mobile money for another order; it must remain open and pending
+   until the signed provider callback is processed by the worker.
+7. Transfer another order to an open guest folio and confirm one `F&B` charge
+   with `source_type=pos_order`.
+8. Close the session. A zero variance closes immediately; a non-zero variance
+   remains pending until a different user with `pos.variance.approve` approves
+   it.
+9. Attempt cross-property order/session access and expect `403` or `404`
+   without data disclosure.
+
+### 10. Fiscalization
 
 1. Configure the fiscal `http_gateway` with an HTTPS endpoint and
    environment-backed credential.
@@ -146,7 +168,7 @@ Run both paths where applicable:
    the explicit retry route and confirm a new attempt.
 7. Confirm accepted fiscal receipt fields cannot be mutated.
 
-### 10. Checkout And Night Audit
+### 11. Checkout And Night Audit
 
 1. Attempt checkout before full payment or accepted fiscalization in a
    disposable flow; expect conflict.
@@ -160,7 +182,7 @@ Run both paths where applicable:
 7. Re-run concurrently; attempts must serialize and retain immutable attempt
    numbers.
 
-### 11. Realtime And Audit Evidence
+### 12. Realtime And Audit Evidence
 
 1. Connect SSE with the same tenant/property token.
 2. Connect STOMP/WebSocket and subscribe only to the scoped property topic.
@@ -184,6 +206,11 @@ Execute with Postman Runner or Newman in parallel:
 - Two room reservations/check-ins: database uniqueness prevents overlap.
 - Two workers claim the same outbox batch: every event is delivered by one
   worker at a time.
+- Concurrent item additions serialize on the order row and totals equal the
+  sum of persisted items.
+- Repeated POS settlement with one idempotency key creates one payment
+  transaction.
+- Cash variance approval by the closing user is rejected.
 - Concurrent night audit: serialized attempts with no deleted history.
 
 ## Pass Criteria

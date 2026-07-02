@@ -3,8 +3,9 @@
 Peak is a modular Spring Boot property-management platform. The implemented
 scope covers platform and tenant administration, property setup, reservations,
 mandatory guest identity readiness, frontdesk stay transitions, folio billing,
-cash and mobile-money payments, fiscal submission, communications, realtime
-streams, night audit, audit, idempotency, and transactional outbox delivery.
+cash and mobile-money payments, outlet POS sessions and orders, fiscal
+submission, communications, realtime streams, night audit, audit, idempotency,
+and transactional outbox delivery.
 
 ## Local Development
 

@@ -260,6 +260,7 @@ class PaymentWebhookService(
         val payload = mapOf(
             "transactionId" to transaction.id,
             "providerAccountId" to providerAccountId,
+            "posOrderId" to transaction.posOrderId,
             "status" to resultStatus,
             "amount" to notification.amount.money(),
         )
@@ -283,6 +284,20 @@ class PaymentWebhookService(
                 priority = 2,
             ),
         )
+        if (transaction.posOrderId != null) {
+            outboxPort.enqueue(
+                OutboxEventCommand(
+                    aggregateType = "payment_transactions",
+                    aggregateId = transaction.id,
+                    tenantId = scope.tenantId,
+                    propertyId = scope.propertyId,
+                    eventType = "payment.transaction.$resultStatus",
+                    destination = OutboxDestination.POS,
+                    payload = payload,
+                    priority = 1,
+                ),
+            )
+        }
         return PaymentWebhookReceipt(
             providerEventId = providerEventId,
             transactionId = transaction.id,
@@ -299,8 +314,9 @@ class PaymentWebhookService(
     ): String {
         val propertyId = transaction.propertyId
             ?: throw PaymentConflictException("Payment transaction has no property")
-        val folioId = transaction.folioId
-            ?: throw PaymentConflictException("Payment transaction has no folio")
+        require((transaction.folioId == null) != (transaction.posOrderId == null)) {
+            "Payment transaction must target exactly one folio or POS order"
+        }
         jdbcTemplate.update(
             """
             UPDATE payment_transactions
@@ -320,30 +336,32 @@ class PaymentWebhookService(
             scope.tenantId,
             transaction.id,
         )
-        val folioPaymentId = billingPort.postConfirmedPayment(
-            tenantId = scope.tenantId,
-            propertyId = propertyId,
-            request = ConfirmedPaymentRequest(
-                folioId = folioId,
-                paymentMethod = "mobile_money",
-                amount = notification.amount.money(),
-                paymentTransactionId = transaction.id,
-                processedBy = transaction.initiatedBy,
-                referenceNumber = notification.providerReference,
-                idempotencyKey = eventId.toString(),
-            ),
-            idempotencyKeyId = null,
-        )
-        jdbcTemplate.update(
-            """
-            UPDATE payment_transactions
-            SET folio_payment_id = ?, updated_at = now()
-            WHERE tenant_id = ? AND id = ?
-            """.trimIndent(),
-            folioPaymentId,
-            scope.tenantId,
-            transaction.id,
-        )
+        transaction.folioId?.let { folioId ->
+            val folioPaymentId = billingPort.postConfirmedPayment(
+                tenantId = scope.tenantId,
+                propertyId = propertyId,
+                request = ConfirmedPaymentRequest(
+                    folioId = folioId,
+                    paymentMethod = "mobile_money",
+                    amount = notification.amount.money(),
+                    paymentTransactionId = transaction.id,
+                    processedBy = transaction.initiatedBy,
+                    referenceNumber = notification.providerReference,
+                    idempotencyKey = eventId.toString(),
+                ),
+                idempotencyKeyId = null,
+            )
+            jdbcTemplate.update(
+                """
+                UPDATE payment_transactions
+                SET folio_payment_id = ?, updated_at = now()
+                WHERE tenant_id = ? AND id = ?
+                """.trimIndent(),
+                folioPaymentId,
+                scope.tenantId,
+                transaction.id,
+            )
+        }
         return "confirmed"
     }
 
@@ -376,7 +394,7 @@ class PaymentWebhookService(
     ): WebhookTransaction {
         return jdbcTemplate.query(
             """
-            SELECT id, property_id, folio_id, initiated_by, amount, currency,
+            SELECT id, property_id, folio_id, pos_order_id, initiated_by, amount, currency,
                    provider_reference, status
             FROM payment_transactions
             WHERE tenant_id = ?
@@ -389,6 +407,7 @@ class PaymentWebhookService(
                     id = rs.getObject("id", UUID::class.java),
                     propertyId = rs.getObject("property_id", UUID::class.java),
                     folioId = rs.getObject("folio_id", UUID::class.java),
+                    posOrderId = rs.getObject("pos_order_id", UUID::class.java),
                     initiatedBy = rs.getObject("initiated_by", UUID::class.java),
                     amount = rs.getBigDecimal("amount"),
                     currency = rs.getString("currency").trim(),
@@ -476,6 +495,7 @@ class PaymentWebhookService(
         val id: UUID,
         val propertyId: UUID?,
         val folioId: UUID?,
+        val posOrderId: UUID?,
         val initiatedBy: UUID?,
         val amount: BigDecimal,
         val currency: String,

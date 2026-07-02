@@ -1,0 +1,133 @@
+package com.mwombeki.peak.pos.api
+
+import com.mwombeki.peak.shared.exception.BusinessException
+import jakarta.validation.constraints.DecimalMin
+import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.NotNull
+import jakarta.validation.constraints.Size
+import java.math.BigDecimal
+import java.time.Instant
+import java.util.UUID
+import org.springframework.http.HttpStatus
+
+data class OpenPosSessionRequest(
+    @field:NotNull
+    val outletId: UUID,
+    @field:DecimalMin("0.00")
+    val openingFloat: BigDecimal = BigDecimal.ZERO,
+    @field:Size(max = 500)
+    val notes: String? = null,
+)
+
+data class ClosePosSessionRequest(
+    @field:DecimalMin("0.00")
+    val actualCash: BigDecimal,
+    @field:Size(max = 500)
+    val notes: String? = null,
+)
+
+data class ApprovePosVarianceRequest(
+    @field:NotBlank
+    @field:Size(min = 10, max = 500)
+    val reason: String,
+)
+
+data class PosSessionResponse(
+    val id: UUID,
+    val propertyId: UUID,
+    val outletId: UUID,
+    val cashierId: UUID,
+    val status: String,
+    val openingFloat: BigDecimal,
+    val expectedCash: BigDecimal,
+    val closingCash: BigDecimal?,
+    val variance: BigDecimal?,
+    val openedAt: Instant,
+    val closedAt: Instant?,
+    val closedBy: UUID?,
+    val varianceApprovedBy: UUID?,
+    val replayed: Boolean = false,
+)
+
+data class PosSessionSummaryResponse(
+    val session: PosSessionResponse,
+    val orderCount: Long,
+    val closedOrderCount: Long,
+    val grossSales: BigDecimal,
+)
+
+data class CreatePosOrderRequest(
+    @field:NotNull
+    val sessionId: UUID,
+    @field:NotBlank
+    val orderType: String = "dine_in",
+    @field:Size(max = 20)
+    val tableNumber: String? = null,
+)
+
+data class AddPosOrderItemRequest(
+    @field:NotNull
+    val menuItemId: UUID,
+    @field:DecimalMin(value = "0.001")
+    val quantity: BigDecimal = BigDecimal.ONE,
+    @field:Size(max = 20)
+    val modifiers: List<@Size(max = 100) String> = emptyList(),
+    @field:Size(max = 500)
+    val specialRequest: String? = null,
+)
+
+data class SettlePosOrderRequest(
+    @field:NotBlank
+    val paymentMethod: String,
+    val folioId: UUID? = null,
+    val providerAccountId: UUID? = null,
+    @field:Size(max = 20)
+    val phoneNumber: String? = null,
+)
+
+data class PosOrderResponse(
+    val id: UUID,
+    val propertyId: UUID,
+    val outletId: UUID,
+    val sessionId: UUID,
+    val orderNumber: String,
+    val orderType: String,
+    val tableNumber: String?,
+    val status: String,
+    val settlementStatus: String,
+    val settlementMethod: String?,
+    val folioId: UUID?,
+    val paymentTransactionId: UUID?,
+    val subtotal: BigDecimal,
+    val taxAmount: BigDecimal,
+    val totalAmount: BigDecimal,
+    val createdAt: Instant,
+    val settledAt: Instant?,
+    val items: List<PosOrderItemResponse>,
+    val replayed: Boolean = false,
+)
+
+data class PosOrderItemResponse(
+    val id: UUID,
+    val menuItemId: UUID,
+    val name: String,
+    val quantity: BigDecimal,
+    val unitPrice: BigDecimal,
+    val subtotal: BigDecimal,
+    val taxAmount: BigDecimal,
+    val totalPrice: BigDecimal,
+    val modifiers: List<String>,
+    val specialRequest: String?,
+)
+
+open class PosException(
+    message: String,
+    status: HttpStatus,
+    code: String,
+) : BusinessException(message, status, code)
+
+class PosNotFoundException(message: String) :
+    PosException(message, HttpStatus.NOT_FOUND, "POS_NOT_FOUND")
+
+class PosConflictException(message: String) :
+    PosException(message, HttpStatus.CONFLICT, "POS_CONFLICT")
