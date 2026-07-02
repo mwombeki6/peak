@@ -1,7 +1,6 @@
 package com.mwombeki.peak.reliability.internal
 
 import com.mwombeki.peak.reliability.api.ClaimedOutboxEvent
-import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventHandler
 import java.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
@@ -13,13 +12,6 @@ import org.springframework.stereotype.Component
 class OutboxEventDispatcher(
     private val handlers: List<OutboxEventHandler>,
 ) {
-    fun supportedDestinations(): List<OutboxDestination> {
-        return handlers
-            .map { it.destination }
-            .distinct()
-            .sortedBy { it.databaseValue }
-    }
-
     suspend fun dispatch(
         event: ClaimedOutboxEvent,
         timeout: Duration,

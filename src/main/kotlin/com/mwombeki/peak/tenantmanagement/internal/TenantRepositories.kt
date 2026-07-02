@@ -83,20 +83,6 @@ class TenantRepository(
         ).firstOrNull()
     }
 
-    fun updateStatus(id: UUID, status: TenantStatus) {
-        jdbcTemplate.update(
-            """
-            UPDATE tenants
-            SET status = ?,
-                updated_at = now()
-            WHERE id = ?
-              AND deleted_at IS NULL
-            """.trimIndent(),
-            status.databaseValue,
-            id,
-        )
-    }
-
     fun recordLifecycleEvent(
         tenantId: UUID,
         eventType: String,

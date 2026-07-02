@@ -150,6 +150,31 @@ class ProductionReadinessValidatorTests {
     }
 
     @Test
+    fun rejectsInvitationTokenExposureInProduction() {
+        val error = assertFailsWith<IllegalStateException> {
+            validator(
+                environment = secureProdEnvironment()
+                    .withProperty("spring.datasource.username", "peak_app")
+                    .withProperty("spring.datasource.password", "not-local-secret")
+                    .withProperty("spring.flyway.enabled", "false")
+                    .withProperty(
+                        "peak.usermanagement.invitation.expose-token-in-response",
+                        "true",
+                    ),
+                runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.API),
+                httpSecurityProperties = secureHttpProperties(),
+                requestContextProperties = secureRequestContextProperties(),
+            ).afterSingletonsInstantiated()
+        }
+
+        assertTrue(
+            requireNotNull(error.message).contains(
+                "peak.usermanagement.invitation.expose-token-in-response must be false in prod",
+            ),
+        )
+    }
+
+    @Test
     fun rejectsUnsafeOutboundProviderHostAllowlist() {
         val error = assertFailsWith<IllegalStateException> {
             validator(

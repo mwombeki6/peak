@@ -108,7 +108,7 @@ class ReservationService(
                 ORDER BY full_name NULLS LAST, last_name NULLS LAST, first_name NULLS LAST, created_at DESC
                 LIMIT 500
                 """.trimIndent(),
-                ::mapGuest,
+                GuestResponseRowMapper,
                 actor.tenantId,
                 propertyId,
                 propertyId,
@@ -141,7 +141,7 @@ class ReservationService(
                       )
                   )
                 """.trimIndent(),
-                ::mapGuest,
+                GuestResponseRowMapper,
                 actor.tenantId,
                 guestId,
                 propertyId,
@@ -831,22 +831,6 @@ class ReservationService(
         }
     }
 
-    private fun mapGuest(rs: ResultSet, rowNumber: Int): GuestResponse {
-        return GuestResponse(
-            id = rs.getObject("id", UUID::class.java),
-            tenantId = rs.getObject("tenant_id", UUID::class.java),
-            fullName = rs.getString("full_name"),
-            firstName = rs.getString("first_name"),
-            lastName = rs.getString("last_name"),
-            email = rs.getString("email"),
-            phonePrimary = rs.getString("phone_primary"),
-            dateOfBirth = rs.getObject("date_of_birth", LocalDate::class.java),
-            nationality = rs.getString("nationality"),
-            vipLevel = rs.getString("vip_level"),
-            blacklisted = rs.getBoolean("blacklisted"),
-        )
-    }
-
     private fun mapReservation(rs: ResultSet, rowNumber: Int): ReservationResponse {
         return ReservationResponse(
             id = rs.getObject("id", UUID::class.java),
@@ -874,7 +858,7 @@ class ReservationService(
             FROM guests
             WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL
             """.trimIndent(),
-            ::mapGuest,
+            GuestResponseRowMapper,
             tenantId,
             guestId,
         ).singleOrNull()

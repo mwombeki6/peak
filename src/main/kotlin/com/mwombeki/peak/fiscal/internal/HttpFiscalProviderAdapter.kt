@@ -1,11 +1,8 @@
 package com.mwombeki.peak.fiscal.internal
 
+import com.mwombeki.peak.shared.outbound.BoundedJsonHttpClient
 import com.mwombeki.peak.shared.outbound.OutboundEndpointPolicy
 import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.nio.charset.StandardCharsets
 import java.time.Duration
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.stereotype.Component
@@ -32,10 +29,11 @@ class JdkFiscalGatewayHttpTransport(
     private val properties: HttpFiscalProviderProperties,
     private val outboundEndpointPolicy: OutboundEndpointPolicy,
 ) : FiscalGatewayHttpTransport {
-    private val client = HttpClient.newBuilder()
-        .connectTimeout(properties.connectTimeout)
-        .followRedirects(HttpClient.Redirect.NEVER)
-        .build()
+    private val client = BoundedJsonHttpClient(
+        endpointPolicy = outboundEndpointPolicy,
+        connectTimeout = properties.connectTimeout,
+        providerLabel = "Fiscal provider",
+    )
 
     override fun post(
         endpoint: URI,
@@ -43,30 +41,13 @@ class JdkFiscalGatewayHttpTransport(
         idempotencyKey: String,
         payload: String,
     ): String {
-        val allowedEndpoint = outboundEndpointPolicy.requireAllowedProviderEndpoint(endpoint)
-        val request = HttpRequest.newBuilder(allowedEndpoint)
-            .timeout(properties.requestTimeout)
-            .header("Authorization", "Bearer $credential")
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json")
-            .header("Idempotency-Key", idempotencyKey)
-            .POST(HttpRequest.BodyPublishers.ofString(payload))
-            .build()
-        val response = client.send(request, HttpResponse.BodyHandlers.ofInputStream())
-        response.body().use { body ->
-            check(response.statusCode() in 200..299) {
-                "Fiscal provider returned HTTP ${response.statusCode()}"
-            }
-            val bytes = body.readNBytes(MAX_RESPONSE_BYTES + 1)
-            check(bytes.size <= MAX_RESPONSE_BYTES) {
-                "Fiscal provider response exceeds 64 KiB"
-            }
-            return String(bytes, StandardCharsets.UTF_8)
-        }
-    }
-
-    private companion object {
-        const val MAX_RESPONSE_BYTES = 64 * 1024
+        return client.post(
+            endpoint = endpoint,
+            requestTimeout = properties.requestTimeout,
+            credential = credential,
+            idempotencyKey = idempotencyKey,
+            payload = payload,
+        )
     }
 }
 
