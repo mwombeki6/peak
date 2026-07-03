@@ -1,0 +1,32 @@
+groups:
+  - name: peak-phase4-department-operations
+    rules:
+      - alert: PeakInventoryLowStockCrossings
+        expr: increase(peak_outbox_platform_events_published_total{event_type="inventory.low_stock"}[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          phase: "4"
+        annotations:
+          summary: Inventory crossed a configured reorder threshold
+          description: Review the property inventory summary and create or receive a purchase order.
+
+      - alert: PeakKitchenEventDeliveryFailures
+        expr: increase(peak_realtime_events_delivery_failures_total{eventType=~"KITCHEN_.*"}[10m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+          phase: "4"
+        annotations:
+          summary: KDS realtime delivery is failing
+          description: Inspect realtime journal backlog and authenticated property stream connectivity.
+
+      - alert: PeakDepartmentOutboxBacklog
+        expr: peak_outbox_worker_claimed_total - peak_outbox_worker_delivered_total > 100
+        for: 10m
+        labels:
+          severity: warning
+          phase: "4"
+        annotations:
+          summary: Department operations outbox backlog is growing
+          description: Check the worker runtime role, dead letters, and housekeeping/KDS destinations.

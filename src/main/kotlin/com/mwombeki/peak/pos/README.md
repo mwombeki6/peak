@@ -17,6 +17,11 @@ Owns property outlet cashier sessions and POS orders.
 - Room charges use the billing API and preserve the POS order as the charge
   source.
 - A non-zero cash variance requires approval by a different user.
+- Create-order, add-item, and kitchen-send commands require both HTTP
+  idempotency and a stable `clientOperationId`.
+- Kitchen sends snapshot recipes and consume stock through `inventory::api`.
+  Post-send voids require exact `RETURN_TO_STOCK` compensation or audited
+  `WASTE`; KDS changes publish on the authenticated property stream.
 
 ## Routes
 
@@ -33,6 +38,9 @@ Owns property outlet cashier sessions and POS orders.
 | `GET` | `/api/v1/properties/{propertyId}/pos-orders/{orderId}` | `pos.view` |
 | `POST` | `/api/v1/properties/{propertyId}/pos-orders/{orderId}/items` | `pos.order.manage` |
 | `POST` | `/api/v1/properties/{propertyId}/pos-orders/{orderId}/settle` | `pos.order.settle` |
+| `POST` | `/api/v1/properties/{propertyId}/pos-orders/{orderId}/send` | `pos.order.manage` |
+| `POST` | `/api/v1/properties/{propertyId}/pos-orders/{orderId}/items/{itemId}/void` | `pos.item.void` |
+| `GET/POST` | `/api/v1/properties/{propertyId}/kitchen-tickets/**` | `pos.kitchen.*` |
 
 The database route matrix is authoritative. Static application roles are not
 used for POS authorization; tenant roles receive these permissions dynamically.

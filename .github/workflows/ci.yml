@@ -42,6 +42,10 @@ jobs:
             -f ops/production/compose.yaml \
             -f ops/testing/compose.phase3-acceptance.yaml \
             config >/tmp/peak-phase3-acceptance-compose.yaml
+          podman compose --env-file ops/production/.env.example \
+            -f ops/production/compose.yaml \
+            -f ops/testing/compose.phase4-acceptance.yaml \
+            config >/tmp/peak-phase4-acceptance-compose.yaml
 
       - name: Validate production environment contract
         run: |
@@ -75,13 +79,16 @@ jobs:
           python3 -m json.tool ops/testing/Peak-Phase-2.postman_collection.json >/dev/null
           python3 -m json.tool ops/testing/Peak-Phase-3-Guest-Identity.postman_collection.json >/dev/null
           python3 -m json.tool ops/testing/Peak-Phase-3.postman_collection.json >/dev/null
+          python3 -m json.tool ops/testing/Peak-Phase-4.postman_collection.json >/dev/null
           python3 -m json.tool ops/observability/phase3-dashboard.json >/dev/null
+          python3 -m json.tool ops/observability/phase4-dashboard.json >/dev/null
 
       - name: Validate ops scripts
         run: |
           sh -n ops/scripts/*.sh
           bash -n ops/testing/run-phase2-acceptance.sh
           bash -n ops/testing/run-phase3-acceptance.sh
+          bash -n ops/testing/run-phase4-acceptance.sh
           bash -n ops/testing/run-clickpesa-sandbox-acceptance.sh
 
       - name: Start Podman API socket for Testcontainers

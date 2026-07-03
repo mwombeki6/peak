@@ -56,9 +56,9 @@ class PosOrderService(
                 INSERT INTO pos_orders (
                     id, tenant_id, property_id, outlet_id, revenue_center_id,
                     session_id, order_number, table_number, order_type, status,
-                    settlement_status, served_by
+                    settlement_status, served_by, client_operation_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', 'unsettled', ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', 'unsettled', ?, ?)
                 """.trimIndent(),
                 orderId,
                 actor.tenantId,
@@ -70,6 +70,7 @@ class PosOrderService(
                 request.tableNumber.normalizedOptional(),
                 orderType,
                 actor.tenantUserId,
+                request.clientOperationId.normalizedClientOperationId(),
             )
             requireOrder(actor.tenantId, propertyId, orderId, lock = false)
                 .also {
@@ -128,9 +129,9 @@ class PosOrderService(
                 INSERT INTO pos_order_items (
                     id, tenant_id, order_id, menu_item_id, item_name,
                     quantity, unit_price, subtotal, tax_amount, total_price,
-                    modifiers, special_request
+                    modifiers, special_request, client_operation_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)
                 """.trimIndent(),
                 itemId,
                 actor.tenantId,
@@ -144,6 +145,7 @@ class PosOrderService(
                 amounts.total,
                 objectMapper.writeValueAsString(request.modifiers.map(String::trim)),
                 request.specialRequest.normalizedOptional(),
+                request.clientOperationId.normalizedClientOperationId(),
             )
             recalculateOrder(actor.tenantId, propertyId, orderId)
             requireOrder(actor.tenantId, propertyId, orderId, lock = false)
@@ -545,7 +547,7 @@ class PosOrderService(
             """
             SELECT id, menu_item_id, item_name, quantity, unit_price,
                    subtotal, tax_amount, total_price, modifiers::text,
-                   special_request
+                   special_request, service_state, void_disposition
             FROM pos_order_items
             WHERE tenant_id = ?
               AND order_id = ?
@@ -567,6 +569,8 @@ class PosOrderService(
                         Array<String>::class.java,
                     ).toList(),
                     specialRequest = rs.getString("special_request"),
+                    serviceState = rs.getString("service_state").uppercase(Locale.ROOT),
+                    voidDisposition = rs.getString("void_disposition")?.uppercase(Locale.ROOT),
                 )
             },
             tenantId,
@@ -665,6 +669,14 @@ class PosOrderService(
         val normalized = trim().lowercase(Locale.ROOT)
         require(normalized in SETTLEMENT_METHODS) {
             "Only cash, mobile_money, and room_charge settlements are supported"
+        }
+        return normalized
+    }
+
+    private fun String.normalizedClientOperationId(): String {
+        val normalized = trim()
+        require(normalized.isNotEmpty() && normalized.length <= 100) {
+            "clientOperationId is required and must not exceed 100 characters"
         }
         return normalized
     }

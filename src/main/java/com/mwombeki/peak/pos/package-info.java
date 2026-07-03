@@ -7,7 +7,10 @@
                 "audit::api",
                 "reliability::api",
                 "billing::api",
-                "payment::api"
+                "payment::api",
+                "inventory::api",
+                "property::api",
+                "realtime::api"
         }
 )
 package com.mwombeki.peak.pos;

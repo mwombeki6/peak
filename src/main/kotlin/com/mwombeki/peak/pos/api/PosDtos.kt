@@ -63,6 +63,9 @@ data class CreatePosOrderRequest(
     val orderType: String = "dine_in",
     @field:Size(max = 20)
     val tableNumber: String? = null,
+    @field:NotBlank
+    @field:Size(max = 100)
+    val clientOperationId: String = "",
 )
 
 data class AddPosOrderItemRequest(
@@ -74,6 +77,72 @@ data class AddPosOrderItemRequest(
     val modifiers: List<@Size(max = 100) String> = emptyList(),
     @field:Size(max = 500)
     val specialRequest: String? = null,
+    @field:NotBlank
+    @field:Size(max = 100)
+    val clientOperationId: String = "",
+)
+
+data class SendPosOrderRequest(
+    @field:NotBlank
+    @field:Size(max = 100)
+    val clientOperationId: String,
+)
+
+enum class PosVoidDisposition {
+    RETURN_TO_STOCK,
+    WASTE,
+}
+
+data class VoidPosOrderItemRequest(
+    val disposition: PosVoidDisposition? = null,
+    @field:NotBlank
+    @field:Size(min = 3, max = 500)
+    val reason: String,
+)
+
+data class PosItemVoidResponse(
+    val orderId: UUID,
+    val itemId: UUID,
+    val disposition: String,
+    val returnBatchId: UUID?,
+    val replayed: Boolean = false,
+)
+
+enum class KitchenTicketStatus {
+    PENDING,
+    PREPARING,
+    READY,
+    DELIVERED,
+    VOIDED,
+}
+
+data class KitchenTicketItemResponse(
+    val id: UUID,
+    val posOrderItemId: UUID,
+    val itemName: String,
+    val quantity: BigDecimal,
+    val modifiers: List<String>,
+    val specialRequest: String?,
+)
+
+data class KitchenTicketResponse(
+    val id: UUID,
+    val propertyId: UUID,
+    val orderId: UUID,
+    val outletId: UUID,
+    val ticketNumber: String,
+    val status: KitchenTicketStatus,
+    val sentAt: Instant,
+    val readyAt: Instant?,
+    val deliveredAt: Instant?,
+    val items: List<KitchenTicketItemResponse>,
+    val replayed: Boolean = false,
+)
+
+data class KitchenTicketReasonRequest(
+    @field:NotBlank
+    @field:Size(min = 3, max = 500)
+    val reason: String,
 )
 
 data class SettlePosOrderRequest(
@@ -118,6 +187,8 @@ data class PosOrderItemResponse(
     val totalPrice: BigDecimal,
     val modifiers: List<String>,
     val specialRequest: String?,
+    val serviceState: String = "UNSENT",
+    val voidDisposition: String? = null,
 )
 
 data class CreatePosOutletRequest(

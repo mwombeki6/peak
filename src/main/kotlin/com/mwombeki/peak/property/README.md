@@ -2,6 +2,10 @@
 
 Property management owns hotel property setup, readiness, and lifecycle control. It lets tenant admins configure a real property through secured APIs without normal manual SQL.
 
+Housekeeping and maintenance change room readiness only through
+`property::api`. This boundary owns clean/dirty, occupancy, maintenance-block,
+and release-to-dirty transitions and records each source.
+
 ## Lifecycle
 
 New properties start as `draft` and `isActive=false`. A property becomes publicly/operationally usable only after `POST /api/v1/properties/{propertyId}/activate` passes readiness and sets `status=active`.

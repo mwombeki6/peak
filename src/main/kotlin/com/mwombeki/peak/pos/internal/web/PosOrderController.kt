@@ -4,6 +4,9 @@ import com.mwombeki.peak.pos.api.AddPosOrderItemRequest
 import com.mwombeki.peak.pos.api.CreatePosOrderRequest
 import com.mwombeki.peak.pos.api.PosOrderResponse
 import com.mwombeki.peak.pos.api.SettlePosOrderRequest
+import com.mwombeki.peak.pos.api.SendPosOrderRequest
+import com.mwombeki.peak.pos.api.VoidPosOrderItemRequest
+import com.mwombeki.peak.pos.internal.PosKitchenService
 import com.mwombeki.peak.pos.internal.PosOrderService
 import jakarta.validation.Valid
 import java.util.UUID
@@ -20,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/v1/properties/{propertyId}/pos-orders")
 class PosOrderController(
     private val posOrderService: PosOrderService,
+    private val posKitchenService: PosKitchenService,
 ) {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
@@ -47,4 +51,19 @@ class PosOrderController(
         @PathVariable orderId: UUID,
         @Valid @RequestBody request: SettlePosOrderRequest,
     ): PosOrderResponse = posOrderService.settleOrder(propertyId, orderId, request)
+
+    @PostMapping("/{orderId}/send")
+    fun send(
+        @PathVariable propertyId: UUID,
+        @PathVariable orderId: UUID,
+        @Valid @RequestBody request: SendPosOrderRequest,
+    ) = posKitchenService.send(propertyId, orderId, request)
+
+    @PostMapping("/{orderId}/items/{itemId}/void")
+    fun voidItem(
+        @PathVariable propertyId: UUID,
+        @PathVariable orderId: UUID,
+        @PathVariable itemId: UUID,
+        @Valid @RequestBody request: VoidPosOrderItemRequest,
+    ) = posKitchenService.voidItem(propertyId, orderId, itemId, request)
 }

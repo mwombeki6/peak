@@ -10,6 +10,9 @@ Owns Phase 3 check-in, walk-in, stay, and checkout transitions.
 - Enforce checkout financial controls.
 - Provide a separate fiscal override checkout path with mandatory reason.
 - Provide a supervisor-only unpaid checkout override that leaves the folio open.
+- Emit one idempotent departure-clean request on checkout.
+- Expose live in-house stay summaries through `frontdesk::api` for stayover
+  generation without cross-module SQL.
 
 ## API
 
