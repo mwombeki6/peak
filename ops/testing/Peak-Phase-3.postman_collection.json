@@ -527,7 +527,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\"sessionId\":\"{{posSessionId}}\",\"orderType\":\"dine_in\",\"tableNumber\":\"A1\"}"
+              "raw": "{\"sessionId\":\"{{posSessionId}}\",\"orderType\":\"dine_in\",\"tableNumber\":\"A1\",\"clientOperationId\":\"phase3-order-op-{{runId}}\"}"
             },
             "url": "{{baseUrl}}/api/v1/properties/{{propertyId}}/pos-orders"
           },
@@ -553,7 +553,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\"menuItemId\":\"{{menuItemId}}\",\"quantity\":1}"
+              "raw": "{\"menuItemId\":\"{{menuItemId}}\",\"quantity\":1,\"clientOperationId\":\"phase3-add-op-{{runId}}\"}"
             },
             "url": "{{baseUrl}}/api/v1/properties/{{propertyId}}/pos-orders/{{posOrderId}}/items"
           },
