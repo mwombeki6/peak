@@ -77,9 +77,9 @@ for module in housekeeping maintenance inventory procurement pos; do
 done
 
 python3 "$ROOT_DIR/ops/testing/websocket-acceptance.py" \
-  --url "${PEAK_WS_URL:-ws://localhost:8080/ws}" \
+  --url "${PEAK_WS_URL:-ws://localhost:8080/ws-connect}" \
   --token "$access_token" \
-  --origin "${PEAK_WS_ORIGIN:-http://localhost:8080}" \
+  --origin "${PEAK_WS_ORIGIN:-https://localhost:5173}" \
   --correlation-id "phase4-kds-subscription" \
   --tenant-id "$tenant_id" \
   --property-id "$property_id" >"$EVIDENCE_DIR/websocket-kds.txt"

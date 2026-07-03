@@ -33,7 +33,7 @@ jobs:
       - name: Install Podman Compose
         run: |
           sudo apt-get update
-          sudo apt-get install -y podman podman-compose
+          sudo apt-get install -y podman podman-compose python3-websocket
 
       - name: Validate production compose
         run: |
@@ -116,8 +116,63 @@ jobs:
       - name: Validate clean migrations
         run: ./gradlew test --tests '*MigrationValidationIntegrationTests' --rerun-tasks
 
+      - name: Prepare Phase 4 acceptance environment
+        run: |
+          cp ops/production/.env.example "$RUNNER_TEMP/peak-phase4-acceptance.env"
+          sed -i \
+            -e 's|^PEAK_IMAGE=.*|PEAK_IMAGE=localhost/peak:phase4-ci|' \
+            -e 's|^KEYCLOAK_HOSTNAME=.*|KEYCLOAK_HOSTNAME=http://keycloak:8080|' \
+            -e 's|^PEAK_SECURITY_JWT_ISSUER_URI=.*|PEAK_SECURITY_JWT_ISSUER_URI=http://keycloak:8080/realms/peak|' \
+            -e 's|^PEAK_CORS_ALLOWED_ORIGINS=.*|PEAK_CORS_ALLOWED_ORIGINS=https://localhost:5173|' \
+            -e 's|^PEAK_REALTIME_WEBSOCKET_ALLOWED_ORIGINS=.*|PEAK_REALTIME_WEBSOCKET_ALLOWED_ORIGINS=https://localhost:5173|' \
+            -e 's|^PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_BASE_URL=.*|PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_BASE_URL=http://host.containers.internal:8090|' \
+            -e 's|^PEAK_ACCEPTANCE_MODE=.*|PEAK_ACCEPTANCE_MODE=true|' \
+            -e 's|^POSTGRES_MIGRATOR_PASSWORD=.*|POSTGRES_MIGRATOR_PASSWORD=phase4-ci-migrator-password|' \
+            -e 's|^POSTGRES_APP_PASSWORD=.*|POSTGRES_APP_PASSWORD=phase4-ci-application-password|' \
+            -e 's|^POSTGRES_WORKER_PASSWORD=.*|POSTGRES_WORKER_PASSWORD=phase4-ci-worker-password|' \
+            -e 's|^POSTGRES_PLATFORM_SUPPORT_PASSWORD=.*|POSTGRES_PLATFORM_SUPPORT_PASSWORD=phase4-ci-platform-support-password|' \
+            -e 's|^KEYCLOAK_ADMIN_PASSWORD=.*|KEYCLOAK_ADMIN_PASSWORD=phase4-ci-keycloak-admin-password|' \
+            -e 's|^KEYCLOAK_DB_PASSWORD=.*|KEYCLOAK_DB_PASSWORD=phase4-ci-keycloak-db-password|' \
+            -e 's|^PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=.*|PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=phase4-ci-communication-provider-key|' \
+            -e 's|^PEAK_ENVELOPE_KEY_BASE64=.*|PEAK_ENVELOPE_KEY_BASE64=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=|' \
+            -e 's|^PEAK_PAYMENT_GATEWAY_CREDENTIAL=.*|PEAK_PAYMENT_GATEWAY_CREDENTIAL=phase4-ci-payment-gateway-credential|' \
+            -e 's|^PEAK_PAYMENT_WEBHOOK_SECRET=.*|PEAK_PAYMENT_WEBHOOK_SECRET=phase4-ci-payment-webhook-secret|' \
+            -e 's|^PEAK_CLICKPESA_API_KEY=.*|PEAK_CLICKPESA_API_KEY=phase4-ci-clickpesa-api-key|' \
+            -e 's|^PEAK_CLICKPESA_CHECKSUM_KEY=.*|PEAK_CLICKPESA_CHECKSUM_KEY=phase4-ci-clickpesa-checksum-key|' \
+            -e 's|^PEAK_FISCAL_GATEWAY_CREDENTIAL=.*|PEAK_FISCAL_GATEWAY_CREDENTIAL=phase4-ci-fiscal-gateway-credential|' \
+            -e 's|^PEAK_GUEST_IDENTITY_HASH_KEY=.*|PEAK_GUEST_IDENTITY_HASH_KEY=phase4-ci-guest-identity-hmac-key-2026|' \
+            "$RUNNER_TEMP/peak-phase4-acceptance.env"
+
+      - name: Run Phase 4 acceptance
+        env:
+          COMPOSE_PROJECT_NAME: peak-phase4-ci
+          ENV_FILE: ${{ runner.temp }}/peak-phase4-acceptance.env
+          PHASE2_BUILD_IMAGE: "true"
+          PHASE2_RESET: "true"
+          PHASE4_TENANT_PASSWORD: Phase4-CI-Acceptance-2026
+        run: ops/testing/run-phase4-acceptance.sh
+
       - name: Check whitespace
         run: git diff --check
+
+      - name: Upload Phase 4 acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-acceptance-evidence
+          path: build/evidence/phase4
+
+      - name: Stop Phase 4 acceptance stack
+        if: always()
+        env:
+          COMPOSE_PROJECT_NAME: peak-phase4-ci
+        run: |
+          podman compose \
+            -p "$COMPOSE_PROJECT_NAME" \
+            --env-file "$RUNNER_TEMP/peak-phase4-acceptance.env" \
+            -f ops/production/compose.yaml \
+            -f ops/testing/compose.phase3-acceptance.yaml \
+            down -v --remove-orphans || true
 
       - name: Upload test report
         if: failure()
