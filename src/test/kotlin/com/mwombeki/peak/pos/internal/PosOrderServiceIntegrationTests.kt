@@ -230,7 +230,7 @@ class PosOrderServiceIntegrationTests {
     }
 
     @Test
-    fun `closes pending order only after confirmed payment event`() {
+    fun `closes pending order only after posted payment event`() {
         val fixture = insertFixture()
         bind(fixture, "mobile-open")
         val session = posSessionService.openSession(
@@ -254,10 +254,10 @@ class PosOrderServiceIntegrationTests {
             INSERT INTO payment_transactions (
                 id, tenant_id, property_id, pos_order_id, initiated_by,
                 transaction_direction, transaction_type, internal_reference,
-                amount, currency, status, confirmed_at
+                amount, currency, status, posted_at, confirmed_at
             )
             VALUES (?, ?, ?, ?, ?, 'inbound', 'collection', ?, ?, 'TZS',
-                    'confirmed', now())
+                    'posted', now(), now())
             """.trimIndent(),
             transactionId,
             fixture.tenantId,
@@ -290,11 +290,11 @@ class PosOrderServiceIntegrationTests {
                     propertyId = fixture.propertyId,
                     aggregateType = "payment_transactions",
                     aggregateId = transactionId,
-                    eventType = "payment.transaction.confirmed",
+                    eventType = "payment.transaction.posted",
                     destination = OutboxDestination.POS,
                     payload = "{}",
                     headers = "{}",
-                    correlationId = "corr-mobile-confirmed",
+                    correlationId = "corr-mobile-posted",
                     idempotencyKeyId = null,
                     status = OutboxStatus.LOCKED,
                     priority = 1,

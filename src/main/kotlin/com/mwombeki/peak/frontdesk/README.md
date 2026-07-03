@@ -9,6 +9,7 @@ Owns Phase 3 check-in, walk-in, stay, and checkout transitions.
 - Maintain stay records and room occupancy state.
 - Enforce checkout financial controls.
 - Provide a separate fiscal override checkout path with mandatory reason.
+- Provide a supervisor-only unpaid checkout override that leaves the folio open.
 
 ## API
 
@@ -18,6 +19,7 @@ Owns Phase 3 check-in, walk-in, stay, and checkout transitions.
 - `GET /api/v1/properties/{propertyId}/stays/{stayId}`
 - `POST /api/v1/properties/{propertyId}/checkouts/{stayId}`
 - `POST /api/v1/properties/{propertyId}/checkouts/{stayId}/fiscal-override`
+- `POST /api/v1/properties/{propertyId}/checkouts/{stayId}/unpaid-override`
 
 ## Checkout Rules
 
@@ -31,6 +33,10 @@ Normal checkout requires:
 Fiscal override checkout is intentionally separated by route and permission. It
 does not mark fiscalization complete; night audit continues to surface the
 missing accepted fiscal receipt.
+
+Unpaid override requires a supervisor reason and a positive balance. It checks
+out the stay without closing the folio, so night audit remains blocked. It
+cannot be combined with fiscal override because checkout is a single transition.
 
 ## Check-In Identity Gate
 

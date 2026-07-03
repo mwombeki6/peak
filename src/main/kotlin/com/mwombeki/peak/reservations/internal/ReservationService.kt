@@ -19,8 +19,11 @@ import com.mwombeki.peak.reservations.api.ReservationConflictException
 import com.mwombeki.peak.reservations.api.ReservationInProgressException
 import com.mwombeki.peak.reservations.api.ReservationMutationReceipt
 import com.mwombeki.peak.reservations.api.ReservationNotFoundException
+import com.mwombeki.peak.reservations.api.ReservationCheckInSnapshot
+import com.mwombeki.peak.reservations.api.ReservationOperationalSummary
 import com.mwombeki.peak.reservations.api.ReservationPort
 import com.mwombeki.peak.reservations.api.ReservationResponse
+import com.mwombeki.peak.reservations.api.ReservationTransitionPort
 import com.mwombeki.peak.shared.context.TenantActor
 import com.mwombeki.peak.shared.context.TenantRequestContext
 import io.micrometer.core.instrument.MeterRegistry
@@ -47,7 +50,174 @@ class ReservationService(
     private val transactionTemplate: TransactionTemplate,
     private val objectMapper: ObjectMapper,
     private val meterRegistry: MeterRegistry,
-) : ReservationPort {
+) : ReservationPort, ReservationTransitionPort {
+
+    override fun requireCheckInSnapshot(
+        tenantId: UUID,
+        propertyId: UUID,
+        reservationId: UUID,
+    ): ReservationCheckInSnapshot {
+        return jdbcTemplate.query(
+            """
+            SELECT r.status, r.check_in_date, r.check_out_date,
+                   rr.id AS reservation_room_id, rr.room_type_id, rr.room_id, rr.folio_id
+            FROM reservations r
+            JOIN reservation_rooms rr
+              ON rr.tenant_id = r.tenant_id
+             AND rr.reservation_id = r.id
+            WHERE r.tenant_id = ?
+              AND r.property_id = ?
+              AND r.id = ?
+              AND r.deleted_at IS NULL
+            FOR UPDATE OF r, rr
+            """.trimIndent(),
+            { rs, _ ->
+                rs.getString("status") to ReservationCheckInSnapshot(
+                    reservationId = reservationId,
+                    checkInDate = rs.getObject("check_in_date", LocalDate::class.java),
+                    checkOutDate = rs.getObject("check_out_date", LocalDate::class.java),
+                    reservationRoomId = rs.getObject("reservation_room_id", UUID::class.java),
+                    roomTypeId = rs.getObject("room_type_id", UUID::class.java),
+                    roomId = rs.getObject("room_id", UUID::class.java),
+                    folioId = rs.getObject("folio_id", UUID::class.java),
+                )
+            },
+            tenantId,
+            propertyId,
+            reservationId,
+        ).singleOrNull()?.also { (status, snapshot) ->
+            if (status != "confirmed") {
+                throw ReservationConflictException(
+                    "Reservation is $status and cannot be checked in",
+                )
+            }
+            if (snapshot.folioId == null) {
+                throw ReservationConflictException(
+                    "Reservation does not have an open folio",
+                )
+            }
+        }?.second ?: throw ReservationNotFoundException(
+            "Reservation was not found",
+        )
+    }
+
+    override fun markCheckedIn(
+        tenantId: UUID,
+        propertyId: UUID,
+        reservationId: UUID,
+        reservationRoomId: UUID,
+        roomId: UUID,
+    ) {
+        val reservationChanged = jdbcTemplate.update(
+            """
+            UPDATE reservations
+            SET status = 'checked_in',
+                actual_check_in_at = now(),
+                updated_at = now()
+            WHERE tenant_id = ?
+              AND property_id = ?
+              AND id = ?
+              AND status = 'confirmed'
+            """.trimIndent(),
+            tenantId,
+            propertyId,
+            reservationId,
+        )
+        val roomChanged = jdbcTemplate.update(
+            """
+            UPDATE reservation_rooms
+            SET status = 'checked_in',
+                room_id = ?,
+                updated_at = now()
+            WHERE tenant_id = ?
+              AND reservation_id = ?
+              AND id = ?
+              AND status = 'reserved'
+            """.trimIndent(),
+            roomId,
+            tenantId,
+            reservationId,
+            reservationRoomId,
+        )
+        if (reservationChanged != 1 || roomChanged != 1) {
+            throw ReservationConflictException(
+                "Reservation check-in transition was not applied",
+            )
+        }
+        jdbcTemplate.update(
+            """
+            UPDATE reservation_room_nights
+            SET room_id = ?, updated_at = now()
+            WHERE tenant_id = ? AND reservation_room_id = ?
+            """.trimIndent(),
+            roomId,
+            tenantId,
+            reservationRoomId,
+        )
+    }
+
+    override fun markCheckedOut(
+        tenantId: UUID,
+        propertyId: UUID,
+        reservationId: UUID,
+    ) {
+        val changed = jdbcTemplate.update(
+            """
+            UPDATE reservations
+            SET status = 'checked_out',
+                actual_check_out_at = now(),
+                updated_at = now()
+            WHERE tenant_id = ?
+              AND property_id = ?
+              AND id = ?
+              AND status = 'checked_in'
+            """.trimIndent(),
+            tenantId,
+            propertyId,
+            reservationId,
+        )
+        if (changed != 1) {
+            throw ReservationConflictException(
+                "Reservation checkout transition was not applied",
+            )
+        }
+        jdbcTemplate.update(
+            """
+            UPDATE reservation_rooms
+            SET status = 'checked_out', updated_at = now()
+            WHERE tenant_id = ?
+              AND reservation_id = ?
+              AND status = 'checked_in'
+            """.trimIndent(),
+            tenantId,
+            reservationId,
+        )
+    }
+
+    override fun operationalSummary(
+        tenantId: UUID,
+        propertyId: UUID,
+        businessDate: LocalDate,
+    ): ReservationOperationalSummary {
+        val overdue = jdbcTemplate.queryForObject(
+            """
+            SELECT COUNT(*)
+            FROM stays s
+            JOIN reservations r
+              ON r.tenant_id = s.tenant_id
+             AND r.id = s.reservation_id
+            WHERE s.tenant_id = ?
+              AND r.property_id = ?
+              AND s.status = 'checked_in'
+              AND r.check_out_date < ?
+            """.trimIndent(),
+            Int::class.java,
+            tenantId,
+            propertyId,
+            businessDate,
+        ) ?: 0
+        return ReservationOperationalSummary(overdueCheckedInStays = overdue)
+    }
 
     override fun createGuestInCurrentTransaction(
         tenantId: UUID,

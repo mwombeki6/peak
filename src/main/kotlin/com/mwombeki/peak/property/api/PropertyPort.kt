@@ -1,7 +1,10 @@
 package com.mwombeki.peak.property.api
 
 import java.util.UUID
+import java.time.LocalDate
+import org.springframework.modulith.NamedInterface
 
+@NamedInterface("api")
 interface PropertyPort {
     fun createProperty(request: CreatePropertyRequest): PropertyMutationReceipt
     fun updateProperty(propertyId: UUID, request: UpdatePropertyRequest): PropertyMutationReceipt
@@ -84,4 +87,23 @@ interface PropertyPort {
     fun enableModule(propertyId: UUID, moduleId: String): PropertyModuleMutationReceipt
     fun disableModule(propertyId: UUID, moduleId: String): PropertyModuleMutationReceipt
     fun listEnabledModules(propertyId: UUID): List<String>
+}
+
+@NamedInterface("api")
+interface PropertyOperationsPort {
+    fun requireAssignableRoom(
+        tenantId: UUID,
+        propertyId: UUID,
+        roomTypeId: UUID,
+        roomId: UUID,
+    )
+
+    fun markRoomOccupied(tenantId: UUID, propertyId: UUID, roomId: UUID)
+    fun markRoomVacantDirty(tenantId: UUID, propertyId: UUID, roomId: UUID)
+    fun currentBusinessDate(tenantId: UUID, propertyId: UUID): LocalDate
+    fun advanceBusinessDate(
+        tenantId: UUID,
+        propertyId: UUID,
+        expectedBusinessDate: LocalDate,
+    ): LocalDate
 }

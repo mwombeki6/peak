@@ -1,5 +1,10 @@
-package com.mwombeki.peak.fiscal.internal
+package com.mwombeki.peak.integrations.internal
 
+// Provider-owned HTTP gateway implementation lives outside the fiscal domain.
+import com.mwombeki.peak.fiscal.api.FiscalInvoiceItem
+import com.mwombeki.peak.fiscal.api.FiscalProvider
+import com.mwombeki.peak.fiscal.api.FiscalSubmissionCommand
+import com.mwombeki.peak.fiscal.api.FiscalSubmissionResult
 import com.mwombeki.peak.shared.outbound.BoundedJsonHttpClient
 import com.mwombeki.peak.shared.outbound.OutboundEndpointPolicy
 import java.net.URI
@@ -55,7 +60,7 @@ class JdkFiscalGatewayHttpTransport(
 class HttpFiscalProviderAdapter(
     private val objectMapper: ObjectMapper,
     private val transport: FiscalGatewayHttpTransport,
-) : FiscalProviderAdapter {
+) : FiscalProvider {
     override val providerCode = "http_gateway"
 
     override fun submit(command: FiscalSubmissionCommand): FiscalSubmissionResult {

@@ -327,6 +327,65 @@ class RuntimeDatabaseRoleIntegrationTests {
     }
 
     @Test
+    fun workerRoleCanResolveOnlyBoundTenantConsentedChannels() {
+        val tenant = insertTenantFixture(status = "active")
+        val otherTenant = insertTenantFixture(status = "active")
+        val channelId = insertConsentedChannel(tenant.tenantId)
+        insertConsentedChannel(otherTenant.tenantId)
+
+        val visibleWithoutTenant = inTransaction {
+            setRole(WORKER_ROLE)
+            jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM contact_channels",
+                Int::class.java,
+            )
+        }
+        assertEquals(0, visibleWithoutTenant)
+
+        val visibleWithTenant = inTransaction {
+            setRole(WORKER_ROLE)
+            bindTenant(tenant.tenantId)
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*)
+                FROM contact_channels cc
+                JOIN tenant_contacts tc
+                  ON tc.tenant_id = cc.tenant_id
+                 AND tc.id = cc.contact_id
+                 AND tc.status = 'active'
+                 AND tc.deleted_at IS NULL
+                WHERE cc.id = ?
+                  AND cc.tenant_id = ?
+                  AND cc.is_active = true
+                  AND cc.verification_status = 'verified'
+                  AND cc.deleted_at IS NULL
+                  AND contact_channel_has_active_consent(
+                        cc.tenant_id,
+                        cc.contact_id,
+                        cc.id,
+                        'operational_reports'
+                      )
+                """.trimIndent(),
+                Int::class.java,
+                channelId,
+                tenant.tenantId,
+            )
+        }
+        assertEquals(1, visibleWithTenant)
+
+        assertFailsWith<DataAccessException> {
+            inTransaction {
+                setRole(WORKER_ROLE)
+                bindTenant(tenant.tenantId)
+                jdbcTemplate.update(
+                    "UPDATE contact_channels SET label = 'forbidden' WHERE id = ?",
+                    channelId,
+                )
+            }
+        }
+    }
+
+    @Test
     fun apiRoleCanEvaluateCrossTenantMockProviderGuardWithoutReadingAccounts() {
         val tenant = insertTenantFixture(status = "active")
         val providerId = UUID.randomUUID()
@@ -563,6 +622,57 @@ class RuntimeDatabaseRoleIntegrationTests {
             UUID.randomUUID(),
         )
         return eventId
+    }
+
+    private fun insertConsentedChannel(tenantId: UUID): UUID {
+        val contactId = UUID.randomUUID()
+        val channelId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_contacts (id, tenant_id, full_name, status)
+            VALUES (?, ?, ?, 'active')
+            """.trimIndent(),
+            contactId,
+            tenantId,
+            "Runtime Delivery Contact $contactId",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO contact_channels (
+                id,
+                tenant_id,
+                contact_id,
+                channel_type,
+                address,
+                normalized_address,
+                verification_status
+            )
+            VALUES (?, ?, ?, 'email', ?, ?, 'verified')
+            """.trimIndent(),
+            channelId,
+            tenantId,
+            contactId,
+            "runtime-$channelId@example.com",
+            "runtime-$channelId@example.com",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO communication_consents (
+                tenant_id,
+                contact_id,
+                contact_channel_id,
+                purpose,
+                status,
+                policy_version,
+                capture_source
+            )
+            VALUES (?, ?, ?, 'operational_reports', 'active', 'runtime-v1', 'api')
+            """.trimIndent(),
+            tenantId,
+            contactId,
+            channelId,
+        )
+        return channelId
     }
 
     private data class PublicBookingFixture(

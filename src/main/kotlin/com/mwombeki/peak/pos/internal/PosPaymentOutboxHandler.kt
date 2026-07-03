@@ -66,13 +66,13 @@ class PosPaymentOutboxHandler(
                     transactionId,
                 )
                 val changed = when (event.eventType) {
-                    PAYMENT_CONFIRMED -> confirm(settlement)
+                    PAYMENT_POSTED -> confirm(settlement)
                     PAYMENT_FAILED -> fail(settlement)
                     else -> false
                 }
                 if (changed) {
-                    val status = if (event.eventType == PAYMENT_CONFIRMED) {
-                        "confirmed"
+                    val status = if (event.eventType == PAYMENT_POSTED) {
+                        "posted"
                     } else {
                         "failed"
                     }
@@ -121,8 +121,8 @@ class PosPaymentOutboxHandler(
         ) {
             return false
         }
-        require(settlement.paymentStatus == "confirmed") {
-            "POS payment transaction is not confirmed"
+        require(settlement.paymentStatus == "posted") {
+            "POS payment transaction is not posted"
         }
         require(settlement.orderStatus == "open" && settlement.settlementStatus == "pending") {
             "POS order is not awaiting mobile-money confirmation"
@@ -244,8 +244,8 @@ class PosPaymentOutboxHandler(
 
     private companion object {
         const val POS_ORDERS = "pos_orders"
-        const val PAYMENT_CONFIRMED = "payment.transaction.confirmed"
+        const val PAYMENT_POSTED = "payment.transaction.posted"
         const val PAYMENT_FAILED = "payment.transaction.failed"
-        val SUPPORTED_EVENTS = setOf(PAYMENT_CONFIRMED, PAYMENT_FAILED)
+        val SUPPORTED_EVENTS = setOf(PAYMENT_POSTED, PAYMENT_FAILED)
     }
 }

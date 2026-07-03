@@ -75,6 +75,36 @@ data class ReversePaymentRequest(
     val cashSessionId: UUID? = null,
 )
 
+data class RefundPaymentRequest(
+    val amount: BigDecimal,
+    val reason: String,
+    val cashSessionId: UUID? = null,
+    val providerEvidence: String? = null,
+)
+
+@NamedInterface("api")
+enum class PaymentStatus(val databaseValue: String) {
+    CREATED("created"),
+    INITIATED("initiated"),
+    PENDING("pending"),
+    POSTED("posted"),
+    FAILED("failed"),
+    EXPIRED("expired"),
+    REVERSED("reversed"),
+    PARTIALLY_REFUNDED("partially_refunded"),
+    REFUNDED("refunded"),
+    RECONCILED("reconciled");
+
+    companion object {
+        fun fromDatabase(value: String): PaymentStatus {
+            return entries.firstOrNull { it.databaseValue == value.lowercase() }
+                ?: throw IllegalArgumentException(
+                    "Unknown payment status: $value",
+                )
+        }
+    }
+}
+
 @NamedInterface("api")
 data class PaymentTransactionResponse(
     val id: UUID,
@@ -88,10 +118,14 @@ data class PaymentTransactionResponse(
     val amount: BigDecimal,
     val feeAmount: BigDecimal,
     val currency: String,
-    val status: String,
+    val status: PaymentStatus,
     val initiatedAt: Instant,
+    val postedAt: Instant?,
     val confirmedAt: Instant?,
     val failedAt: Instant?,
+    val expiresAt: Instant? = null,
+    val refundedAmount: BigDecimal = BigDecimal.ZERO,
+    val refundOfTransactionId: UUID? = null,
     val reversalOfTransactionId: UUID? = null,
     val replayed: Boolean = false,
 )
@@ -102,9 +136,15 @@ data class ConfigurePaymentProviderRequest(
     val accountName: String,
     val endpointUrl: String? = null,
     val merchantId: String? = null,
+    val clientId: String? = null,
     val walletNumber: String? = null,
-    val secretRef: String,
-    val webhookSecretRef: String,
+    val secretRef: String? = null,
+    val webhookSecretRef: String? = null,
+    val apiKeySecretRef: String? = null,
+    val checksumKeySecretRef: String? = null,
+    val environment: String = "sandbox",
+    val sandboxCertifiedAt: Instant? = null,
+    val sandboxEvidenceRef: String? = null,
     val isDefault: Boolean = false,
 )
 
@@ -115,9 +155,12 @@ data class PaymentProviderAccountResponse(
     val providerName: String,
     val accountName: String,
     val merchantId: String?,
+    val clientId: String? = null,
     val walletNumber: String?,
     val isDefault: Boolean,
     val isActive: Boolean,
+    val environment: String = "sandbox",
+    val sandboxCertifiedAt: Instant? = null,
     val replayed: Boolean = false,
 )
 
@@ -149,10 +192,24 @@ data class PaymentReconciliationResponse(
     val replayed: Boolean = false,
 )
 
+data class ImportPaymentReconciliationRequest(
+    val providerAccountId: UUID,
+    val startDate: LocalDate,
+    val endDate: LocalDate,
+    val currency: String = "TZS",
+)
+
+data class PaymentReconciliationImportResponse(
+    val importId: UUID,
+    val providerAccountId: UUID,
+    val status: String,
+    val replayed: Boolean = false,
+)
+
 data class PaymentWebhookReceipt(
     val providerEventId: String,
     val transactionId: UUID?,
-    val status: String,
+    val status: PaymentStatus,
     val replayed: Boolean,
 )
 
@@ -173,3 +230,8 @@ class PaymentRejectedException(message: String) :
 
 class PaymentProviderUnavailableException(message: String) :
     PaymentException(message, HttpStatus.SERVICE_UNAVAILABLE, "PAYMENT_PROVIDER_UNAVAILABLE")
+
+@NamedInterface("api")
+data class PaymentNightAuditSummary(
+    val nonTerminalTransactions: Int,
+)

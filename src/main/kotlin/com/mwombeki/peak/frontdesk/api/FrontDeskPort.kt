@@ -9,6 +9,11 @@ interface FrontDeskPort {
     fun createWalkIn(propertyId: UUID, request: WalkInRequest): FrontDeskMutationReceipt
     fun checkOut(propertyId: UUID, stayId: UUID, request: CheckoutRequest): FrontDeskMutationReceipt
     fun checkOutWithFiscalOverride(propertyId: UUID, stayId: UUID, request: CheckoutRequest): FrontDeskMutationReceipt
+    fun checkOutWithUnpaidOverride(
+        propertyId: UUID,
+        stayId: UUID,
+        request: UnpaidCheckoutOverrideRequest,
+    ): FrontDeskMutationReceipt
     fun listStays(propertyId: UUID): List<StayResponse>
     fun getStay(propertyId: UUID, stayId: UUID): StayResponse?
 }

@@ -13,6 +13,9 @@ import com.mwombeki.peak.frontdesk.api.FrontDeskNotFoundException
 import com.mwombeki.peak.frontdesk.api.FrontDeskPort
 import com.mwombeki.peak.frontdesk.api.StayResponse
 import com.mwombeki.peak.frontdesk.api.WalkInRequest
+import com.mwombeki.peak.frontdesk.api.UnpaidCheckoutOverrideRequest
+import com.mwombeki.peak.fiscal.api.FiscalStatusPort
+import com.mwombeki.peak.property.api.PropertyOperationsPort
 import com.mwombeki.peak.reliability.api.IdempotencyCommand
 import com.mwombeki.peak.reliability.api.IdempotencyPort
 import com.mwombeki.peak.reliability.api.IdempotencyReservation
@@ -21,11 +24,11 @@ import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.reservations.api.GuestIdentityReadinessPort
 import com.mwombeki.peak.reservations.api.ReservationPort
+import com.mwombeki.peak.reservations.api.ReservationTransitionPort
 import com.mwombeki.peak.shared.context.TenantActor
 import com.mwombeki.peak.shared.context.TenantRequestContext
 import io.micrometer.core.instrument.MeterRegistry
 import java.sql.ResultSet
-import java.time.LocalDate
 import java.util.UUID
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.JdbcTemplate
@@ -38,8 +41,11 @@ class FrontDeskService(
     private val jdbcTemplate: JdbcTemplate,
     private val tenantRequestContext: TenantRequestContext,
     private val reservationPort: ReservationPort,
+    private val reservationTransitionPort: ReservationTransitionPort,
+    private val propertyOperationsPort: PropertyOperationsPort,
     private val guestIdentityReadinessPort: GuestIdentityReadinessPort,
     private val billingPort: BillingPort,
+    private val fiscalStatusPort: FiscalStatusPort,
     private val idempotencyPort: IdempotencyPort,
     private val auditPort: AuditPort,
     private val outboxPort: OutboxPort,
@@ -112,6 +118,108 @@ class FrontDeskService(
         )
     }
 
+    override fun checkOutWithUnpaidOverride(
+        propertyId: UUID,
+        stayId: UUID,
+        request: UnpaidCheckoutOverrideRequest,
+    ): FrontDeskMutationReceipt {
+        return mutate(
+            propertyId = propertyId,
+            operationType = "frontdesk.checkout.unpaid_override",
+            requestPayload = mapOf("stayId" to stayId, "request" to request),
+            resourceType = STAYS,
+            replayType = FrontDeskMutationReceipt::class.java,
+        ) { actor, idempotencyKeyId ->
+            val reason = request.reason.normalizedRequired("reason")
+            require(reason.length in 10..500) {
+                "Unpaid checkout override reason must be between 10 and 500 characters"
+            }
+            val stay = requireStay(
+                actor.tenantId,
+                propertyId,
+                stayId,
+                lock = true,
+            )
+            if (stay.status != "checked_in") {
+                throw FrontDeskConflictException(
+                    "Only checked-in stays can be checked out",
+                )
+            }
+            val financialState = billingPort.checkoutFinancialState(
+                actor.tenantId,
+                propertyId,
+                stay.reservationId,
+            )
+            require(financialState.balanceDue > java.math.BigDecimal.ZERO) {
+                "Unpaid checkout override requires an outstanding balance"
+            }
+            jdbcTemplate.update(
+                """
+                INSERT INTO unpaid_checkout_overrides (
+                    id, tenant_id, property_id, stay_id, reservation_id,
+                    folio_id, approved_by, reason, outstanding_amount
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+                UUID.randomUUID(),
+                actor.tenantId,
+                propertyId,
+                stayId,
+                stay.reservationId,
+                financialState.folioId,
+                actor.tenantUserId,
+                reason,
+                financialState.balanceDue,
+            )
+            jdbcTemplate.update(
+                """
+                UPDATE stays
+                SET status = 'checked_out',
+                    check_out_time = now(),
+                    updated_at = now()
+                WHERE tenant_id = ? AND id = ? AND status = 'checked_in'
+                """.trimIndent(),
+                actor.tenantId,
+                stayId,
+            )
+            reservationTransitionPort.markCheckedOut(
+                actor.tenantId,
+                propertyId,
+                stay.reservationId,
+            )
+            propertyOperationsPort.markRoomVacantDirty(
+                actor.tenantId,
+                propertyId,
+                stay.roomId,
+            )
+            recordSideEffects(
+                tenantId = actor.tenantId,
+                propertyId = propertyId,
+                action = "frontdesk.checked_out_with_unpaid_override",
+                eventType = "frontdesk.checked_out_with_unpaid_override",
+                aggregateId = stayId,
+                payload = mapOf(
+                    "propertyId" to propertyId,
+                    "reservationId" to stay.reservationId,
+                    "stayId" to stayId,
+                    "folioId" to financialState.folioId,
+                    "outstandingAmount" to financialState.balanceDue,
+                    "reason" to reason,
+                ),
+                idempotencyKeyId = idempotencyKeyId,
+            )
+            FrontDeskMutationReceipt(
+                propertyId = propertyId,
+                reservationId = stay.reservationId,
+                stayId = stayId,
+                folioId = financialState.folioId,
+                status = "checked_out",
+                changed = true,
+                replayed = false,
+            )
+        }
+    }
+
     override fun listStays(propertyId: UUID): List<StayResponse> {
         return read(propertyId) { actor ->
             jdbcTemplate.query(
@@ -142,7 +250,11 @@ class FrontDeskService(
         requestedRoomId: UUID?,
         idempotencyKeyId: UUID,
     ): FrontDeskMutationReceipt {
-        val reservation = requireReservationForCheckIn(actor.tenantId, propertyId, reservationId)
+        val reservation = reservationTransitionPort.requireCheckInSnapshot(
+            actor.tenantId,
+            propertyId,
+            reservationId,
+        )
         guestIdentityReadinessPort.requireReadyInCurrentTransaction(
             actor.tenantId,
             propertyId,
@@ -150,48 +262,19 @@ class FrontDeskService(
         )
         val roomId = requestedRoomId ?: reservation.roomId
             ?: throw FrontDeskConflictException("Room assignment is required before check-in")
-        requireRoomAssignable(actor.tenantId, propertyId, reservation.roomTypeId, roomId)
-        val stayId = UUID.randomUUID()
-        jdbcTemplate.update(
-            """
-            UPDATE reservations
-            SET status = 'checked_in',
-                actual_check_in_at = now(),
-                updated_at = now()
-            WHERE tenant_id = ?
-              AND property_id = ?
-              AND id = ?
-              AND status = 'confirmed'
-            """.trimIndent(),
+        propertyOperationsPort.requireAssignableRoom(
             actor.tenantId,
             propertyId,
-            reservationId,
-        )
-        jdbcTemplate.update(
-            """
-            UPDATE reservation_rooms
-            SET status = 'checked_in',
-                room_id = ?,
-                updated_at = now()
-            WHERE tenant_id = ?
-              AND reservation_id = ?
-              AND id = ?
-              AND status = 'reserved'
-            """.trimIndent(),
+            reservation.roomTypeId,
             roomId,
-            actor.tenantId,
-            reservationId,
-            reservation.reservationRoomId,
         )
-        jdbcTemplate.update(
-            """
-            UPDATE reservation_room_nights
-            SET room_id = ?, updated_at = now()
-            WHERE tenant_id = ? AND reservation_room_id = ?
-            """.trimIndent(),
-            roomId,
-            actor.tenantId,
-            reservation.reservationRoomId,
+        val stayId = UUID.randomUUID()
+        reservationTransitionPort.markCheckedIn(
+            tenantId = actor.tenantId,
+            propertyId = propertyId,
+            reservationId = reservationId,
+            reservationRoomId = reservation.reservationRoomId,
+            roomId = roomId,
         )
         jdbcTemplate.update(
             """
@@ -203,14 +286,7 @@ class FrontDeskService(
             reservationId,
             roomId,
         )
-        jdbcTemplate.update(
-            """
-            UPDATE rooms
-            SET status = 'occupied',
-                last_status_changed_at = now(),
-                updated_at = now()
-            WHERE tenant_id = ? AND property_id = ? AND id = ?
-            """.trimIndent(),
+        propertyOperationsPort.markRoomOccupied(
             actor.tenantId,
             propertyId,
             roomId,
@@ -266,7 +342,14 @@ class FrontDeskService(
             if (!financialState.hasIssuedInvoice) {
                 throw FrontDeskConflictException("Checkout requires an issued invoice")
             }
-            if (!financialState.hasAcceptedFiscalReceipt) {
+            val hasAcceptedFiscalReceipt = financialState.invoiceId?.let {
+                fiscalStatusPort.hasAcceptedReceipt(
+                    actor.tenantId,
+                    propertyId,
+                    it,
+                )
+            } == true
+            if (!hasAcceptedFiscalReceipt) {
                 if (!allowFiscalOverride) {
                     throw FrontDeskConflictException("Checkout requires an accepted fiscal receipt")
                 }
@@ -287,43 +370,18 @@ class FrontDeskService(
                 actor.tenantId,
                 stayId,
             )
-            jdbcTemplate.update(
-                """
-                UPDATE reservations
-                SET status = 'checked_out',
-                    actual_check_out_at = now(),
-                    updated_at = now()
-                WHERE tenant_id = ?
-                  AND property_id = ?
-                  AND id = ?
-                """.trimIndent(),
+            reservationTransitionPort.markCheckedOut(
                 actor.tenantId,
                 propertyId,
                 stay.reservationId,
             )
-            jdbcTemplate.update(
-                """
-                UPDATE reservation_rooms
-                SET status = 'checked_out', updated_at = now()
-                WHERE tenant_id = ? AND reservation_id = ? AND status = 'checked_in'
-                """.trimIndent(),
-                actor.tenantId,
-                stay.reservationId,
-            )
-            jdbcTemplate.update(
-                """
-                UPDATE rooms
-                SET status = 'vacant_dirty',
-                    last_status_changed_at = now(),
-                    updated_at = now()
-                WHERE tenant_id = ? AND property_id = ? AND id = ?
-                """.trimIndent(),
+            propertyOperationsPort.markRoomVacantDirty(
                 actor.tenantId,
                 propertyId,
                 stay.roomId,
             )
             billingPort.closeFolio(actor.tenantId, propertyId, financialState.folioId)
-            val eventType = if (allowFiscalOverride && !financialState.hasAcceptedFiscalReceipt) {
+            val eventType = if (allowFiscalOverride && !hasAcceptedFiscalReceipt) {
                 "frontdesk.checked_out_with_fiscal_override"
             } else {
                 "frontdesk.checked_out"
@@ -339,7 +397,7 @@ class FrontDeskService(
                     "reservationId" to stay.reservationId,
                     "stayId" to stayId,
                     "folioId" to financialState.folioId,
-                    "fiscalOverride" to (allowFiscalOverride && !financialState.hasAcceptedFiscalReceipt),
+                    "fiscalOverride" to (allowFiscalOverride && !hasAcceptedFiscalReceipt),
                     "reason" to request.reason,
                 ),
                 idempotencyKeyId = idempotencyKeyId,
@@ -353,77 +411,6 @@ class FrontDeskService(
                 changed = true,
                 replayed = false,
             )
-        }
-    }
-
-    private fun requireReservationForCheckIn(
-        tenantId: UUID,
-        propertyId: UUID,
-        reservationId: UUID,
-    ): ReservationCheckInRecord {
-        return jdbcTemplate.query(
-            """
-            SELECT r.status, r.check_in_date, r.check_out_date, rr.id AS reservation_room_id,
-                   rr.room_type_id, rr.room_id, rr.folio_id
-            FROM reservations r
-            JOIN reservation_rooms rr ON rr.tenant_id = r.tenant_id AND rr.reservation_id = r.id
-            WHERE r.tenant_id = ?
-              AND r.property_id = ?
-              AND r.id = ?
-              AND r.deleted_at IS NULL
-            FOR UPDATE OF r, rr
-            """.trimIndent(),
-            { rs, _ ->
-                ReservationCheckInRecord(
-                    status = rs.getString("status"),
-                    checkInDate = rs.getObject("check_in_date", LocalDate::class.java),
-                    checkOutDate = rs.getObject("check_out_date", LocalDate::class.java),
-                    reservationRoomId = rs.getObject("reservation_room_id", UUID::class.java),
-                    roomTypeId = rs.getObject("room_type_id", UUID::class.java),
-                    roomId = rs.getObject("room_id", UUID::class.java),
-                    folioId = rs.getObject("folio_id", UUID::class.java),
-                )
-            },
-            tenantId,
-            propertyId,
-            reservationId,
-        ).singleOrNull()?.also {
-            if (it.status != "confirmed") {
-                throw FrontDeskConflictException("Reservation is ${it.status} and cannot be checked in")
-            }
-            if (it.folioId == null) {
-                throw FrontDeskConflictException("Reservation does not have an open folio")
-            }
-        } ?: throw FrontDeskNotFoundException("Reservation was not found")
-    }
-
-    private fun requireRoomAssignable(
-        tenantId: UUID,
-        propertyId: UUID,
-        roomTypeId: UUID,
-        roomId: UUID,
-    ) {
-        val exists = jdbcTemplate.queryForObject(
-            """
-            SELECT EXISTS (
-                SELECT 1
-                FROM rooms
-                WHERE tenant_id = ?
-                  AND property_id = ?
-                  AND room_type_id = ?
-                  AND id = ?
-                  AND status = 'vacant_clean'
-                  AND deleted_at IS NULL
-            )
-            """.trimIndent(),
-            Boolean::class.java,
-            tenantId,
-            propertyId,
-            roomTypeId,
-            roomId,
-        ) == true
-        if (!exists) {
-            throw FrontDeskConflictException("Room is not assignable for check-in")
         }
     }
 
@@ -576,16 +563,6 @@ class FrontDeskService(
             folioId = rs.getObject("folio_id", UUID::class.java),
         )
     }
-
-    private data class ReservationCheckInRecord(
-        val status: String,
-        val checkInDate: LocalDate,
-        val checkOutDate: LocalDate,
-        val reservationRoomId: UUID,
-        val roomTypeId: UUID,
-        val roomId: UUID?,
-        val folioId: UUID?,
-    )
 
     private data class StayRecord(
         val id: UUID,

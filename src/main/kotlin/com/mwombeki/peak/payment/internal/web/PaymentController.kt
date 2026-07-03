@@ -6,12 +6,15 @@ import com.mwombeki.peak.payment.api.CollectCashPaymentRequest
 import com.mwombeki.peak.payment.api.ConfigurePaymentProviderRequest
 import com.mwombeki.peak.payment.api.CreatePaymentReconciliationRequest
 import com.mwombeki.peak.payment.api.InitiateMobileMoneyRequest
+import com.mwombeki.peak.payment.api.ImportPaymentReconciliationRequest
 import com.mwombeki.peak.payment.api.OpenCashSessionRequest
 import com.mwombeki.peak.payment.api.PaymentPort
 import com.mwombeki.peak.payment.api.PaymentProviderAccountResponse
 import com.mwombeki.peak.payment.api.PaymentReconciliationResponse
+import com.mwombeki.peak.payment.api.PaymentReconciliationImportResponse
 import com.mwombeki.peak.payment.api.PaymentTransactionResponse
 import com.mwombeki.peak.payment.api.RecordManualMobileMoneyPaymentRequest
+import com.mwombeki.peak.payment.api.RefundPaymentRequest
 import com.mwombeki.peak.payment.api.ReversePaymentRequest
 import java.util.UUID
 import org.springframework.web.bind.annotation.GetMapping
@@ -21,6 +24,7 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.http.ResponseEntity
 
 @RestController
 @RequestMapping("/api/v1/properties/{propertyId}/payments")
@@ -55,7 +59,11 @@ class PaymentController(
     fun initiateMobileMoney(
         @PathVariable propertyId: UUID,
         @RequestBody request: InitiateMobileMoneyRequest,
-    ): PaymentTransactionResponse = paymentPort.initiateMobileMoney(propertyId, request)
+    ): ResponseEntity<PaymentTransactionResponse> {
+        return ResponseEntity.accepted().body(
+            paymentPort.initiateMobileMoney(propertyId, request),
+        )
+    }
 
     @PostMapping("/mobile-money/manual-reference")
     fun recordManualMobileMoney(
@@ -89,6 +97,15 @@ class PaymentController(
         return paymentPort.reversePayment(propertyId, transactionId, request)
     }
 
+    @PostMapping("/transactions/{transactionId}/refund")
+    fun refundPayment(
+        @PathVariable propertyId: UUID,
+        @PathVariable transactionId: UUID,
+        @RequestBody request: RefundPaymentRequest,
+    ): PaymentTransactionResponse {
+        return paymentPort.refundPayment(propertyId, transactionId, request)
+    }
+
     @PostMapping("/provider-accounts")
     fun configureProvider(
         @PathVariable propertyId: UUID,
@@ -112,5 +129,34 @@ class PaymentController(
         @PathVariable reconciliationId: UUID,
     ): PaymentReconciliationResponse {
         return paymentPort.approveReconciliation(propertyId, reconciliationId)
+    }
+
+    @GetMapping("/reconciliations")
+    fun listReconciliations(
+        @PathVariable propertyId: UUID,
+        @RequestParam(defaultValue = "100") limit: Int,
+    ): List<PaymentReconciliationResponse> {
+        return paymentPort.listReconciliations(propertyId, limit)
+    }
+
+    @GetMapping("/reconciliations/{reconciliationId}")
+    fun getReconciliation(
+        @PathVariable propertyId: UUID,
+        @PathVariable reconciliationId: UUID,
+    ): PaymentReconciliationResponse {
+        return paymentPort.getReconciliation(propertyId, reconciliationId)
+            ?: throw com.mwombeki.peak.payment.api.PaymentNotFoundException(
+                "Payment reconciliation was not found",
+            )
+    }
+
+    @PostMapping("/reconciliations/import")
+    fun importReconciliation(
+        @PathVariable propertyId: UUID,
+        @RequestBody request: ImportPaymentReconciliationRequest,
+    ): ResponseEntity<PaymentReconciliationImportResponse> {
+        return ResponseEntity.accepted().body(
+            paymentPort.importReconciliation(propertyId, request),
+        )
     }
 }

@@ -120,6 +120,43 @@ data class PosOrderItemResponse(
     val specialRequest: String?,
 )
 
+data class CreatePosOutletRequest(
+    @field:NotNull
+    val revenueCenterId: UUID,
+    @field:NotBlank
+    @field:Size(max = 120)
+    val name: String,
+    @field:NotBlank
+    val type: String = "RESTAURANT",
+)
+
+data class CreatePosMenuCategoryRequest(
+    @field:NotNull
+    val outletId: UUID,
+    @field:NotBlank
+    @field:Size(max = 120)
+    val name: String,
+)
+
+data class CreatePosMenuItemRequest(
+    @field:NotNull
+    val categoryId: UUID,
+    @field:NotNull
+    val taxRateId: UUID,
+    @field:NotBlank
+    @field:Size(max = 160)
+    val name: String,
+    @field:DecimalMin(value = "0.01")
+    val price: BigDecimal,
+)
+
+data class PosConfigurationResponse(
+    val id: UUID,
+    val propertyId: UUID,
+    val resourceType: String,
+    val replayed: Boolean = false,
+)
+
 open class PosException(
     message: String,
     status: HttpStatus,

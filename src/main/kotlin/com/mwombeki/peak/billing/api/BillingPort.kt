@@ -33,6 +33,13 @@ interface BillingPort {
         idempotencyKeyId: UUID,
     ): UUID
 
+    fun postConfirmedRefund(
+        tenantId: UUID,
+        propertyId: UUID,
+        request: ConfirmedPaymentRefundRequest,
+        idempotencyKeyId: UUID,
+    ): UUID
+
     fun checkoutFinancialState(
         tenantId: UUID,
         propertyId: UUID,
@@ -64,4 +71,43 @@ interface BillingPort {
     fun issueInvoice(propertyId: UUID, folioId: UUID, request: IssueInvoiceRequest): InvoiceResponse
     fun listInvoices(propertyId: UUID): List<InvoiceResponse>
     fun getInvoice(propertyId: UUID, invoiceId: UUID): InvoiceResponse?
+    fun voidInvoice(
+        propertyId: UUID,
+        invoiceId: UUID,
+        request: VoidInvoiceRequest,
+        hasFiscalAcceptance: Boolean,
+    ): InvoiceResponse
+    fun createCreditNote(
+        propertyId: UUID,
+        invoiceId: UUID,
+        request: CreateCreditNoteRequest,
+        fiscalCorrectionRequired: Boolean,
+    ): CreditNoteResponse
+}
+
+@NamedInterface("api")
+interface BillingSnapshotPort {
+    fun nightAuditSummary(
+        tenantId: UUID,
+        propertyId: UUID,
+    ): BillingNightAuditSummary
+
+    fun fiscalInvoiceSnapshot(
+        tenantId: UUID,
+        propertyId: UUID,
+        invoiceId: UUID,
+    ): FiscalInvoiceSnapshot
+
+    fun fiscalCreditNoteSnapshot(
+        tenantId: UUID,
+        propertyId: UUID,
+        creditNoteId: UUID,
+    ): FiscalCreditNoteSnapshot
+
+    fun markCreditNoteFiscalStatus(
+        tenantId: UUID,
+        propertyId: UUID,
+        creditNoteId: UUID,
+        status: String,
+    )
 }

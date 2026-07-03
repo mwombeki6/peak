@@ -15,6 +15,8 @@ data class ConfigureFiscalProviderRequest(
     val deviceSerial: String? = null,
     val branchCode: String? = null,
     val taxpayerIdentifier: String,
+    val sandboxCertifiedAt: Instant? = null,
+    val sandboxEvidenceRef: String? = null,
     val isDefault: Boolean = true,
 )
 
@@ -30,6 +32,7 @@ data class FiscalProviderConfigResponse(
     val taxpayerIdentifier: String,
     val isDefault: Boolean,
     val isActive: Boolean,
+    val sandboxCertifiedAt: Instant? = null,
     val replayed: Boolean = false,
 )
 
@@ -45,6 +48,11 @@ data class FiscalReceiptResponse(
     val status: String,
     val submittedAt: Instant,
     val replayed: Boolean = false,
+)
+
+data class FiscalNightAuditSummary(
+    val issuedInvoicesMissingAcceptedReceipt: Int,
+    val pendingCorrections: Int,
 )
 
 open class FiscalException(

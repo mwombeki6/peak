@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'echo "Phase 2 acceptance failed at line $LINENO." >&2' ERR
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/ops/production/.env}"
@@ -424,11 +425,11 @@ jq -e '.isReady == true and (.missingRequirements | length == 0)' <<<"$API_BODY"
 
 api POST "/api/v1/communication/notifications" "$tenant_token" 200 \
   "notification-send" "$(
-    jq -nc --arg property "$property_id" --arg recipient "$contact_email" \
+    jq -nc --arg property "$property_id" --arg channel "$channel_id" \
       '{
         propertyId:$property,
-        channel:"EMAIL",
-        recipient:$recipient,
+        contactChannelId:$channel,
+        purpose:"operational_reports",
         subject:"Phase 2 acceptance",
         content:"Phase 2 communication delivery accepted."
       }'

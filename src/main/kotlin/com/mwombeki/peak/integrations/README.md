@@ -1,15 +1,21 @@
 # Integrations Module
 
-Integrations owns external identity-provider adapters. It currently implements
-the NIDA verification adapter contract owned by reservations. It does not own
-guest identity records, tenant onboarding, platform governance, user
-management, payments, fiscalization, or settlement accounting.
+Integrations owns concrete external provider adapters. Provider SPIs and
+business state remain in their payment, fiscal, and reservations APIs.
 
 ## V1 Boundary
 
 The public Booking Engine is outside V1 and has no controller or route
 permission. Its existing schema is dormant for a later phase. Payment and
-fiscal provider workflows live in their dedicated business modules.
+fiscal orchestration lives in the dedicated business modules.
+
+## Payment And Fiscal
+
+- ClickPesa: token cache, USSD collection, status query, checksum webhook, and
+  statement query.
+- Signed fiscal simulator: deterministic non-production acceptance scenarios.
+- HTTP fiscal adapter: production-neutral boundary pending an approved,
+  certified TRA vendor.
 
 ## NIDA Verification
 

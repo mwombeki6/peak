@@ -20,12 +20,16 @@ peak:
     invitation:
       acceptance-base-url: ${PEAK_INVITATION_ACCEPTANCE_BASE_URL:}
   payment:
+    production-approved-provider-codes: ${PEAK_PAYMENT_PRODUCTION_APPROVED_PROVIDER_CODES:}
     providers:
       contract-mock:
         enabled: false
   fiscal:
+    production-approved-provider-codes: ${PEAK_FISCAL_PRODUCTION_APPROVED_PROVIDER_CODES:}
     providers:
       contract-mock:
+        enabled: false
+      signed-simulator:
         enabled: false
   guest-identity:
     hash-key: ${PEAK_GUEST_IDENTITY_HASH_KEY:}

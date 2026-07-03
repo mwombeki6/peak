@@ -10,6 +10,10 @@ data class RunNightAuditRequest(
     val auditDate: LocalDate? = null,
 )
 
+data class OverrideNightAuditIssueRequest(
+    val reason: String,
+)
+
 data class NightAuditIssueResponse(
     val id: UUID,
     val runId: UUID,
@@ -19,6 +23,7 @@ data class NightAuditIssueResponse(
     val message: String,
     val blocking: Boolean,
     val resolvedAt: Instant?,
+    val resolutionNote: String? = null,
 )
 
 data class NightAuditRunResponse(

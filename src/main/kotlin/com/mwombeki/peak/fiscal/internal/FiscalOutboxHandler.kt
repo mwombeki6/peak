@@ -1,5 +1,10 @@
 package com.mwombeki.peak.fiscal.internal
 
+import com.mwombeki.peak.billing.api.BillingSnapshotPort
+import com.mwombeki.peak.fiscal.api.FiscalInvoiceItem
+import com.mwombeki.peak.fiscal.api.FiscalProvider
+import com.mwombeki.peak.fiscal.api.FiscalSubmissionCommand
+import com.mwombeki.peak.fiscal.api.FiscalSubmissionResult
 import com.mwombeki.peak.reliability.api.ClaimedOutboxEvent
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventHandler
@@ -24,7 +29,8 @@ class FiscalOutboxHandler(
     private val objectMapper: ObjectMapper,
     private val secretResolver: SecretReferenceResolver,
     private val meterRegistry: MeterRegistry,
-    adapters: List<FiscalProviderAdapter>,
+    private val billingSnapshotPort: BillingSnapshotPort,
+    adapters: List<FiscalProvider>,
 ) : OutboxEventHandler {
     private val adaptersByCode = adapters.associateBy { it.providerCode }
 
@@ -117,39 +123,18 @@ class FiscalOutboxHandler(
         invoiceId: UUID,
         outboxEventId: UUID,
     ): FiscalSubmissionWork? {
-        val invoice = jdbcTemplate.query(
-            """
-            SELECT id, invoice_number_formatted, currency_code, subtotal,
-                   vat_total, service_charge, tourism_levy, total, status
-            FROM invoices
-            WHERE tenant_id = ?
-              AND property_id = ?
-              AND id = ?
-              AND deleted_at IS NULL
-            FOR UPDATE
-            """.trimIndent(),
-            { rs, _ ->
-                InvoiceSnapshot(
-                    id = rs.getObject("id", UUID::class.java),
-                    number = rs.getString("invoice_number_formatted"),
-                    currency = rs.getString("currency_code").trim(),
-                    subtotal = rs.getBigDecimal("subtotal").money(),
-                    taxTotal = rs.getBigDecimal("vat_total")
-                        .add(rs.getBigDecimal("service_charge"))
-                        .add(rs.getBigDecimal("tourism_levy"))
-                        .money(),
-                    total = rs.getBigDecimal("total").money(),
-                    status = rs.getString("status"),
-                )
-            },
+        val invoice = billingSnapshotPort.fiscalInvoiceSnapshot(
             tenantId,
             propertyId,
             invoiceId,
-        ).singleOrNull() ?: error("Fiscal invoice was not found")
+        )
+        if (invoice.status == "voided") {
+            return null
+        }
         require(invoice.status in setOf("issued", "sent", "paid")) {
             "Only issued invoices can be fiscalized"
         }
-        require(!invoice.number.isNullOrBlank()) {
+        require(invoice.number.isNotBlank()) {
             "Invoice number is required before fiscalization"
         }
 
@@ -229,26 +214,13 @@ class FiscalOutboxHandler(
             )
         }
 
-        val items = jdbcTemplate.query(
-            """
-            SELECT description, amount, vat_amount
-            FROM invoice_items
-            WHERE tenant_id = ?
-              AND invoice_id = ?
-              AND status = 'POSTED'
-              AND is_reversed = false
-            ORDER BY created_at, id
-            """.trimIndent(),
-            { rs, _ ->
+        val items = invoice.items.map {
                 FiscalInvoiceItem(
-                    description = rs.getString("description"),
-                    amount = rs.getBigDecimal("amount").money(),
-                    taxAmount = rs.getBigDecimal("vat_amount").money(),
+                    description = it.description,
+                    amount = it.amount.money(),
+                    taxAmount = it.taxAmount.money(),
                 )
-            },
-            tenantId,
-            invoiceId,
-        )
+            }
         require(items.isNotEmpty()) {
             "Fiscal invoice has no posted items"
         }
@@ -299,7 +271,7 @@ class FiscalOutboxHandler(
             deviceSerial = config.deviceSerial,
             taxpayerIdentifier = config.taxpayerIdentifier,
             invoiceId = invoiceId,
-            invoiceNumber = requireNotNull(invoice.number),
+            invoiceNumber = invoice.number,
             currency = invoice.currency,
             subtotal = invoice.subtotal,
             taxTotal = invoice.taxTotal,
@@ -438,16 +410,6 @@ class FiscalOutboxHandler(
     }
 
     private fun BigDecimal.money(): BigDecimal = setScale(2, RoundingMode.HALF_UP)
-
-    private data class InvoiceSnapshot(
-        val id: UUID,
-        val number: String?,
-        val currency: String,
-        val subtotal: BigDecimal,
-        val taxTotal: BigDecimal,
-        val total: BigDecimal,
-        val status: String,
-    )
 
     private data class FiscalConfig(
         val id: UUID,

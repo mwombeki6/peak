@@ -7,6 +7,9 @@
 - [ ] Deploy image is identified by commit SHA or registry digest.
 - [ ] `./gradlew test` report is retained.
 - [ ] Flyway validates from an empty PostgreSQL 18 database through the expected version.
+- [ ] V40 payment data upgrades to the V41 canonical lifecycle.
+- [ ] Modulith dependency verification and required integration tests pass with
+      no skipped results.
 - [ ] `podman compose ... config` and `validate-production-env.sh` pass.
 
 ## Security Evidence
@@ -17,7 +20,7 @@
 - [ ] API, worker, migrator, and support database credentials are distinct.
 - [ ] Envelope, guest identity, provider, webhook, database, and Keycloak
       secrets are loaded from the approved secret store.
-- [ ] Active payment/fiscal `contract_mock` configurations are absent.
+- [ ] Active payment/fiscal mocks and fiscal simulators are absent.
 - [ ] Provider endpoints use certified hosts present in the exact outbound
       allowlist, and the host egress policy permits only required destinations.
 - [ ] API and Keycloak bind only to loopback; the edge proxy terminates TLS and
@@ -39,6 +42,8 @@
 
 - [ ] Communication HTTP gateway contract is certified.
 - [ ] Mobile-money canonical gateway and signed webhook contract are certified.
+- [ ] Protected ClickPesa sandbox evidence covers USSD push, status query,
+      checksum callback, duplicate callback, and statement reconciliation.
 - [ ] Fiscal gateway is approved for the selected TRA/EFD/VFD integration.
 - [ ] Provider timeouts, retry policy, idempotency, and reconciliation procedure
       are accepted by operations and finance.
@@ -50,8 +55,12 @@
 - [ ] Phase 1 security/runtime regression plan passes.
 - [ ] Phase 2 property/administration acceptance passes.
 - [ ] Phase 3 end-to-end and concurrency plan passes.
+- [ ] Phase 3 Podman evidence uses Keycloak plus separate API/worker roles and
+      the signed fiscal simulator.
 - [ ] Release image is deployed to staging and `smoke-test.sh` passes.
 - [ ] Production migration exits successfully before API/worker rollout.
 - [ ] First production readiness and smoke checks pass.
 - [ ] Image SHA, migration version, test evidence, operator, and rollout time
       are recorded.
+- [ ] Accepted commit SHA and immutable image digest are recorded after the
+      worktree is clean.

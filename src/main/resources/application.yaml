@@ -53,6 +53,11 @@ peak:
       cleanup-interval-ms: ${PEAK_REALTIME_JOURNAL_CLEANUP_INTERVAL_MS:60000}
   payment:
     providers:
+      clickpesa:
+        connect-timeout: ${PEAK_CLICKPESA_CONNECT_TIMEOUT:3s}
+        request-timeout: ${PEAK_CLICKPESA_REQUEST_TIMEOUT:15s}
+        token-ttl: ${PEAK_CLICKPESA_TOKEN_TTL:1h}
+        token-refresh-skew: ${PEAK_CLICKPESA_TOKEN_REFRESH_SKEW:5m}
       http-gateway:
         connect-timeout: ${PEAK_PAYMENT_HTTP_CONNECT_TIMEOUT:3s}
         request-timeout: ${PEAK_PAYMENT_HTTP_REQUEST_TIMEOUT:15s}

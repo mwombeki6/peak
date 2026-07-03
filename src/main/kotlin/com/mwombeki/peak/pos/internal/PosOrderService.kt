@@ -5,6 +5,7 @@ import com.mwombeki.peak.billing.api.PostChargeRequest
 import com.mwombeki.peak.payment.api.CollectPosCashPaymentRequest
 import com.mwombeki.peak.payment.api.InitiatePosMobileMoneyRequest
 import com.mwombeki.peak.payment.api.PaymentPort
+import com.mwombeki.peak.payment.api.PaymentStatus
 import com.mwombeki.peak.pos.api.AddPosOrderItemRequest
 import com.mwombeki.peak.pos.api.CreatePosOrderRequest
 import com.mwombeki.peak.pos.api.PosNotFoundException
@@ -276,8 +277,8 @@ class PosOrderService(
             ),
             idempotencyKeyId,
         )
-        check(transaction.status == "confirmed") {
-            "Cash payment was not confirmed"
+        check(transaction.status == PaymentStatus.POSTED) {
+            "Cash payment was not posted"
         }
         val orderUpdated = jdbcTemplate.update(
             """

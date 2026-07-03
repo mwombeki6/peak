@@ -3,13 +3,17 @@ package com.mwombeki.peak.fiscal.internal
 import com.mwombeki.peak.audit.api.AuditPort
 import com.mwombeki.peak.audit.api.AuditResource
 import com.mwombeki.peak.audit.api.TenantAuditEvent
+import com.mwombeki.peak.billing.api.BillingSnapshotPort
 import com.mwombeki.peak.fiscal.api.ConfigureFiscalProviderRequest
 import com.mwombeki.peak.fiscal.api.FiscalConflictException
 import com.mwombeki.peak.fiscal.api.FiscalNotFoundException
 import com.mwombeki.peak.fiscal.api.FiscalPort
 import com.mwombeki.peak.fiscal.api.FiscalProviderConfigResponse
+import com.mwombeki.peak.fiscal.api.FiscalProvider
 import com.mwombeki.peak.fiscal.api.FiscalReceiptResponse
 import com.mwombeki.peak.fiscal.api.FiscalRejectedException
+import com.mwombeki.peak.fiscal.api.FiscalNightAuditSummary
+import com.mwombeki.peak.fiscal.api.FiscalStatusPort
 import com.mwombeki.peak.reliability.api.IdempotencyCommand
 import com.mwombeki.peak.reliability.api.IdempotencyPort
 import com.mwombeki.peak.reliability.api.IdempotencyReservation
@@ -22,8 +26,10 @@ import com.mwombeki.peak.shared.outbound.OutboundEndpointPolicy
 import com.mwombeki.peak.shared.secrets.SecretReferenceResolver
 import java.net.URI
 import java.sql.ResultSet
+import java.sql.Timestamp
 import java.util.UUID
 import io.micrometer.core.instrument.MeterRegistry
+import org.springframework.core.env.Environment
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
@@ -42,9 +48,85 @@ class FiscalService(
     private val secretResolver: SecretReferenceResolver,
     private val outboundEndpointPolicy: OutboundEndpointPolicy,
     private val meterRegistry: MeterRegistry,
-    adapters: List<FiscalProviderAdapter>,
-) : FiscalPort {
+    private val billingSnapshotPort: BillingSnapshotPort,
+    private val springEnvironment: Environment,
+    adapters: List<FiscalProvider>,
+) : FiscalPort, FiscalStatusPort {
     private val providerCodes = adapters.mapTo(mutableSetOf()) { it.providerCode }
+
+    override fun hasAcceptedReceipt(
+        tenantId: UUID,
+        propertyId: UUID,
+        invoiceId: UUID,
+    ): Boolean {
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM fiscal_receipts
+                WHERE tenant_id = ?
+                  AND property_id = ?
+                  AND invoice_id = ?
+                  AND status = 'accepted'
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            tenantId,
+            propertyId,
+            invoiceId,
+        ) == true
+    }
+
+    override fun hasFiscalActivity(
+        tenantId: UUID,
+        propertyId: UUID,
+        invoiceId: UUID,
+    ): Boolean {
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM fiscal_receipts
+                WHERE tenant_id = ?
+                  AND property_id = ?
+                  AND invoice_id = ?
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            tenantId,
+            propertyId,
+            invoiceId,
+        ) == true
+    }
+
+    override fun nightAuditSummary(
+        tenantId: UUID,
+        propertyId: UUID,
+    ): FiscalNightAuditSummary {
+        val invoices = billingSnapshotPort.nightAuditSummary(
+            tenantId,
+            propertyId,
+        ).issuedInvoiceIds
+        val missing = invoices.count { invoiceId ->
+            !hasAcceptedReceipt(tenantId, propertyId, invoiceId)
+        }
+        val pendingCorrections = jdbcTemplate.queryForObject(
+            """
+            SELECT COUNT(*)
+            FROM fiscal_corrections
+            WHERE tenant_id = ?
+              AND property_id = ?
+              AND status IN ('pending', 'submitted', 'retry')
+            """.trimIndent(),
+            Int::class.java,
+            tenantId,
+            propertyId,
+        ) ?: 0
+        return FiscalNightAuditSummary(
+            issuedInvoicesMissingAcceptedReceipt = missing,
+            pendingCorrections = pendingCorrections,
+        )
+    }
 
     override fun configureProvider(
         propertyId: UUID,
@@ -62,9 +144,34 @@ class FiscalService(
             require(providerCode in providerCodes) {
                 "Fiscal provider adapter is unavailable for $providerCode"
             }
+            if (springEnvironment.activeProfiles.contains("prod")) {
+                require(providerCode !in NON_PRODUCTION_PROVIDERS) {
+                    "Mock and simulator fiscal providers are forbidden in production"
+                }
+            }
             val environment = request.environment.trim().lowercase()
             require(environment in setOf("sandbox", "production")) {
                 "environment must be sandbox or production"
+            }
+            if (springEnvironment.activeProfiles.contains("prod")) {
+                require(environment == "production") {
+                    "Sandbox fiscal providers are forbidden in production"
+                }
+            }
+            if (environment == "production") {
+                require(
+                    providerCode in springEnvironment.approvedProviderCodes(
+                        "peak.fiscal.production-approved-provider-codes",
+                    ),
+                ) {
+                    "Fiscal provider is not approved for production"
+                }
+                require(
+                    request.sandboxCertifiedAt != null &&
+                            !request.sandboxEvidenceRef.isNullOrBlank(),
+                ) {
+                    "Production fiscal configuration requires sandbox certification evidence"
+                }
             }
             val endpointUrl = request.endpointUrl.normalizedRequired("endpointUrl")
             if (providerCode == HTTP_GATEWAY_PROVIDER) {
@@ -108,9 +215,10 @@ class FiscalService(
                     INSERT INTO fiscal_provider_configs (
                         id, tenant_id, property_id, provider_id, environment,
                         device_serial, branch_code, taxpayer_identifier,
-                        endpoint_url, secret_ref, is_default, is_active
+                        endpoint_url, secret_ref, sandbox_certified_at,
+                        sandbox_evidence_ref, is_default, is_active
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, true)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, true)
                     """.trimIndent(),
                     id,
                     actor.tenantId,
@@ -122,6 +230,8 @@ class FiscalService(
                     request.taxpayerIdentifier.normalizedRequired("taxpayerIdentifier"),
                     endpointUrl,
                     request.secretRef.trim(),
+                    request.sandboxCertifiedAt?.let(Timestamp::from),
+                    request.sandboxEvidenceRef.trimmedOrNull(),
                     request.isDefault,
                 )
             } catch (ex: DuplicateKeyException) {
@@ -429,6 +539,8 @@ class FiscalService(
             taxpayerIdentifier = rs.getString("taxpayer_identifier"),
             isDefault = rs.getBoolean("is_default"),
             isActive = rs.getBoolean("is_active"),
+            sandboxCertifiedAt = rs.getTimestamp("sandbox_certified_at")
+                ?.toInstant(),
         )
     }
 
@@ -483,8 +595,20 @@ class FiscalService(
 
     private fun String?.trimmedOrNull(): String? = this?.trim()?.takeIf(String::isNotEmpty)
 
+    private fun Environment.approvedProviderCodes(property: String): Set<String> {
+        return getProperty(property, "")
+            .split(',')
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .toSet()
+    }
+
     private companion object {
         const val HTTP_GATEWAY_PROVIDER = "http_gateway"
+        val NON_PRODUCTION_PROVIDERS = setOf(
+            "contract_mock",
+            "signed_simulator",
+        )
         const val FISCAL_PROVIDER_CONFIGS = "fiscal_provider_configs"
         const val FISCAL_RECEIPTS = "fiscal_receipts"
         const val FISCAL_RETRY_REQUESTED = "fiscal.receipt.retry.requested"
@@ -493,7 +617,7 @@ class FiscalService(
             SELECT fpc.id, fpc.property_id, fp.provider_code,
                    fp.name AS provider_name, fpc.environment, fpc.endpoint_url,
                    fpc.device_serial, fpc.branch_code, fpc.taxpayer_identifier,
-                   fpc.is_default, fpc.is_active
+                   fpc.is_default, fpc.is_active, fpc.sandbox_certified_at
             FROM fiscal_provider_configs fpc
             JOIN fiscal_providers fp ON fp.id = fpc.provider_id
         """.trimIndent()

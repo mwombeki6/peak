@@ -190,6 +190,10 @@ tasks.withType<Test>().configureEach {
     useJUnitPlatform()
 }
 
+tasks.bootJar {
+    archiveFileName.set("peak.jar")
+}
+
 tasks.register<Exec>("podmanComposeUp") {
     group = "application"
     description = "Starts Peak local infrastructure with Podman Compose."

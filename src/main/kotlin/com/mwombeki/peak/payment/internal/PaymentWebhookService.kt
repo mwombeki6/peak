@@ -8,6 +8,9 @@ import com.mwombeki.peak.billing.api.ConfirmedPaymentRequest
 import com.mwombeki.peak.payment.api.PaymentConflictException
 import com.mwombeki.peak.payment.api.PaymentNotFoundException
 import com.mwombeki.peak.payment.api.PaymentRejectedException
+import com.mwombeki.peak.payment.api.PaymentProvider
+import com.mwombeki.peak.payment.api.PaymentStatus
+import com.mwombeki.peak.payment.api.ProviderWebhookNotification
 import com.mwombeki.peak.payment.api.PaymentWebhookPort
 import com.mwombeki.peak.payment.api.PaymentWebhookReceipt
 import com.mwombeki.peak.reliability.api.OutboxDestination
@@ -24,12 +27,14 @@ import java.security.MessageDigest
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.sql.Timestamp
 import java.util.HexFormat
 import java.util.UUID
 import io.micrometer.core.instrument.MeterRegistry
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.core.env.Environment
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.ObjectMapper
@@ -45,26 +50,21 @@ class PaymentWebhookService(
     private val auditPort: AuditPort,
     private val outboxPort: OutboxPort,
     private val objectMapper: ObjectMapper,
-    adapters: List<PaymentProviderAdapter>,
+    adapters: List<PaymentProvider>,
     private val clock: Clock,
     private val meterRegistry: MeterRegistry,
+    private val environment: Environment,
 ) : PaymentWebhookPort {
     private val adaptersByCode = adapters.associateBy { it.providerCode }
 
     override fun receive(
         providerAccountId: UUID,
-        providerEventId: String,
-        timestamp: String,
-        signature: String,
         payload: String,
     ): PaymentWebhookReceipt {
         meterRegistry.counter("peak.payment.webhook.received").increment()
         return try {
             receiveValidated(
                 providerAccountId,
-                providerEventId,
-                timestamp,
-                signature,
                 payload,
             ).also { receipt ->
                 meterRegistry.counter(
@@ -72,7 +72,7 @@ class PaymentWebhookService(
                     "result",
                     "accepted",
                     "status",
-                    receipt.status,
+                    receipt.status.databaseValue,
                 ).increment()
             }
         } catch (ex: Exception) {
@@ -89,23 +89,10 @@ class PaymentWebhookService(
 
     private fun receiveValidated(
         providerAccountId: UUID,
-        providerEventId: String,
-        timestamp: String,
-        signature: String,
         payload: String,
     ): PaymentWebhookReceipt {
-        require(PROVIDER_EVENT_ID.matches(providerEventId)) {
-            "Provider event id is invalid"
-        }
         require(payload.toByteArray(StandardCharsets.UTF_8).size <= MAX_PAYLOAD_BYTES) {
             "Provider webhook payload exceeds the allowed size"
-        }
-        val receivedAt = timestamp.toLongOrNull()?.let(Instant::ofEpochSecond)
-            ?: throw PaymentRejectedException("Provider timestamp is invalid")
-        require(
-            Duration.between(receivedAt, clock.instant()).abs() <= MAX_WEBHOOK_AGE,
-        ) {
-            "Provider webhook timestamp is outside the accepted replay window"
         }
 
         val originalContext = requestContextHolder.current()
@@ -116,18 +103,44 @@ class PaymentWebhookService(
                 require(scope.active) {
                     "Payment provider account is inactive"
                 }
-                verifySignature(
-                    timestamp = timestamp,
-                    payload = payload,
-                    suppliedSignature = signature,
-                    secret = secretResolver.resolve(scope.webhookSecretRef),
-                )
+                require(scope.providerCode == CLICKPESA_PROVIDER) {
+                    "Only ClickPesa callbacks are accepted by this endpoint"
+                }
                 val adapter = adaptersByCode[scope.providerCode]
                     ?: throw PaymentRejectedException(
                         "Payment provider callback is not supported",
                     )
-                val notification = adapter.parseWebhook(payload)
+                val notification = try {
+                    adapter.verifyAndParseWebhook(
+                        payload = payload,
+                        checksumKey = secretResolver.resolve(
+                            scope.checksumKeySecretRef,
+                        ),
+                        checksumRequired = environment.activeProfiles
+                            .contains("prod"),
+                    )
+                } catch (ex: IllegalArgumentException) {
+                    throw PaymentRejectedException(
+                        ex.message ?: "ClickPesa callback was rejected",
+                    )
+                }
                 validateNotification(notification)
+                require(
+                    notification.clientId == null ||
+                            notification.clientId == scope.clientId,
+                ) {
+                    "ClickPesa callback client identity does not match account"
+                }
+                notification.providerTimestamp?.let { providerTimestamp ->
+                    require(
+                        Duration.between(
+                            providerTimestamp,
+                            clock.instant(),
+                        ).abs() <= MAX_WEBHOOK_AGE,
+                    ) {
+                        "ClickPesa callback is outside the accepted replay window"
+                    }
+                }
 
                 val tenantContext = originalContext.copy(
                     identity = RequestIdentity.Public(
@@ -142,11 +155,20 @@ class PaymentWebhookService(
                 processNotification(
                     scope = scope,
                     providerAccountId = providerAccountId,
-                    providerEventId = providerEventId,
                     notification = notification,
+                    payloadHash = sha256(payload),
                 )
                 },
             )
+        } catch (ex: Exception) {
+            persistVerifiedRejection(
+                providerAccountId = providerAccountId,
+                payload = payload,
+                payloadHash = sha256(payload),
+                originalContext = originalContext,
+                failureType = ex::class.simpleName ?: "WebhookRejected",
+            )
+            throw ex
         } finally {
             requestContextHolder.set(originalContext)
         }
@@ -155,33 +177,30 @@ class PaymentWebhookService(
     private fun processNotification(
         scope: WebhookScope,
         providerAccountId: UUID,
-        providerEventId: String,
         notification: ProviderWebhookNotification,
+        payloadHash: String,
     ): PaymentWebhookReceipt {
         val eventId = UUID.randomUUID()
         val inserted = jdbcTemplate.update(
             """
             INSERT INTO payment_webhook_events (
                 id, tenant_id, provider_account_id, provider_event_id,
-                event_type, payload, status
+                event_type, payload, payload_hash, event_key,
+                provider_timestamp, checksum_method, processing_result, status
             )
-            VALUES (?, ?, ?, ?, 'collection.status', ?::jsonb, 'received')
+            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, 'received', 'received')
             ON CONFLICT (tenant_id, provider_account_id, provider_event_id) DO NOTHING
             """.trimIndent(),
             eventId,
             scope.tenantId,
             providerAccountId,
-            providerEventId,
-            objectMapper.writeValueAsString(
-                notification.metadata + mapOf(
-                    "internalReference" to notification.internalReference,
-                    "providerReference" to notification.providerReference,
-                    "status" to notification.status,
-                    "amount" to notification.amount,
-                    "feeAmount" to notification.feeAmount,
-                    "currency" to notification.currency,
-                ),
-            ),
+            notification.eventKey,
+            notification.eventType,
+            sanitizedPayload(notification),
+            payloadHash,
+            notification.eventKey,
+            notification.providerTimestamp?.let(Timestamp::from),
+            notification.checksumMethod,
         ) == 1
 
         val transaction = requireTransaction(
@@ -190,18 +209,32 @@ class PaymentWebhookService(
             notification.internalReference,
         )
         if (!inserted) {
+            jdbcTemplate.update(
+                """
+                UPDATE payment_webhook_events
+                SET replay_count = replay_count + 1
+                WHERE tenant_id = ?
+                  AND provider_account_id = ?
+                  AND provider_event_id = ?
+                """.trimIndent(),
+                scope.tenantId,
+                providerAccountId,
+                notification.eventKey,
+            )
             return PaymentWebhookReceipt(
-                providerEventId = providerEventId,
+                providerEventId = notification.eventKey,
                 transactionId = transaction.id,
-                status = transaction.status,
+                status = PaymentStatus.fromDatabase(transaction.status),
                 replayed = true,
             )
         }
         require(transaction.propertyId == scope.propertyId) {
             "Payment callback property does not match provider account"
         }
-        require(transaction.amount.money() == notification.amount.money()) {
-            "Payment callback amount does not match transaction"
+        if (notification.status == "posted") {
+            require(transaction.amount.money() == notification.amount.money()) {
+                "Payment callback amount does not match transaction"
+            }
         }
         require(transaction.currency == notification.currency) {
             "Payment callback currency does not match transaction"
@@ -216,15 +249,15 @@ class PaymentWebhookService(
         if (transaction.status in TERMINAL_STATUSES) {
             markEvent(eventId, scope.tenantId, "ignored", null)
             return PaymentWebhookReceipt(
-                providerEventId = providerEventId,
+                providerEventId = notification.eventKey,
                 transactionId = transaction.id,
-                status = transaction.status,
+                status = PaymentStatus.fromDatabase(transaction.status),
                 replayed = true,
             )
         }
 
         val resultStatus = when (notification.status) {
-            "confirmed" -> confirmPayment(
+            "posted" -> confirmPayment(
                 scope = scope,
                 eventId = eventId,
                 transaction = transaction,
@@ -241,7 +274,9 @@ class PaymentWebhookService(
                         failed_at = now(),
                         failure_reason = 'Provider reported collection failure',
                         updated_at = now()
-                    WHERE tenant_id = ? AND id = ? AND status IN ('initiated', 'pending')
+                    WHERE tenant_id = ?
+                      AND id = ?
+                      AND status IN ('created', 'initiated', 'pending')
                     """.trimIndent(),
                     eventId,
                     notification.providerReference,
@@ -299,10 +334,95 @@ class PaymentWebhookService(
             )
         }
         return PaymentWebhookReceipt(
-            providerEventId = providerEventId,
+            providerEventId = notification.eventKey,
             transactionId = transaction.id,
-            status = resultStatus,
+            status = PaymentStatus.fromDatabase(resultStatus),
             replayed = false,
+        )
+    }
+
+    private fun persistVerifiedRejection(
+        providerAccountId: UUID,
+        payload: String,
+        payloadHash: String,
+        originalContext: com.mwombeki.peak.shared.context.RequestContext,
+        failureType: String,
+    ) {
+        try {
+            transactionTemplate.executeWithoutResult {
+                val scope = resolveScope(providerAccountId)
+                if (!scope.active || scope.providerCode != CLICKPESA_PROVIDER) {
+                    return@executeWithoutResult
+                }
+                val adapter = adaptersByCode[scope.providerCode]
+                    ?: return@executeWithoutResult
+                val notification = adapter.verifyAndParseWebhook(
+                    payload = payload,
+                    checksumKey = secretResolver.resolve(
+                        scope.checksumKeySecretRef,
+                    ),
+                    checksumRequired = environment.activeProfiles
+                        .contains("prod"),
+                )
+                val tenantContext = originalContext.copy(
+                    identity = RequestIdentity.Public(
+                        tenantId = scope.tenantId,
+                        propertyId = scope.propertyId,
+                        correlationId = originalContext.correlationId,
+                    ),
+                )
+                requestContextHolder.set(tenantContext)
+                databaseSessionContext.bind(tenantContext.identity)
+                jdbcTemplate.update(
+                    """
+                    INSERT INTO payment_webhook_events (
+                        id, tenant_id, provider_account_id, provider_event_id,
+                        event_type, payload, payload_hash, event_key,
+                        provider_timestamp, checksum_method, processing_result,
+                        status, processed_at, error_message
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, 'failed',
+                            'failed', now(), ?)
+                    ON CONFLICT (
+                        tenant_id,
+                        provider_account_id,
+                        provider_event_id
+                    ) DO NOTHING
+                    """.trimIndent(),
+                    UUID.randomUUID(),
+                    scope.tenantId,
+                    providerAccountId,
+                    notification.eventKey,
+                    notification.eventType,
+                    sanitizedPayload(notification),
+                    payloadHash,
+                    notification.eventKey,
+                    notification.providerTimestamp?.let(Timestamp::from),
+                    notification.checksumMethod,
+                    failureType.take(200),
+                )
+            }
+        } catch (_: Exception) {
+            // Invalid checksums and unavailable accounts are not trusted enough
+            // to persist. The bounded rejection metric remains authoritative.
+        } finally {
+            requestContextHolder.set(originalContext)
+        }
+    }
+
+    private fun sanitizedPayload(
+        notification: ProviderWebhookNotification,
+    ): String {
+        return objectMapper.writeValueAsString(
+            mapOf(
+                "internalReference" to notification.internalReference,
+                "providerReference" to notification.providerReference,
+                "status" to notification.status,
+                "amount" to notification.amount,
+                "feeAmount" to notification.feeAmount,
+                "currency" to notification.currency,
+                "eventType" to notification.eventType,
+            ),
         )
     }
 
@@ -323,16 +443,19 @@ class PaymentWebhookService(
             SET webhook_event_id = ?,
                 provider_reference = ?,
                 fee_amount = ?,
-                status = 'confirmed',
+                provider_status = ?,
+                status = 'posted',
+                posted_at = now(),
                 confirmed_at = now(),
                 updated_at = now()
             WHERE tenant_id = ?
               AND id = ?
-              AND status IN ('initiated', 'pending')
+              AND status IN ('created', 'initiated', 'pending')
             """.trimIndent(),
             eventId,
             notification.providerReference,
             notification.feeAmount.money(),
+            notification.status,
             scope.tenantId,
             transaction.id,
         )
@@ -362,14 +485,14 @@ class PaymentWebhookService(
                 transaction.id,
             )
         }
-        return "confirmed"
+        return "posted"
     }
 
     private fun resolveScope(providerAccountId: UUID): WebhookScope {
         return jdbcTemplate.query(
             """
             SELECT tenant_id, property_id, provider_code,
-                   webhook_secret_ref, account_active
+                   checksum_key_secret_ref, client_id, account_active
             FROM resolve_payment_webhook_scope(?)
             """.trimIndent(),
             { rs, _ ->
@@ -377,7 +500,10 @@ class PaymentWebhookService(
                     tenantId = rs.getObject("tenant_id", UUID::class.java),
                     propertyId = rs.getObject("property_id", UUID::class.java),
                     providerCode = rs.getString("provider_code"),
-                    webhookSecretRef = rs.getString("webhook_secret_ref"),
+                    checksumKeySecretRef = rs.getString(
+                        "checksum_key_secret_ref",
+                    ),
+                    clientId = rs.getString("client_id"),
                     active = rs.getBoolean("account_active"),
                 )
             },
@@ -433,10 +559,12 @@ class PaymentWebhookService(
             """
             UPDATE payment_webhook_events
             SET status = ?,
+                processing_result = ?,
                 processed_at = now(),
                 error_message = ?
             WHERE tenant_id = ? AND id = ?
             """.trimIndent(),
+            status,
             status,
             error,
             tenantId,
@@ -451,8 +579,17 @@ class PaymentWebhookService(
         require(notification.providerReference.length in 3..200) {
             "Provider callback reference is invalid"
         }
-        require(notification.amount > BigDecimal.ZERO) {
-            "Provider callback amount must be positive"
+        require(notification.eventType in setOf("PAYMENT RECEIVED", "PAYMENT FAILED")) {
+            "Provider callback event type is unsupported"
+        }
+        require(notification.status in setOf("posted", "failed")) {
+            "Provider callback status is unsupported"
+        }
+        require(
+            (notification.status == "posted" && notification.amount > BigDecimal.ZERO) ||
+                    (notification.status == "failed" && notification.amount >= BigDecimal.ZERO),
+        ) {
+            "Provider callback amount is invalid"
         }
         require(notification.feeAmount >= BigDecimal.ZERO) {
             "Provider callback fee must not be negative"
@@ -460,25 +597,17 @@ class PaymentWebhookService(
         require(notification.currency == "TZS") {
             "Provider callback currency must be TZS"
         }
+        require(notification.providerTimestamp != null) {
+            "Provider callback timestamp is required"
+        }
     }
 
-    private fun verifySignature(
-        timestamp: String,
-        payload: String,
-        suppliedSignature: String,
-        secret: String,
-    ) {
-        val mac = Mac.getInstance(HMAC_ALGORITHM)
-        mac.init(SecretKeySpec(secret.toByteArray(StandardCharsets.UTF_8), HMAC_ALGORITHM))
-        val expected = mac.doFinal("$timestamp.$payload".toByteArray(StandardCharsets.UTF_8))
-        val supplied = try {
-            HexFormat.of().parseHex(suppliedSignature.trim().lowercase())
-        } catch (ex: IllegalArgumentException) {
-            throw PaymentRejectedException("Provider webhook signature is invalid")
-        }
-        if (!MessageDigest.isEqual(expected, supplied)) {
-            throw PaymentRejectedException("Provider webhook signature is invalid")
-        }
+    private fun sha256(payload: String): String {
+        return HexFormat.of().formatHex(
+            MessageDigest.getInstance("SHA-256").digest(
+                payload.toByteArray(StandardCharsets.UTF_8),
+            ),
+        )
     }
 
     private fun BigDecimal.money(): BigDecimal = setScale(2, RoundingMode.HALF_UP)
@@ -487,7 +616,8 @@ class PaymentWebhookService(
         val tenantId: UUID,
         val propertyId: UUID?,
         val providerCode: String,
-        val webhookSecretRef: String?,
+        val checksumKeySecretRef: String,
+        val clientId: String,
         val active: Boolean,
     )
 
@@ -504,11 +634,18 @@ class PaymentWebhookService(
     )
 
     private companion object {
-        const val HMAC_ALGORITHM = "HmacSHA256"
+        const val CLICKPESA_PROVIDER = "clickpesa"
         const val MAX_PAYLOAD_BYTES = 64 * 1024
         val MAX_WEBHOOK_AGE: Duration = Duration.ofMinutes(5)
-        val PROVIDER_EVENT_ID = Regex("[A-Za-z0-9._:-]{3,200}")
         val INTERNAL_REFERENCE = Regex("PEAK-[A-F0-9]{20}")
-        val TERMINAL_STATUSES = setOf("confirmed", "failed", "reversed", "cancelled")
+        val TERMINAL_STATUSES = setOf(
+            "posted",
+            "failed",
+            "expired",
+            "reversed",
+            "partially_refunded",
+            "refunded",
+            "reconciled",
+        )
     }
 }

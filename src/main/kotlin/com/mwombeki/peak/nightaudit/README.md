@@ -8,7 +8,8 @@ Owns Phase 3 property close checks and blocking issue capture.
 - Record blocking and warning issues in `night_audit_issues`.
 - Report open unpaid folios, missing invoices, missing accepted fiscal receipts,
   pending payments, open POS sessions, and overdue stays.
-- Emit audit and outbox events for completed audit runs.
+- Revalidate live summaries before explicit completion and advance the property
+  business date exactly once.
 - Derive the business date from the property's IANA timezone and configured
   business-day offset.
 
@@ -17,6 +18,8 @@ Owns Phase 3 property close checks and blocking issue capture.
 - `POST /api/v1/properties/{propertyId}/night-audit`: Runs the audit for the current business date.
 - `GET /api/v1/properties/{propertyId}/night-audit`: Lists recent audit runs.
 - `GET /api/v1/properties/{propertyId}/night-audit/{runId}`: Gets details of a specific run and its issues.
+- `POST /api/v1/properties/{propertyId}/night-audit/{runId}/issues/{issueId}/override`
+- `POST /api/v1/properties/{propertyId}/night-audit/{runId}/complete`
 
 ## Operations
 
@@ -30,10 +33,10 @@ Owns Phase 3 property close checks and blocking issue capture.
 
 ## Status Semantics
 
-Runs complete with `completed` when no blocking issues exist. Runs complete with
-`failed` when blocking operational or financial issues require resolution. A
-fiscal override checkout still leaves a night-audit issue until fiscal recovery
-accepts the invoice.
+Runs transition `RUNNING -> BLOCKED/READY -> COMPLETED`. `FAILED` is reserved
+for technical failure. Completion revalidates current state; an open unpaid
+folio cannot be overridden. A fiscal override checkout still blocks until
+fiscal recovery accepts the invoice.
 
 Every attempt is retained. Concurrent requests lock per property/business date,
 and completed or failed attempts are never deleted and recreated.

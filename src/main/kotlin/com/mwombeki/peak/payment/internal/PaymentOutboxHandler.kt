@@ -1,8 +1,12 @@
 package com.mwombeki.peak.payment.internal
 
+import com.mwombeki.peak.payment.api.PaymentProvider
+import com.mwombeki.peak.payment.api.ProviderCollectionCommand
 import com.mwombeki.peak.reliability.api.ClaimedOutboxEvent
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventHandler
+import com.mwombeki.peak.reliability.api.OutboxEventCommand
+import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.shared.secrets.SecretReferenceResolver
@@ -21,9 +25,10 @@ class PaymentOutboxHandler(
     private val jdbcTemplate: JdbcTemplate,
     private val databaseSessionContext: DatabaseSessionContext,
     private val transactionTemplate: TransactionTemplate,
-    adapters: List<PaymentProviderAdapter>,
+    adapters: List<PaymentProvider>,
     private val secretResolver: SecretReferenceResolver,
     private val meterRegistry: MeterRegistry,
+    private val outboxPort: OutboxPort,
 ) : OutboxEventHandler {
     private val adaptersByCode = adapters.associateBy { it.providerCode }
 
@@ -61,7 +66,7 @@ class PaymentOutboxHandler(
                 )
             },
         )
-        if (work.status !in setOf("initiated", "pending")) {
+        if (work.status !in setOf("created", "initiated", "pending")) {
             return
         }
 
@@ -74,11 +79,14 @@ class PaymentOutboxHandler(
                     transactionId = work.transactionId,
                     internalReference = work.internalReference,
                     endpointUrl = work.endpointUrl,
-                    merchantId = work.merchantId,
+                    clientId = work.clientId,
                     payerIdentifier = work.payerIdentifier,
                     amount = work.amount,
                     currency = work.currency,
-                    credential = secretResolver.resolve(work.secretRef),
+                    apiKey = secretResolver.resolve(work.apiKeySecretRef),
+                    checksumKey = secretResolver.resolve(
+                        work.checksumKeySecretRef,
+                    ),
                 ),
             ).also {
                 meterRegistry.counter(
@@ -123,15 +131,31 @@ class PaymentOutboxHandler(
                 """
                 UPDATE payment_transactions
                 SET provider_reference = ?,
+                    provider_status = ?,
                     status = 'pending',
+                    next_status_check_at = now() + interval '15 seconds',
                     updated_at = now()
                 WHERE tenant_id = ?
                   AND id = ?
-                  AND status IN ('initiated', 'pending')
+                  AND status IN ('created', 'initiated', 'pending')
                 """.trimIndent(),
                 result.providerReference,
+                result.providerStatus,
                 tenantId,
                 work.transactionId,
+            )
+            outboxPort.enqueue(
+                OutboxEventCommand(
+                    aggregateType = "payment_transactions",
+                    aggregateId = work.transactionId,
+                    tenantId = tenantId,
+                    propertyId = event.propertyId,
+                    eventType = PAYMENT_STATUS_CHECK_REQUESTED,
+                    destination = OutboxDestination.PAYMENT,
+                    payload = mapOf("transactionId" to work.transactionId),
+                    priority = 3,
+                    availableAt = java.time.Instant.now().plusSeconds(15),
+                ),
             )
         }
     }
@@ -140,8 +164,9 @@ class PaymentOutboxHandler(
         return jdbcTemplate.query(
             """
             SELECT pt.id, pt.internal_reference, pt.payer_identifier, pt.amount,
-                   pt.currency, pt.status, pp.provider_code, ppa.merchant_id,
-                   ppa.endpoint_url, ppa.secret_ref
+                   pt.currency, pt.status, pp.provider_code, ppa.client_id,
+                   ppa.endpoint_url, ppa.api_key_secret_ref,
+                   ppa.checksum_key_secret_ref
             FROM payment_transactions pt
             JOIN payment_provider_accounts ppa
               ON ppa.tenant_id = pt.tenant_id
@@ -165,8 +190,11 @@ class PaymentOutboxHandler(
                     status = rs.getString("status"),
                     providerCode = rs.getString("provider_code"),
                     endpointUrl = rs.getString("endpoint_url"),
-                    merchantId = rs.getString("merchant_id"),
-                    secretRef = rs.getString("secret_ref"),
+                    clientId = rs.getString("client_id"),
+                    apiKeySecretRef = rs.getString("api_key_secret_ref"),
+                    checksumKeySecretRef = rs.getString(
+                        "checksum_key_secret_ref",
+                    ),
                 )
             },
             tenantId,
@@ -183,11 +211,14 @@ class PaymentOutboxHandler(
         val status: String,
         val providerCode: String,
         val endpointUrl: String?,
-        val merchantId: String?,
-        val secretRef: String?,
+        val clientId: String,
+        val apiKeySecretRef: String,
+        val checksumKeySecretRef: String,
     )
 
     private companion object {
         const val PAYMENT_COLLECTION_REQUESTED = "payment.collection.requested"
+        const val PAYMENT_STATUS_CHECK_REQUESTED =
+            "payment.status_check.requested"
     }
 }

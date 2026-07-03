@@ -36,7 +36,12 @@ jobs:
           sudo apt-get install -y podman podman-compose
 
       - name: Validate production compose
-        run: podman compose --env-file ops/production/.env.example -f ops/production/compose.yaml config >/tmp/peak-production-compose.yaml
+        run: |
+          podman compose --env-file ops/production/.env.example -f ops/production/compose.yaml config >/tmp/peak-production-compose.yaml
+          podman compose --env-file ops/production/.env.example \
+            -f ops/production/compose.yaml \
+            -f ops/testing/compose.phase3-acceptance.yaml \
+            config >/tmp/peak-phase3-acceptance-compose.yaml
 
       - name: Validate production environment contract
         run: |
@@ -54,6 +59,8 @@ jobs:
           PEAK_ENVELOPE_KEY_BASE64=cGVhay1jaS1lbnZlbG9wZS1rZXktMzItYnl0ZXMhISE=
           PEAK_PAYMENT_GATEWAY_CREDENTIAL=ci-payment-gateway-credential-1234
           PEAK_PAYMENT_WEBHOOK_SECRET=ci-payment-webhook-secret-1234
+          PEAK_CLICKPESA_API_KEY=ci-clickpesa-api-key-1234
+          PEAK_CLICKPESA_CHECKSUM_KEY=ci-clickpesa-checksum-key-1234
           PEAK_FISCAL_GATEWAY_CREDENTIAL=ci-fiscal-gateway-credential-1234
           PEAK_GUEST_IDENTITY_HASH_KEY=ci-guest-identity-hmac-key-1234567890
           EOF
@@ -68,14 +75,36 @@ jobs:
           python3 -m json.tool ops/testing/Peak-Phase-2.postman_collection.json >/dev/null
           python3 -m json.tool ops/testing/Peak-Phase-3-Guest-Identity.postman_collection.json >/dev/null
           python3 -m json.tool ops/testing/Peak-Phase-3.postman_collection.json >/dev/null
+          python3 -m json.tool ops/observability/phase3-dashboard.json >/dev/null
 
       - name: Validate ops scripts
         run: |
           sh -n ops/scripts/*.sh
           bash -n ops/testing/run-phase2-acceptance.sh
+          bash -n ops/testing/run-phase3-acceptance.sh
+          bash -n ops/testing/run-clickpesa-sandbox-acceptance.sh
+
+      - name: Start Podman API socket for Testcontainers
+        run: |
+          socket="$RUNNER_TEMP/podman.sock"
+          podman system service --time=0 "unix://$socket" >/tmp/podman-service.log 2>&1 &
+          for attempt in $(seq 1 20); do
+            [ -S "$socket" ] && break
+            sleep 1
+          done
+          [ -S "$socket" ]
+          echo "DOCKER_HOST=unix://$socket" >>"$GITHUB_ENV"
+          echo "TESTCONTAINERS_RYUK_DISABLED=true" >>"$GITHUB_ENV"
 
       - name: Run tests
         run: ./gradlew test
+
+      - name: Reject skipped required integration tests
+        run: |
+          if grep -R '<skipped' build/test-results/test/TEST-*IntegrationTests.xml; then
+            echo "A required integration test was skipped" >&2
+            exit 1
+          fi
 
       - name: Validate clean migrations
         run: ./gradlew test --tests '*MigrationValidationIntegrationTests' --rerun-tasks

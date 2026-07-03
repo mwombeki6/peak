@@ -21,6 +21,7 @@ import com.mwombeki.peak.property.api.PropertyManagementInProgressException
 import com.mwombeki.peak.property.api.PropertyManagementNotFoundException
 import com.mwombeki.peak.property.api.PropertyModuleMutationReceipt
 import com.mwombeki.peak.property.api.PropertyMutationReceipt
+import com.mwombeki.peak.property.api.PropertyOperationsPort
 import com.mwombeki.peak.property.api.PropertyPort
 import com.mwombeki.peak.property.api.PropertyReadinessResponse
 import com.mwombeki.peak.property.api.PropertyResponse
@@ -50,6 +51,7 @@ import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
 import io.micrometer.core.instrument.MeterRegistry
 import java.sql.ResultSet
+import java.time.LocalDate
 import java.time.ZoneId
 import java.util.UUID
 import org.springframework.dao.DataIntegrityViolationException
@@ -70,7 +72,140 @@ class PropertyManagementService(
     private val transactionTemplate: TransactionTemplate,
     private val objectMapper: ObjectMapper,
     private val meterRegistry: MeterRegistry,
-) : PropertyPort {
+) : PropertyPort, PropertyOperationsPort {
+
+    override fun requireAssignableRoom(
+        tenantId: UUID,
+        propertyId: UUID,
+        roomTypeId: UUID,
+        roomId: UUID,
+    ) {
+        val exists = jdbcTemplate.queryForObject(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM rooms
+                WHERE tenant_id = ?
+                  AND property_id = ?
+                  AND room_type_id = ?
+                  AND id = ?
+                  AND status = 'vacant_clean'
+                  AND deleted_at IS NULL
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            tenantId,
+            propertyId,
+            roomTypeId,
+            roomId,
+        ) == true
+        if (!exists) {
+            throw PropertyManagementConflictException(
+                "Room is not assignable for check-in",
+            )
+        }
+    }
+
+    override fun markRoomOccupied(
+        tenantId: UUID,
+        propertyId: UUID,
+        roomId: UUID,
+    ) {
+        val changed = jdbcTemplate.update(
+            """
+            UPDATE rooms
+            SET status = 'occupied',
+                last_status_changed_at = now(),
+                updated_at = now()
+            WHERE tenant_id = ?
+              AND property_id = ?
+              AND id = ?
+              AND status = 'vacant_clean'
+              AND deleted_at IS NULL
+            """.trimIndent(),
+            tenantId,
+            propertyId,
+            roomId,
+        )
+        if (changed != 1) {
+            throw PropertyManagementConflictException(
+                "Room is not available for occupancy",
+            )
+        }
+    }
+
+    override fun markRoomVacantDirty(
+        tenantId: UUID,
+        propertyId: UUID,
+        roomId: UUID,
+    ) {
+        val changed = jdbcTemplate.update(
+            """
+            UPDATE rooms
+            SET status = 'vacant_dirty',
+                last_status_changed_at = now(),
+                updated_at = now()
+            WHERE tenant_id = ?
+              AND property_id = ?
+              AND id = ?
+              AND status = 'occupied'
+              AND deleted_at IS NULL
+            """.trimIndent(),
+            tenantId,
+            propertyId,
+            roomId,
+        )
+        if (changed != 1) {
+            throw PropertyManagementConflictException(
+                "Room is not currently occupied",
+            )
+        }
+    }
+
+    override fun currentBusinessDate(tenantId: UUID, propertyId: UUID): LocalDate {
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT COALESCE(
+                business_date,
+                ((now() AT TIME ZONE timezone)::date + business_date_offset)
+            )
+            FROM properties
+            WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL
+            """.trimIndent(),
+            LocalDate::class.java,
+            tenantId,
+            propertyId,
+        ) ?: throw PropertyManagementNotFoundException("Property was not found")
+    }
+
+    override fun advanceBusinessDate(
+        tenantId: UUID,
+        propertyId: UUID,
+        expectedBusinessDate: LocalDate,
+    ): LocalDate {
+        return jdbcTemplate.query(
+            """
+            UPDATE properties
+            SET business_date = ?::date + 1,
+                updated_at = now()
+            WHERE tenant_id = ?
+              AND id = ?
+              AND deleted_at IS NULL
+              AND COALESCE(
+                    business_date,
+                    ((now() AT TIME ZONE timezone)::date + business_date_offset)
+                  ) = ?
+            RETURNING business_date
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("business_date", LocalDate::class.java) },
+            expectedBusinessDate,
+            tenantId,
+            propertyId,
+            expectedBusinessDate,
+        ).singleOrNull() ?: throw PropertyManagementConflictException(
+            "Property business date has already advanced",
+        )
+    }
 
     override fun listProperties(): List<PropertyResponse> {
         return read { identity ->
@@ -117,9 +252,10 @@ class PropertyManagementService(
                     """
                     INSERT INTO properties (
                         id, tenant_id, name, location, code, type, status,
-                        is_active, timezone, business_date_offset
+                        is_active, timezone, business_date_offset, business_date
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, false, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, false, ?, ?,
+                            ((now() AT TIME ZONE ?)::date + ?))
                     """.trimIndent(),
                     propertyId,
                     identity.tenantId,
@@ -128,6 +264,8 @@ class PropertyManagementService(
                     request.code?.normalizedCode(),
                     request.type.normalizedRequired("type").uppercase(),
                     PROPERTY_STATUS_DRAFT,
+                    request.timezone.validatedTimezone(),
+                    request.businessDateOffset.validatedBusinessDateOffset(),
                     request.timezone.validatedTimezone(),
                     request.businessDateOffset.validatedBusinessDateOffset(),
                 )
