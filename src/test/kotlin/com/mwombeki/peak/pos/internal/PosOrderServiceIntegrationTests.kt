@@ -82,6 +82,7 @@ class PosOrderServiceIntegrationTests {
                 sessionId = session.id,
                 orderType = "dine_in",
                 tableNumber = "A1",
+                clientOperationId = "cash-order-create",
             ),
         )
 
@@ -92,6 +93,7 @@ class PosOrderServiceIntegrationTests {
             AddPosOrderItemRequest(
                 menuItemId = fixture.menuItemId,
                 quantity = BigDecimal("2"),
+                clientOperationId = "cash-order-item",
             ),
         )
         assertEquals(BigDecimal("20.00"), pricedOrder.subtotal)
@@ -170,7 +172,11 @@ class PosOrderServiceIntegrationTests {
             fixture.propertyId,
             OpenPosSessionRequest(fixture.outletId),
         )
-        val request = CreatePosOrderRequest(session.id, "takeaway")
+        val request = CreatePosOrderRequest(
+            session.id,
+            "takeaway",
+            clientOperationId = "replay-order-create",
+        )
 
         bind(fixture, "replay-order")
         val first = posOrderService.createOrder(fixture.propertyId, request)
@@ -240,13 +246,20 @@ class PosOrderServiceIntegrationTests {
         bind(fixture, "mobile-order")
         val order = posOrderService.createOrder(
             fixture.propertyId,
-            CreatePosOrderRequest(session.id, "takeaway"),
+            CreatePosOrderRequest(
+                session.id,
+                "takeaway",
+                clientOperationId = "mobile-order-create",
+            ),
         )
         bind(fixture, "mobile-item")
         val pricedOrder = posOrderService.addItem(
             fixture.propertyId,
             order.id,
-            AddPosOrderItemRequest(fixture.menuItemId),
+            AddPosOrderItemRequest(
+                fixture.menuItemId,
+                clientOperationId = "mobile-order-item",
+            ),
         )
         val transactionId = UUID.randomUUID()
         jdbcTemplate.update(
@@ -330,7 +343,11 @@ class PosOrderServiceIntegrationTests {
         bind(fixture, "parallel-order")
         val order = posOrderService.createOrder(
             fixture.propertyId,
-            CreatePosOrderRequest(session.id, "takeaway"),
+            CreatePosOrderRequest(
+                session.id,
+                "takeaway",
+                clientOperationId = "parallel-order-create",
+            ),
         )
 
         val start = CountDownLatch(1)
@@ -343,7 +360,10 @@ class PosOrderServiceIntegrationTests {
                     posOrderService.addItem(
                         fixture.propertyId,
                         order.id,
-                        AddPosOrderItemRequest(fixture.menuItemId),
+                        AddPosOrderItemRequest(
+                            fixture.menuItemId,
+                            clientOperationId = "parallel-item-$index",
+                        ),
                     )
                 }
             }

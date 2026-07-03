@@ -11,6 +11,8 @@ import com.mwombeki.peak.frontdesk.api.FrontDeskInProgressException
 import com.mwombeki.peak.frontdesk.api.FrontDeskMutationReceipt
 import com.mwombeki.peak.frontdesk.api.FrontDeskNotFoundException
 import com.mwombeki.peak.frontdesk.api.FrontDeskPort
+import com.mwombeki.peak.frontdesk.api.HousekeepingStaySummary
+import com.mwombeki.peak.frontdesk.api.HousekeepingStaySummaryPort
 import com.mwombeki.peak.frontdesk.api.StayResponse
 import com.mwombeki.peak.frontdesk.api.WalkInRequest
 import com.mwombeki.peak.frontdesk.api.UnpaidCheckoutOverrideRequest
@@ -52,7 +54,40 @@ class FrontDeskService(
     private val transactionTemplate: TransactionTemplate,
     private val objectMapper: ObjectMapper,
     private val meterRegistry: MeterRegistry,
-) : FrontDeskPort {
+) : FrontDeskPort, HousekeepingStaySummaryPort {
+
+    override fun inHouseStaySummaries(
+        tenantId: UUID,
+        propertyId: UUID,
+        businessDate: java.time.LocalDate,
+    ): List<HousekeepingStaySummary> {
+        return jdbcTemplate.query(
+            """
+            SELECT s.id AS stay_id, s.room_id, r.check_in_date, r.check_out_date
+            FROM stays s
+            JOIN reservations r
+              ON r.tenant_id = s.tenant_id AND r.id = s.reservation_id
+            WHERE s.tenant_id = ?
+              AND r.property_id = ?
+              AND s.status = 'checked_in'
+              AND r.check_in_date <= ?
+              AND r.check_out_date > ?
+            ORDER BY s.id
+            """.trimIndent(),
+            { rs, _ ->
+                HousekeepingStaySummary(
+                    stayId = rs.getObject("stay_id", UUID::class.java),
+                    roomId = rs.getObject("room_id", UUID::class.java),
+                    checkInDate = rs.getObject("check_in_date", java.time.LocalDate::class.java),
+                    checkOutDate = rs.getObject("check_out_date", java.time.LocalDate::class.java),
+                )
+            },
+            tenantId,
+            propertyId,
+            businessDate,
+            businessDate,
+        )
+    }
 
     override fun checkIn(
         propertyId: UUID,
@@ -207,6 +242,9 @@ class FrontDeskService(
                     "reason" to reason,
                 ),
                 idempotencyKeyId = idempotencyKeyId,
+            )
+            enqueueDepartureClean(
+                actor.tenantId, propertyId, stayId, stay.roomId, idempotencyKeyId,
             )
             FrontDeskMutationReceipt(
                 propertyId = propertyId,
@@ -402,6 +440,9 @@ class FrontDeskService(
                 ),
                 idempotencyKeyId = idempotencyKeyId,
             )
+            enqueueDepartureClean(
+                actor.tenantId, propertyId, stayId, stay.roomId, idempotencyKeyId,
+            )
             FrontDeskMutationReceipt(
                 propertyId = propertyId,
                 reservationId = stay.reservationId,
@@ -531,6 +572,32 @@ class FrontDeskService(
                 payload = payload,
                 idempotencyKeyId = idempotencyKeyId,
                 priority = 4,
+            ),
+        )
+    }
+
+    private fun enqueueDepartureClean(
+        tenantId: UUID,
+        propertyId: UUID,
+        stayId: UUID,
+        roomId: UUID,
+        idempotencyKeyId: UUID,
+    ) {
+        outboxPort.enqueue(
+            OutboxEventCommand(
+                aggregateType = STAYS,
+                aggregateId = stayId,
+                tenantId = tenantId,
+                propertyId = propertyId,
+                eventType = "frontdesk.departure_clean_requested",
+                destination = OutboxDestination.HOUSEKEEPING,
+                payload = mapOf(
+                    "propertyId" to propertyId,
+                    "stayId" to stayId,
+                    "roomId" to roomId,
+                ),
+                idempotencyKeyId = idempotencyKeyId,
+                priority = 2,
             ),
         )
     }

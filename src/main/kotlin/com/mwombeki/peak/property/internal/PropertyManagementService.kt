@@ -162,6 +162,101 @@ class PropertyManagementService(
         }
     }
 
+    override fun markRoomVacantClean(
+        tenantId: UUID,
+        propertyId: UUID,
+        roomId: UUID,
+        reason: String,
+        sourceId: UUID,
+        changedBy: UUID?,
+    ) {
+        changeRoomStatus(
+            tenantId, propertyId, roomId, setOf("vacant_dirty"), "vacant_clean",
+            reason, "housekeeping_task", sourceId, changedBy,
+        )
+    }
+
+    override fun placeMaintenanceBlock(
+        tenantId: UUID,
+        propertyId: UUID,
+        roomId: UUID,
+        blockStatus: String,
+        reason: String,
+        sourceId: UUID,
+        changedBy: UUID,
+    ) {
+        require(blockStatus in setOf("out_of_service", "out_of_order")) {
+            "Unsupported maintenance block status"
+        }
+        changeRoomStatus(
+            tenantId, propertyId, roomId,
+            setOf("vacant_clean", "vacant_dirty"), blockStatus,
+            reason, "room_block", sourceId, changedBy,
+        )
+    }
+
+    override fun releaseMaintenanceBlock(
+        tenantId: UUID,
+        propertyId: UUID,
+        roomId: UUID,
+        expectedBlockStatus: String,
+        reason: String,
+        sourceId: UUID,
+        changedBy: UUID,
+    ) {
+        require(expectedBlockStatus in setOf("out_of_service", "out_of_order")) {
+            "Unsupported maintenance block status"
+        }
+        changeRoomStatus(
+            tenantId, propertyId, roomId, setOf(expectedBlockStatus), "vacant_dirty",
+            reason, "room_block_release", sourceId, changedBy,
+        )
+    }
+
+    private fun changeRoomStatus(
+        tenantId: UUID,
+        propertyId: UUID,
+        roomId: UUID,
+        expected: Set<String>,
+        target: String,
+        reason: String,
+        sourceType: String,
+        sourceId: UUID,
+        changedBy: UUID?,
+    ) {
+        val current = jdbcTemplate.query(
+            """
+            SELECT status FROM rooms
+            WHERE tenant_id = ? AND property_id = ? AND id = ? AND deleted_at IS NULL
+            FOR UPDATE
+            """.trimIndent(),
+            { rs, _ -> rs.getString("status") },
+            tenantId, propertyId, roomId,
+        ).singleOrNull() ?: throw PropertyManagementNotFoundException("Room was not found")
+        if (current !in expected) {
+            throw PropertyManagementConflictException(
+                "Room cannot transition from $current to $target",
+            )
+        }
+        jdbcTemplate.update(
+            """
+            UPDATE rooms SET status = ?, last_status_changed_at = now(), updated_at = now()
+            WHERE tenant_id = ? AND property_id = ? AND id = ? AND status = ?
+            """.trimIndent(),
+            target, tenantId, propertyId, roomId, current,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO room_state_transitions (
+                tenant_id, property_id, room_id, from_status, to_status,
+                reason, source_type, source_id, changed_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """.trimIndent(),
+            tenantId, propertyId, roomId, current, target,
+            reason, sourceType, sourceId, changedBy,
+        )
+    }
+
     override fun currentBusinessDate(tenantId: UUID, propertyId: UUID): LocalDate {
         return jdbcTemplate.queryForObject(
             """

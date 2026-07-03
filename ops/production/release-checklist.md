@@ -8,6 +8,8 @@
 - [ ] `./gradlew test` report is retained.
 - [ ] Flyway validates from an empty PostgreSQL 18 database through the expected version.
 - [ ] V40 payment data upgrades to the V41 canonical lifecycle.
+- [ ] Populated V44 department data upgrades through the V49 canonical
+      operations contracts.
 - [ ] Modulith dependency verification and required integration tests pass with
       no skipped results.
 - [ ] `podman compose ... config` and `validate-production-env.sh` pass.
@@ -57,6 +59,11 @@
 - [ ] Phase 3 end-to-end and concurrency plan passes.
 - [ ] Phase 3 Podman evidence uses Keycloak plus separate API/worker roles and
       the signed fiscal simulator.
+- [ ] Phase 4 Podman/Newman evidence covers housekeeping inspection, maintenance
+      release-to-dirty, weighted-average stock, partial receiving, replay-safe
+      kitchen consumption, and authenticated WebSocket/KDS access.
+- [ ] ClickPesa protected sandbox evidence is tracked as a non-blocking external
+      follow-up; cash, room-charge, and simulated mobile-money acceptance pass.
 - [ ] Release image is deployed to staging and `smoke-test.sh` passes.
 - [ ] Production migration exits successfully before API/worker rollout.
 - [ ] First production readiness and smoke checks pass.

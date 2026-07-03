@@ -100,6 +100,32 @@ interface PropertyOperationsPort {
 
     fun markRoomOccupied(tenantId: UUID, propertyId: UUID, roomId: UUID)
     fun markRoomVacantDirty(tenantId: UUID, propertyId: UUID, roomId: UUID)
+    fun markRoomVacantClean(
+        tenantId: UUID,
+        propertyId: UUID,
+        roomId: UUID,
+        reason: String,
+        sourceId: UUID,
+        changedBy: UUID?,
+    )
+    fun placeMaintenanceBlock(
+        tenantId: UUID,
+        propertyId: UUID,
+        roomId: UUID,
+        blockStatus: String,
+        reason: String,
+        sourceId: UUID,
+        changedBy: UUID,
+    )
+    fun releaseMaintenanceBlock(
+        tenantId: UUID,
+        propertyId: UUID,
+        roomId: UUID,
+        expectedBlockStatus: String,
+        reason: String,
+        sourceId: UUID,
+        changedBy: UUID,
+    )
     fun currentBusinessDate(tenantId: UUID, propertyId: UUID): LocalDate
     fun advanceBusinessDate(
         tenantId: UUID,
