@@ -3,6 +3,7 @@ package com.mwombeki.peak.nightaudit.internal.web
 import com.mwombeki.peak.nightaudit.api.NightAuditNotFoundException
 import com.mwombeki.peak.nightaudit.api.NightAuditPort
 import com.mwombeki.peak.nightaudit.api.NightAuditRunResponse
+import com.mwombeki.peak.nightaudit.api.NightAuditCloseSnapshotResponse
 import com.mwombeki.peak.nightaudit.api.OverrideNightAuditIssueRequest
 import com.mwombeki.peak.nightaudit.api.RunNightAuditRequest
 import java.util.UUID
@@ -56,5 +57,16 @@ class NightAuditController(
         @PathVariable runId: UUID,
     ): NightAuditRunResponse {
         return nightAuditPort.complete(propertyId, runId)
+    }
+
+    @GetMapping("/{runId}/close-snapshot")
+    fun getCloseSnapshot(
+        @PathVariable propertyId: UUID,
+        @PathVariable runId: UUID,
+    ): NightAuditCloseSnapshotResponse {
+        return nightAuditPort.getCloseSnapshot(propertyId, runId)
+            ?: throw NightAuditNotFoundException(
+                "Night audit close snapshot was not found",
+            )
     }
 }

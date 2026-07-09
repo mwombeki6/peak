@@ -4,7 +4,17 @@ import com.mwombeki.peak.audit.api.AuditPort
 import com.mwombeki.peak.audit.api.AuditResource
 import com.mwombeki.peak.audit.api.TenantAuditEvent
 import com.mwombeki.peak.billing.api.BillingSnapshotPort
+import com.mwombeki.peak.billing.api.BillingCloseSnapshotSummary
 import com.mwombeki.peak.fiscal.api.FiscalStatusPort
+import com.mwombeki.peak.fiscal.api.FiscalCloseSnapshotSummary
+import com.mwombeki.peak.housekeeping.api.HousekeepingCloseSnapshotPort
+import com.mwombeki.peak.housekeeping.api.HousekeepingCloseSnapshotSummary
+import com.mwombeki.peak.inventory.api.InventoryCloseSnapshotPort
+import com.mwombeki.peak.inventory.api.InventoryCloseSnapshotSummary
+import com.mwombeki.peak.maintenance.api.MaintenanceCloseSnapshotPort
+import com.mwombeki.peak.maintenance.api.MaintenanceCloseSnapshotSummary
+import com.mwombeki.peak.nightaudit.api.NightAuditCloseSnapshotResponse
+import com.mwombeki.peak.nightaudit.api.NightAuditCloseSnapshotPort
 import com.mwombeki.peak.nightaudit.api.NightAuditConflictException
 import com.mwombeki.peak.nightaudit.api.NightAuditInProgressException
 import com.mwombeki.peak.nightaudit.api.NightAuditIssueResponse
@@ -14,8 +24,11 @@ import com.mwombeki.peak.nightaudit.api.NightAuditRunResponse
 import com.mwombeki.peak.nightaudit.api.OverrideNightAuditIssueRequest
 import com.mwombeki.peak.nightaudit.api.RunNightAuditRequest
 import com.mwombeki.peak.payment.api.PaymentStatusPort
+import com.mwombeki.peak.payment.api.PaymentCloseSnapshotSummary
 import com.mwombeki.peak.pos.api.PosStatusPort
+import com.mwombeki.peak.pos.api.PosCloseSnapshotSummary
 import com.mwombeki.peak.property.api.PropertyOperationsPort
+import com.mwombeki.peak.property.api.PropertyCloseSnapshotSummary
 import com.mwombeki.peak.reliability.api.IdempotencyCommand
 import com.mwombeki.peak.reliability.api.IdempotencyPort
 import com.mwombeki.peak.reliability.api.IdempotencyReservation
@@ -23,14 +36,21 @@ import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.reservations.api.ReservationTransitionPort
+import com.mwombeki.peak.reservations.api.ReservationCloseSnapshotPort
+import com.mwombeki.peak.reservations.api.ReservationCloseSnapshotSummary
 import com.mwombeki.peak.shared.context.TenantActor
 import com.mwombeki.peak.shared.context.TenantRequestContext
 import io.micrometer.core.instrument.MeterRegistry
+import java.math.BigDecimal
+import java.math.RoundingMode
+import java.security.MessageDigest
 import java.sql.ResultSet
 import java.time.LocalDate
+import java.time.Instant
 import java.util.UUID
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.JdbcTemplate
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.ObjectMapper
@@ -51,7 +71,11 @@ class NightAuditService(
     private val paymentStatusPort: PaymentStatusPort,
     private val fiscalStatusPort: FiscalStatusPort,
     private val posStatusPort: PosStatusPort,
-) : NightAuditPort {
+    private val reservationCloseSnapshotPort: ReservationCloseSnapshotPort,
+    private val housekeepingCloseSnapshotPort: HousekeepingCloseSnapshotPort,
+    private val maintenanceCloseSnapshotPort: MaintenanceCloseSnapshotPort,
+    private val inventoryCloseSnapshotPort: InventoryCloseSnapshotPort,
+) : NightAuditPort, NightAuditCloseSnapshotPort {
 
     override fun runNightAudit(
         propertyId: UUID,
@@ -70,6 +94,13 @@ class NightAuditService(
             val issues = try {
                 collectIssues(actor.tenantId, propertyId, runId, auditDate)
             } catch (ex: Exception) {
+                logger.warn(
+                    "Night audit evaluation failed propertyId={} runId={} failureType={}",
+                    propertyId,
+                    runId,
+                    ex::class.simpleName,
+                    ex,
+                )
                 val failureType = ex::class.simpleName?.take(100)
                     ?: "NightAuditTechnicalFailure"
                 jdbcTemplate.update(
@@ -114,9 +145,9 @@ class NightAuditService(
                     """
                     INSERT INTO night_audit_issues (
                         id, tenant_id, property_id, run_id, severity, issue_code,
-                        message, blocking, payload
+                        message, blocking, override_allowed, payload
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
                     """.trimIndent(),
                     issue.id,
                     actor.tenantId,
@@ -126,6 +157,7 @@ class NightAuditService(
                     issue.issueCode,
                     issue.message,
                     issue.blocking,
+                    issue.overrideAllowed,
                     objectMapper.writeValueAsString(issue.payload),
                 )
             }
@@ -204,9 +236,9 @@ class NightAuditService(
             require(run.status in setOf("blocked", "ready")) {
                 "Only blocked or ready runs can have issues overridden"
             }
-            val issueCode = jdbcTemplate.query(
+            val issue = jdbcTemplate.query(
                 """
-                SELECT issue_code
+                SELECT issue_code, override_allowed
                 FROM night_audit_issues
                 WHERE tenant_id = ?
                   AND property_id = ?
@@ -215,7 +247,10 @@ class NightAuditService(
                   AND resolved_at IS NULL
                 FOR UPDATE
                 """.trimIndent(),
-                { rs, _ -> rs.getString("issue_code") },
+                { rs, _ ->
+                    rs.getString("issue_code") to
+                        rs.getBoolean("override_allowed")
+                },
                 actor.tenantId,
                 propertyId,
                 runId,
@@ -223,9 +258,9 @@ class NightAuditService(
             ).singleOrNull() ?: throw NightAuditNotFoundException(
                 "Night audit issue was not found or was already resolved",
             )
-            if (issueCode == OPEN_UNPAID_FOLIOS) {
+            if (!issue.second) {
                 throw NightAuditConflictException(
-                    "Open unpaid folios must be settled and cannot be overridden",
+                    "Issue ${issue.first} must be resolved at source and cannot be overridden",
                 )
             }
             val changed = jdbcTemplate.update(
@@ -297,6 +332,10 @@ class NightAuditService(
             resourceType = NIGHT_AUDIT_RUNS,
             replayType = NightAuditRunResponse::class.java,
         ) { actor, idempotencyKeyId ->
+            jdbcTemplate.queryForList(
+                "SELECT pg_advisory_xact_lock(hashtextextended(?::text, 0))",
+                "$propertyId:complete",
+            )
             val run = requireRunForUpdate(actor.tenantId, propertyId, runId)
             require(run.status in setOf("ready", "blocked")) {
                 "Only evaluated night audit runs can be completed"
@@ -308,11 +347,17 @@ class NightAuditService(
             require(currentDate == run.auditDate) {
                 "Night audit date does not match the current property business date"
             }
+            val closeData = collectCloseData(
+                actor.tenantId,
+                propertyId,
+                run.auditDate,
+            )
             val liveIssues = collectIssues(
                 actor.tenantId,
                 propertyId,
                 runId,
                 run.auditDate,
+                closeData,
             )
             val overriddenCodes = resolvedIssueCodes(
                 actor.tenantId,
@@ -320,13 +365,23 @@ class NightAuditService(
                 runId,
             )
             val unapprovedBlockers = liveIssues.filter {
-                it.blocking && it.issueCode !in overriddenCodes
+                it.blocking &&
+                    (!it.overrideAllowed || it.issueCode !in overriddenCodes)
             }
             if (unapprovedBlockers.isNotEmpty()) {
                 throw NightAuditConflictException(
                     "Live night-audit blockers require resolution before completion",
                 )
             }
+            val snapshot = captureCloseSnapshot(
+                actor = actor,
+                propertyId = propertyId,
+                runId = runId,
+                businessDate = run.auditDate,
+                closeData = closeData,
+                liveIssues = liveIssues,
+                overriddenCodes = overriddenCodes,
+            )
             propertyOperationsPort.advanceBusinessDate(
                 actor.tenantId,
                 propertyId,
@@ -336,6 +391,9 @@ class NightAuditService(
                 "completedAfterRevalidation" to true,
                 "overriddenIssueCodes" to overriddenCodes.sorted(),
                 "nextBusinessDate" to run.auditDate.plusDays(1),
+                "closeSnapshotId" to snapshot.id,
+                "closeSnapshotHash" to snapshot.payloadHash,
+                "reportGenerationQueued" to true,
             )
             val changed = jdbcTemplate.update(
                 """
@@ -360,6 +418,14 @@ class NightAuditService(
                     "Night audit was completed concurrently",
                 )
             }
+            queueCoreReports(
+                actor = actor,
+                propertyId = propertyId,
+                runId = runId,
+                snapshotId = snapshot.id,
+                businessDate = run.auditDate,
+                idempotencyKeyId = idempotencyKeyId,
+            )
             recordLifecycleEvent(
                 actor = actor,
                 propertyId = propertyId,
@@ -395,6 +461,85 @@ class NightAuditService(
         return read(propertyId) { actor ->
             run(actor.tenantId, propertyId, runId, includeIssues = true)
         }
+    }
+
+    override fun getCloseSnapshot(
+        propertyId: UUID,
+        runId: UUID,
+    ): NightAuditCloseSnapshotResponse? {
+        return read(propertyId) { actor ->
+            jdbcTemplate.query(
+                """
+                SELECT id, tenant_id, property_id, night_audit_run_id,
+                       business_date, schema_version, currency, payload::text,
+                       payload_hash, available_rooms, rooms_sold,
+                       occupied_rooms, occupancy, adr, revpar, room_revenue,
+                       pos_revenue, tax_total, gross_total, net_total,
+                       revenue_journal_difference,
+                       payment_allocation_difference, captured_at
+                FROM night_audit_close_snapshots
+                WHERE tenant_id = ?
+                  AND property_id = ?
+                  AND night_audit_run_id = ?
+                """.trimIndent(),
+                { rs, _ -> mapCloseSnapshot(rs) },
+                actor.tenantId,
+                propertyId,
+                runId,
+            ).singleOrNull()
+        }
+    }
+
+    override fun getCloseSnapshot(
+        tenantId: UUID,
+        propertyId: UUID,
+        runId: UUID,
+    ): NightAuditCloseSnapshotResponse? {
+        return jdbcTemplate.query(
+            """
+            SELECT id, tenant_id, property_id, night_audit_run_id,
+                   business_date, schema_version, currency, payload::text,
+                   payload_hash, available_rooms, rooms_sold,
+                   occupied_rooms, occupancy, adr, revpar, room_revenue,
+                   pos_revenue, tax_total, gross_total, net_total,
+                   revenue_journal_difference,
+                   payment_allocation_difference, captured_at
+            FROM night_audit_close_snapshots
+            WHERE tenant_id = ?
+              AND property_id = ?
+              AND night_audit_run_id = ?
+            """.trimIndent(),
+            { rs, _ -> mapCloseSnapshot(rs) },
+            tenantId,
+            propertyId,
+            runId,
+        ).singleOrNull()
+    }
+
+    override fun getCloseSnapshotById(
+        tenantId: UUID,
+        propertyId: UUID,
+        snapshotId: UUID,
+    ): NightAuditCloseSnapshotResponse? {
+        return jdbcTemplate.query(
+            """
+            SELECT id, tenant_id, property_id, night_audit_run_id,
+                   business_date, schema_version, currency, payload::text,
+                   payload_hash, available_rooms, rooms_sold,
+                   occupied_rooms, occupancy, adr, revpar, room_revenue,
+                   pos_revenue, tax_total, gross_total, net_total,
+                   revenue_journal_difference,
+                   payment_allocation_difference, captured_at
+            FROM night_audit_close_snapshots
+            WHERE tenant_id = ?
+              AND property_id = ?
+              AND id = ?
+            """.trimIndent(),
+            { rs, _ -> mapCloseSnapshot(rs) },
+            tenantId,
+            propertyId,
+            snapshotId,
+        ).singleOrNull()
     }
 
     private fun createRun(
@@ -453,6 +598,11 @@ class NightAuditService(
         propertyId: UUID,
         runId: UUID,
         auditDate: LocalDate,
+        closeData: CloseData = collectCloseData(
+            tenantId,
+            propertyId,
+            auditDate,
+        ),
     ): List<NightAuditIssueDraft> {
         val issues = mutableListOf<NightAuditIssueDraft>()
         val billing = billingSnapshotPort.nightAuditSummary(tenantId, propertyId)
@@ -520,6 +670,28 @@ class NightAuditService(
             message = "Checked-in stays are past scheduled checkout date.",
             blocking = false,
         )
+        addDifferenceIssue(
+            issues = issues,
+            difference = closeData.billing.revenueJournalDifference,
+            runId = runId,
+            code = REVENUE_JOURNAL_MISMATCH,
+            message = "Revenue-center charges do not reconcile to posted journal credits.",
+        )
+        addDifferenceIssue(
+            issues = issues,
+            difference = closeData.payment.allocationDifference,
+            runId = runId,
+            code = PAYMENT_ALLOCATION_MISMATCH,
+            message = "Posted payment allocations do not reconcile to confirmed transactions.",
+        )
+        addCountIssue(
+            issues = issues,
+            count = closeData.pos.closedUnsettledOrders,
+            runId = runId,
+            code = CLOSED_POS_ORDERS_UNSETTLED,
+            message = "Closed POS orders remain unposted or unsettled.",
+            blocking = true,
+        )
         return issues
     }
 
@@ -545,8 +717,343 @@ class NightAuditService(
             issueCode = code,
             message = "$message Count: $count",
             blocking = blocking,
+            overrideAllowed = code !in NON_OVERRIDABLE_ISSUE_CODES,
             payload = mapOf("count" to count),
         )
+    }
+
+    private fun addDifferenceIssue(
+        issues: MutableList<NightAuditIssueDraft>,
+        difference: BigDecimal,
+        runId: UUID,
+        code: String,
+        message: String,
+    ) {
+        val value = difference.money()
+        if (value.compareTo(MONEY_ZERO) == 0) {
+            return
+        }
+        issues += NightAuditIssueDraft(
+            id = UUID.randomUUID(),
+            runId = runId,
+            severity = "blocking",
+            issueCode = code,
+            message = "$message Difference: ${value.toPlainString()}",
+            blocking = true,
+            overrideAllowed = false,
+            payload = mapOf("difference" to value),
+        )
+    }
+
+    private fun collectCloseData(
+        tenantId: UUID,
+        propertyId: UUID,
+        businessDate: LocalDate,
+    ): CloseData {
+        return CloseData(
+            property = propertyOperationsPort.closeSnapshotSummary(
+                tenantId,
+                propertyId,
+            ),
+            reservations = reservationCloseSnapshotPort.closeSnapshotSummary(
+                tenantId,
+                propertyId,
+                businessDate,
+            ),
+            billing = billingSnapshotPort.closeSnapshotSummary(
+                tenantId,
+                propertyId,
+                businessDate,
+            ),
+            payment = paymentStatusPort.closeSnapshotSummary(
+                tenantId,
+                propertyId,
+                businessDate,
+            ),
+            fiscal = fiscalStatusPort.closeSnapshotSummary(
+                tenantId,
+                propertyId,
+                businessDate,
+            ),
+            pos = posStatusPort.closeSnapshotSummary(
+                tenantId,
+                propertyId,
+                businessDate,
+            ),
+            housekeeping = housekeepingCloseSnapshotPort.closeSnapshotSummary(
+                tenantId,
+                propertyId,
+                businessDate,
+            ),
+            maintenance = maintenanceCloseSnapshotPort.closeSnapshotSummary(
+                tenantId,
+                propertyId,
+            ),
+            inventory = inventoryCloseSnapshotPort.closeSnapshotSummary(
+                tenantId,
+                propertyId,
+                businessDate,
+            ),
+        )
+    }
+
+    private fun captureCloseSnapshot(
+        actor: TenantActor,
+        propertyId: UUID,
+        runId: UUID,
+        businessDate: LocalDate,
+        closeData: CloseData,
+        liveIssues: List<NightAuditIssueDraft>,
+        overriddenCodes: Set<String>,
+    ): NightAuditCloseSnapshotResponse {
+        val availableRooms = (
+            closeData.property.totalRooms -
+                closeData.maintenance.outOfOrderRooms
+            ).coerceAtLeast(0)
+        val roomsSold = closeData.reservations.roomsSold
+        val roomRevenue = closeData.billing.roomRevenue.money()
+        val occupancy = ratio(roomsSold.toBigDecimal(), availableRooms)
+        val adr = ratio(roomRevenue, roomsSold)
+        val revpar = ratio(roomRevenue, availableRooms)
+        val payload = linkedMapOf<String, Any?>(
+            "schemaVersion" to CLOSE_SNAPSHOT_SCHEMA_VERSION,
+            "businessDate" to businessDate,
+            "currency" to closeData.property.currency,
+            "rooms" to linkedMapOf(
+                "available" to availableRooms,
+                "sold" to roomsSold,
+                "occupied" to closeData.reservations.occupiedRooms,
+                "arrivals" to closeData.reservations.arrivals,
+                "departures" to closeData.reservations.departures,
+                "noShows" to closeData.reservations.noShows,
+                "overdueStays" to closeData.reservations.overdueStays,
+                "occupancy" to occupancy,
+                "adr" to adr,
+                "revpar" to revpar,
+            ),
+            "revenue" to linkedMapOf(
+                "byRevenueCenter" to closeData.billing.revenueByCenter.map {
+                    linkedMapOf(
+                        "revenueCenterId" to it.revenueCenterId,
+                        "amount" to it.amount.money(),
+                    )
+                },
+                "room" to roomRevenue,
+                "pos" to closeData.pos.revenue.money(),
+                "tax" to closeData.billing.taxTotal.money(),
+                "gross" to closeData.billing.grossTotal.money(),
+                "net" to closeData.billing.netTotal.money(),
+            ),
+            "payments" to linkedMapOf(
+                "byMethod" to closeData.payment.paymentsByMethod
+                    .toSortedMap()
+                    .mapValues { it.value.money() },
+                "cashVariance" to closeData.payment.cashVariance.money(),
+                "providerReconciliation" to
+                    closeData.payment.providerReconciliation.money(),
+                "refunds" to closeData.payment.refunds.money(),
+                "reversals" to closeData.payment.reversals.money(),
+            ),
+            "fiscal" to linkedMapOf(
+                "accepted" to closeData.fiscal.acceptedTotal.money(),
+                "pending" to closeData.fiscal.pendingTotal.money(),
+                "failed" to closeData.fiscal.failedTotal.money(),
+                "corrections" to closeData.fiscal.correctionTotal.money(),
+            ),
+            "operations" to linkedMapOf(
+                "openExceptions" to (
+                    closeData.housekeeping.openTasks +
+                        closeData.maintenance.openExceptions
+                    ),
+                "housekeeping" to closeData.housekeeping.states.toSortedMap(),
+                "maintenanceBlocks" to linkedMapOf(
+                    "outOfOrder" to closeData.maintenance.outOfOrderRooms,
+                    "outOfService" to closeData.maintenance.outOfServiceRooms,
+                ),
+                "lowStock" to closeData.inventory.lowStockItems,
+                "waste" to closeData.inventory.wasteTotal.money(),
+                "inventoryValue" to closeData.inventory.inventoryValue.money(),
+            ),
+            "audit" to linkedMapOf(
+                "issues" to liveIssues.sortedBy { it.issueCode }.map {
+                    linkedMapOf(
+                        "code" to it.issueCode,
+                        "blocking" to it.blocking,
+                        "overrideAllowed" to it.overrideAllowed,
+                        "payload" to it.payload.toSortedMap(),
+                    )
+                },
+                "approvedOverrides" to overriddenCodes.sorted(),
+                "reconciliationDifferences" to linkedMapOf(
+                    "revenueJournal" to
+                        closeData.billing.revenueJournalDifference.money(),
+                    "paymentAllocation" to
+                        closeData.payment.allocationDifference.money(),
+                ),
+            ),
+        )
+        val payloadBytes = objectMapper.writeValueAsBytes(payload)
+        val payloadHash = sha256Hex(payloadBytes)
+        val snapshotId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO night_audit_close_snapshots (
+                id, tenant_id, property_id, night_audit_run_id,
+                business_date, schema_version, currency, payload,
+                payload_hash, available_rooms, rooms_sold, occupied_rooms,
+                occupancy, adr, revpar, room_revenue, pos_revenue,
+                tax_total, gross_total, net_total,
+                revenue_journal_difference, payment_allocation_difference,
+                captured_by
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?
+            )
+            """.trimIndent(),
+            snapshotId,
+            actor.tenantId,
+            propertyId,
+            runId,
+            businessDate,
+            CLOSE_SNAPSHOT_SCHEMA_VERSION,
+            closeData.property.currency,
+            payloadBytes.toString(Charsets.UTF_8),
+            payloadHash,
+            availableRooms,
+            roomsSold,
+            closeData.reservations.occupiedRooms,
+            occupancy,
+            adr,
+            revpar,
+            roomRevenue,
+            closeData.pos.revenue.money(),
+            closeData.billing.taxTotal.money(),
+            closeData.billing.grossTotal.money(),
+            closeData.billing.netTotal.money(),
+            closeData.billing.revenueJournalDifference.money(),
+            closeData.payment.allocationDifference.money(),
+            actor.tenantUserId,
+        )
+        return NightAuditCloseSnapshotResponse(
+            id = snapshotId,
+            tenantId = actor.tenantId,
+            propertyId = propertyId,
+            nightAuditRunId = runId,
+            businessDate = businessDate,
+            schemaVersion = CLOSE_SNAPSHOT_SCHEMA_VERSION,
+            currency = closeData.property.currency,
+            payloadHash = payloadHash,
+            availableRooms = availableRooms,
+            roomsSold = roomsSold,
+            occupiedRooms = closeData.reservations.occupiedRooms,
+            occupancy = occupancy,
+            adr = adr,
+            revpar = revpar,
+            roomRevenue = roomRevenue,
+            posRevenue = closeData.pos.revenue.money(),
+            taxTotal = closeData.billing.taxTotal.money(),
+            grossTotal = closeData.billing.grossTotal.money(),
+            netTotal = closeData.billing.netTotal.money(),
+            revenueJournalDifference =
+                closeData.billing.revenueJournalDifference.money(),
+            paymentAllocationDifference =
+                closeData.payment.allocationDifference.money(),
+            payload = payload,
+            capturedAt = Instant.now(),
+        )
+    }
+
+    private fun queueCoreReports(
+        actor: TenantActor,
+        propertyId: UUID,
+        runId: UUID,
+        snapshotId: UUID,
+        businessDate: LocalDate,
+        idempotencyKeyId: UUID,
+    ) {
+        CORE_REPORT_CODES.forEach { reportCode ->
+            outboxPort.enqueue(
+                OutboxEventCommand(
+                    aggregateType = "report_runs",
+                    aggregateId = snapshotId,
+                    tenantId = actor.tenantId,
+                    propertyId = propertyId,
+                    eventType = "report.generation.requested",
+                    destination = OutboxDestination.REPORTS,
+                    payload = mapOf(
+                        "nightAuditRunId" to runId,
+                        "closeSnapshotId" to snapshotId,
+                        "reportCode" to reportCode,
+                        "businessDate" to businessDate,
+                        "generationKey" to
+                            "$propertyId:$businessDate:$reportCode",
+                    ),
+                    idempotencyKeyId = idempotencyKeyId,
+                    priority = 2,
+                ),
+            )
+        }
+    }
+
+    private fun mapCloseSnapshot(rs: ResultSet): NightAuditCloseSnapshotResponse {
+        return NightAuditCloseSnapshotResponse(
+            id = rs.getObject("id", UUID::class.java),
+            tenantId = rs.getObject("tenant_id", UUID::class.java),
+            propertyId = rs.getObject("property_id", UUID::class.java),
+            nightAuditRunId = rs.getObject(
+                "night_audit_run_id",
+                UUID::class.java,
+            ),
+            businessDate = rs.getObject(
+                "business_date",
+                LocalDate::class.java,
+            ),
+            schemaVersion = rs.getInt("schema_version"),
+            currency = rs.getString("currency").trim(),
+            payloadHash = rs.getString("payload_hash"),
+            availableRooms = rs.getInt("available_rooms"),
+            roomsSold = rs.getInt("rooms_sold"),
+            occupiedRooms = rs.getInt("occupied_rooms"),
+            occupancy = rs.getBigDecimal("occupancy").ratio(),
+            adr = rs.getBigDecimal("adr").money(),
+            revpar = rs.getBigDecimal("revpar").money(),
+            roomRevenue = rs.getBigDecimal("room_revenue").money(),
+            posRevenue = rs.getBigDecimal("pos_revenue").money(),
+            taxTotal = rs.getBigDecimal("tax_total").money(),
+            grossTotal = rs.getBigDecimal("gross_total").money(),
+            netTotal = rs.getBigDecimal("net_total").money(),
+            revenueJournalDifference = rs.getBigDecimal(
+                "revenue_journal_difference",
+            ).money(),
+            paymentAllocationDifference = rs.getBigDecimal(
+                "payment_allocation_difference",
+            ).money(),
+            payload = summary(rs.getString("payload")),
+            capturedAt = rs.getTimestamp("captured_at").toInstant(),
+        )
+    }
+
+    private fun ratio(numerator: BigDecimal, denominator: Int): BigDecimal {
+        if (denominator == 0) {
+            return RATIO_ZERO
+        }
+        return numerator.divide(
+            denominator.toBigDecimal(),
+            2,
+            RoundingMode.HALF_UP,
+        )
+    }
+
+    private fun BigDecimal.money(): BigDecimal =
+        setScale(2, RoundingMode.HALF_UP)
+
+    private fun BigDecimal.ratio(): BigDecimal =
+        setScale(2, RoundingMode.HALF_UP)
+
+    private fun sha256Hex(bytes: ByteArray): String {
+        return MessageDigest.getInstance("SHA-256")
+            .digest(bytes)
+            .joinToString("") { "%02x".format(it) }
     }
 
     private fun requireRun(
@@ -699,6 +1206,8 @@ class NightAuditService(
             runBy = rs.getObject("run_by", UUID::class.java),
             summary = summary(rs.getString("summary")),
             issues = if (includeIssues) issues(tenantId, propertyId, runId) else emptyList(),
+            reportGenerationQueued =
+                summary(rs.getString("summary"))["reportGenerationQueued"] == true,
         )
     }
 
@@ -709,8 +1218,8 @@ class NightAuditService(
     ): List<NightAuditIssueResponse> {
         return jdbcTemplate.query(
             """
-            SELECT id, run_id, property_id, severity, issue_code, message, blocking,
-                   resolved_at, resolution_note
+            SELECT id, run_id, property_id, severity, issue_code, message,
+                   blocking, override_allowed, resolved_at, resolution_note
             FROM night_audit_issues
             WHERE tenant_id = ?
               AND property_id = ?
@@ -726,6 +1235,7 @@ class NightAuditService(
                     issueCode = rs.getString("issue_code"),
                     message = rs.getString("message"),
                     blocking = rs.getBoolean("blocking"),
+                    overrideAllowed = rs.getBoolean("override_allowed"),
                     resolvedAt = rs.getTimestamp("resolved_at")?.toInstant(),
                     resolutionNote = rs.getString("resolution_note"),
                 )
@@ -819,6 +1329,7 @@ class NightAuditService(
         val issueCode: String,
         val message: String,
         val blocking: Boolean,
+        val overrideAllowed: Boolean,
         val payload: Map<String, Any?>,
     )
 
@@ -828,9 +1339,37 @@ class NightAuditService(
         val summary: Map<String, Any?>,
     )
 
+    private data class CloseData(
+        val property: PropertyCloseSnapshotSummary,
+        val reservations: ReservationCloseSnapshotSummary,
+        val billing: BillingCloseSnapshotSummary,
+        val payment: PaymentCloseSnapshotSummary,
+        val fiscal: FiscalCloseSnapshotSummary,
+        val pos: PosCloseSnapshotSummary,
+        val housekeeping: HousekeepingCloseSnapshotSummary,
+        val maintenance: MaintenanceCloseSnapshotSummary,
+        val inventory: InventoryCloseSnapshotSummary,
+    )
+
     private companion object {
-        const val OPEN_UNPAID_FOLIOS = "open_unpaid_folios"
+        const val REVENUE_JOURNAL_MISMATCH = "revenue_journal_mismatch"
+        const val PAYMENT_ALLOCATION_MISMATCH = "payment_allocation_mismatch"
+        const val CLOSED_POS_ORDERS_UNSETTLED = "closed_pos_orders_unsettled"
         const val NIGHT_AUDIT_RUNS = "night_audit_runs"
+        const val CLOSE_SNAPSHOT_SCHEMA_VERSION = 1
+        val MONEY_ZERO: BigDecimal = BigDecimal.ZERO.setScale(2)
+        val RATIO_ZERO: BigDecimal = BigDecimal.ZERO.setScale(2)
+        val NON_OVERRIDABLE_ISSUE_CODES = setOf(
+            "open_unpaid_folios",
+            REVENUE_JOURNAL_MISMATCH,
+            PAYMENT_ALLOCATION_MISMATCH,
+            CLOSED_POS_ORDERS_UNSETTLED,
+        )
+        val CORE_REPORT_CODES = listOf(
+            "daily_management_summary",
+            "night_audit_close",
+        )
+        val logger = LoggerFactory.getLogger(NightAuditService::class.java)
     }
 }
 

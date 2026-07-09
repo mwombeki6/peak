@@ -235,3 +235,13 @@ class PaymentProviderUnavailableException(message: String) :
 data class PaymentNightAuditSummary(
     val nonTerminalTransactions: Int,
 )
+
+@NamedInterface("api")
+data class PaymentCloseSnapshotSummary(
+    val paymentsByMethod: Map<String, BigDecimal>,
+    val cashVariance: BigDecimal,
+    val providerReconciliation: BigDecimal,
+    val refunds: BigDecimal,
+    val reversals: BigDecimal,
+    val allocationDifference: BigDecimal,
+)

@@ -66,6 +66,16 @@ peak:
       http-gateway:
         connect-timeout: ${PEAK_FISCAL_HTTP_CONNECT_TIMEOUT:3s}
         request-timeout: ${PEAK_FISCAL_HTTP_REQUEST_TIMEOUT:20s}
+  reporting:
+    storage:
+      enabled: ${PEAK_REPORT_STORAGE_ENABLED:false}
+      endpoint: ${PEAK_REPORT_STORAGE_ENDPOINT:http://localhost:9000}
+      access-key: ${PEAK_REPORT_STORAGE_ACCESS_KEY:peak}
+      secret-key: ${PEAK_REPORT_STORAGE_SECRET_KEY:peak-development-secret}
+      bucket: ${PEAK_REPORT_STORAGE_BUCKET:peak-private-reports}
+      region: ${PEAK_REPORT_STORAGE_REGION:us-east-1}
+    retention:
+      cleanup-interval-ms: ${PEAK_REPORT_RETENTION_CLEANUP_INTERVAL_MS:3600000}
   reliability:
     outbox:
       worker:

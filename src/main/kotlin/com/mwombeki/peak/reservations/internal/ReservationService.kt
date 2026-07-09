@@ -21,6 +21,8 @@ import com.mwombeki.peak.reservations.api.ReservationMutationReceipt
 import com.mwombeki.peak.reservations.api.ReservationNotFoundException
 import com.mwombeki.peak.reservations.api.ReservationCheckInSnapshot
 import com.mwombeki.peak.reservations.api.ReservationOperationalSummary
+import com.mwombeki.peak.reservations.api.ReservationCloseSnapshotPort
+import com.mwombeki.peak.reservations.api.ReservationCloseSnapshotSummary
 import com.mwombeki.peak.reservations.api.ReservationPort
 import com.mwombeki.peak.reservations.api.ReservationResponse
 import com.mwombeki.peak.reservations.api.ReservationTransitionPort
@@ -50,7 +52,7 @@ class ReservationService(
     private val transactionTemplate: TransactionTemplate,
     private val objectMapper: ObjectMapper,
     private val meterRegistry: MeterRegistry,
-) : ReservationPort, ReservationTransitionPort {
+) : ReservationPort, ReservationTransitionPort, ReservationCloseSnapshotPort {
 
     override fun requireCheckInSnapshot(
         tenantId: UUID,
@@ -217,6 +219,68 @@ class ReservationService(
             businessDate,
         ) ?: 0
         return ReservationOperationalSummary(overdueCheckedInStays = overdue)
+    }
+
+    override fun closeSnapshotSummary(
+        tenantId: UUID,
+        propertyId: UUID,
+        businessDate: LocalDate,
+    ): ReservationCloseSnapshotSummary {
+        return jdbcTemplate.query(
+            """
+            SELECT
+                COUNT(DISTINCT rr.id) FILTER (
+                    WHERE rr.status IN ('checked_in', 'checked_out')
+                      AND rr.check_in_date <= ?
+                      AND rr.check_out_date > ?
+                ) AS rooms_sold,
+                COUNT(DISTINCT s.room_id) FILTER (
+                    WHERE s.status = 'checked_in'
+                ) AS occupied_rooms,
+                COUNT(DISTINCT r.id) FILTER (
+                    WHERE r.check_in_date = ?
+                      AND r.status IN ('confirmed', 'checked_in', 'checked_out')
+                ) AS arrivals,
+                COUNT(DISTINCT r.id) FILTER (
+                    WHERE r.check_out_date = ?
+                      AND r.status IN ('checked_out')
+                ) AS departures,
+                COUNT(DISTINCT r.id) FILTER (
+                    WHERE r.check_in_date = ? AND r.status = 'no_show'
+                ) AS no_shows,
+                COUNT(DISTINCT s.id) FILTER (
+                    WHERE s.status = 'checked_in' AND r.check_out_date < ?
+                ) AS overdue_stays
+            FROM reservations r
+            LEFT JOIN reservation_rooms rr
+              ON rr.tenant_id = r.tenant_id
+             AND rr.reservation_id = r.id
+            LEFT JOIN stays s
+              ON s.tenant_id = r.tenant_id
+             AND s.reservation_id = r.id
+            WHERE r.tenant_id = ?
+              AND r.property_id = ?
+              AND r.deleted_at IS NULL
+            """.trimIndent(),
+            { rs, _ ->
+                ReservationCloseSnapshotSummary(
+                    roomsSold = rs.getInt("rooms_sold"),
+                    occupiedRooms = rs.getInt("occupied_rooms"),
+                    arrivals = rs.getInt("arrivals"),
+                    departures = rs.getInt("departures"),
+                    noShows = rs.getInt("no_shows"),
+                    overdueStays = rs.getInt("overdue_stays"),
+                )
+            },
+            businessDate,
+            businessDate,
+            businessDate,
+            businessDate,
+            businessDate,
+            businessDate,
+            tenantId,
+            propertyId,
+        ).single()
     }
 
     override fun createGuestInCurrentTransaction(

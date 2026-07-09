@@ -24,8 +24,6 @@ interface CommunicationPort {
         channelId: UUID,
         request: RecordCommunicationConsentRequest,
     ): CommunicationConsentReceipt
-    fun configureReportRecipient(request: ConfigureReportRecipientRequest): ReportRecipientMutationReceipt
-    fun listReportRecipients(): List<ReportRecipientResponse>
     fun createTemplate(request: CreateTemplateRequest): TemplateMutationReceipt
     fun verifyChannel(channelId: UUID, token: String): ChannelVerificationReceipt
     fun requestChannelVerification(channelId: UUID): ChannelVerificationRequestReceipt

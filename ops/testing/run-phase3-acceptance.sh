@@ -26,7 +26,7 @@ export PHASE2_ROOT_PASSWORD="${PHASE3_ROOT_PASSWORD:-P3-$(openssl rand -hex 18)}
 export PHASE2_OTHER_PASSWORD="${PHASE3_OTHER_PASSWORD:-P3-$(openssl rand -hex 18)}"
 export PHASE2_EVIDENCE_FILE="$PHASE2_EVIDENCE"
 export COMPOSE_PROJECT_NAME="$PROJECT"
-export OVERLAY_FILE="$ROOT_DIR/ops/testing/compose.phase3-acceptance.yaml"
+export OVERLAY_FILE="${OVERLAY_FILE:-$ROOT_DIR/ops/testing/compose.phase3-acceptance.yaml}"
 
 if [[ "${PHASE3_REUSE_FOUNDATION:-false}" == "true" ]]; then
   [[ -f "$PHASE2_EVIDENCE" ]] || {

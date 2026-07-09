@@ -20,7 +20,7 @@ class Phase4MigrationUpgradeIntegrationTests @Autowired constructor(
     private val postgres: PostgreSQLContainer,
 ) {
     @Test
-    fun `upgrades populated V44 department records through V49`() {
+    fun `upgrades populated V44 department records through current schema`() {
         val database = "phase4_upgrade_${UUID.randomUUID().toString().replace("-", "")}"
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use {
             it.createStatement().execute("CREATE DATABASE $database")
@@ -159,7 +159,7 @@ class Phase4MigrationUpgradeIntegrationTests @Autowired constructor(
                 .dataSource(url, postgres.username, postgres.password)
                 .load()
             flyway.migrate()
-            assertEquals("49", flyway.info().current().version.version)
+            assertEquals("53", flyway.info().current().version.version)
 
             DriverManager.getConnection(url, postgres.username, postgres.password).use { c ->
                 c.prepareStatement(

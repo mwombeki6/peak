@@ -59,6 +59,11 @@ dependencies {
     // Communications
     implementation("org.springframework.boot:spring-boot-starter-mail")
 
+    // Phase 5 reporting and S3-compatible private object storage
+    implementation("org.apache.pdfbox:pdfbox:3.0.7")
+    implementation("io.minio:minio:9.0.3")
+    implementation("com.github.librepdf:openpdf-fonts-extra:3.0.5")
+
     // Kotlin and JSON
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")

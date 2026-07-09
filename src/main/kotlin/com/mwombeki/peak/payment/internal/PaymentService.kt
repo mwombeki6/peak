@@ -26,6 +26,7 @@ import com.mwombeki.peak.payment.api.PaymentRejectedException
 import com.mwombeki.peak.payment.api.PaymentStatus
 import com.mwombeki.peak.payment.api.PaymentTransactionResponse
 import com.mwombeki.peak.payment.api.PaymentNightAuditSummary
+import com.mwombeki.peak.payment.api.PaymentCloseSnapshotSummary
 import com.mwombeki.peak.payment.api.PaymentStatusPort
 import com.mwombeki.peak.payment.api.RecordManualMobileMoneyPaymentRequest
 import com.mwombeki.peak.payment.api.RefundPaymentRequest
@@ -47,6 +48,7 @@ import java.math.RoundingMode
 import java.net.URI
 import java.sql.ResultSet
 import java.sql.Timestamp
+import java.time.LocalDate
 import java.util.UUID
 import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.core.env.Environment
@@ -91,6 +93,123 @@ class PaymentService(
             propertyId,
         ) ?: 0
         return PaymentNightAuditSummary(nonTerminalTransactions = count)
+    }
+
+    override fun closeSnapshotSummary(
+        tenantId: UUID,
+        propertyId: UUID,
+        businessDate: LocalDate,
+    ): PaymentCloseSnapshotSummary {
+        val byMethod = jdbcTemplate.query(
+            """
+            SELECT payment_method, round(sum(amount), 2) AS amount
+            FROM folio_payments
+            WHERE tenant_id = ?
+              AND property_id = ?
+              AND business_date = ?
+              AND status = 'POSTED'
+              AND is_reversed = false
+              AND deleted_at IS NULL
+            GROUP BY payment_method
+            ORDER BY payment_method
+            """.trimIndent(),
+            { rs, _ ->
+                rs.getString("payment_method") to
+                    rs.getBigDecimal("amount").money()
+            },
+            tenantId,
+            propertyId,
+            businessDate,
+        ).toMap()
+        return jdbcTemplate.query(
+            """
+            WITH transaction_totals AS (
+                SELECT
+                    round(COALESCE(sum(amount) FILTER (
+                        WHERE transaction_type = 'collection'
+                          AND folio_id IS NOT NULL
+                          AND status IN (
+                              'posted', 'reconciled', 'partially_refunded',
+                              'refunded'
+                          )
+                    ), 0), 2) AS collections,
+                    round(COALESCE(sum(amount) FILTER (
+                        WHERE transaction_type = 'refund'
+                          AND status IN ('posted', 'reconciled')
+                    ), 0), 2) AS refunds,
+                    round(COALESCE(sum(amount) FILTER (
+                        WHERE transaction_type = 'reversal'
+                          AND status IN ('posted', 'reconciled')
+                    ), 0), 2) AS reversals
+                FROM payment_transactions
+                WHERE tenant_id = ?
+                  AND property_id = ?
+                  AND business_date = ?
+            ),
+            allocation_total AS (
+                SELECT round(COALESCE(sum(amount), 0), 2) AS amount
+                FROM folio_payments
+                WHERE tenant_id = ?
+                  AND property_id = ?
+                  AND business_date = ?
+                  AND status = 'POSTED'
+                  AND is_reversed = false
+                  AND deleted_at IS NULL
+            ),
+            cash_total AS (
+                SELECT round(COALESCE(sum(variance), 0), 2) AS variance
+                FROM cash_sessions
+                WHERE tenant_id = ?
+                  AND property_id = ?
+                  AND business_date = ?
+                  AND status = 'closed'
+            ),
+            provider_total AS (
+                SELECT round(COALESCE(sum(variance), 0), 2) AS variance
+                FROM payment_reconciliations
+                WHERE tenant_id = ?
+                  AND property_id = ?
+                  AND reconciliation_date = ?
+                  AND status IN ('matched', 'variance', 'approved')
+            )
+            SELECT cash.variance AS cash_variance,
+                   provider.variance AS provider_reconciliation,
+                   tx.refunds,
+                   tx.reversals,
+                   round(alloc.amount - tx.collections, 2)
+                       AS allocation_difference
+            FROM transaction_totals tx
+            CROSS JOIN allocation_total alloc
+            CROSS JOIN cash_total cash
+            CROSS JOIN provider_total provider
+            """.trimIndent(),
+            { rs, _ ->
+                PaymentCloseSnapshotSummary(
+                    paymentsByMethod = byMethod,
+                    cashVariance = rs.getBigDecimal("cash_variance").money(),
+                    providerReconciliation = rs.getBigDecimal(
+                        "provider_reconciliation",
+                    ).money(),
+                    refunds = rs.getBigDecimal("refunds").money(),
+                    reversals = rs.getBigDecimal("reversals").money(),
+                    allocationDifference = rs.getBigDecimal(
+                        "allocation_difference",
+                    ).money(),
+                )
+            },
+            tenantId,
+            propertyId,
+            businessDate,
+            tenantId,
+            propertyId,
+            businessDate,
+            tenantId,
+            propertyId,
+            businessDate,
+            tenantId,
+            propertyId,
+            businessDate,
+        ).single()
     }
 
     override fun openCashSession(

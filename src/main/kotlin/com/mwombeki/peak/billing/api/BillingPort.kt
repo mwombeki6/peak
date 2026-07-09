@@ -1,5 +1,6 @@
 package com.mwombeki.peak.billing.api
 
+import java.time.LocalDate
 import java.util.UUID
 import org.springframework.modulith.NamedInterface
 
@@ -91,6 +92,12 @@ interface BillingSnapshotPort {
         tenantId: UUID,
         propertyId: UUID,
     ): BillingNightAuditSummary
+
+    fun closeSnapshotSummary(
+        tenantId: UUID,
+        propertyId: UUID,
+        businessDate: LocalDate,
+    ): BillingCloseSnapshotSummary
 
     fun fiscalInvoiceSnapshot(
         tenantId: UUID,

@@ -81,3 +81,22 @@ data class ReservationCheckInSnapshot(
 data class ReservationOperationalSummary(
     val overdueCheckedInStays: Int,
 )
+
+@NamedInterface("api")
+data class ReservationCloseSnapshotSummary(
+    val roomsSold: Int,
+    val occupiedRooms: Int,
+    val arrivals: Int,
+    val departures: Int,
+    val noShows: Int,
+    val overdueStays: Int,
+)
+
+@NamedInterface("api")
+interface ReservationCloseSnapshotPort {
+    fun closeSnapshotSummary(
+        tenantId: UUID,
+        propertyId: UUID,
+        businessDate: java.time.LocalDate,
+    ): ReservationCloseSnapshotSummary
+}

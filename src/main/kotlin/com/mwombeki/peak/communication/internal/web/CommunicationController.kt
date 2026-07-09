@@ -4,7 +4,6 @@ import com.mwombeki.peak.communication.api.ChannelVerificationReceipt
 import com.mwombeki.peak.communication.api.ChannelVerificationRequestReceipt
 import com.mwombeki.peak.communication.api.CommunicationPort
 import com.mwombeki.peak.communication.api.CommunicationConsentReceipt
-import com.mwombeki.peak.communication.api.ConfigureReportRecipientRequest
 import com.mwombeki.peak.communication.api.ContactMutationReceipt
 import com.mwombeki.peak.communication.api.ContactResponse
 import com.mwombeki.peak.communication.api.ContactRoleMutationReceipt
@@ -16,8 +15,6 @@ import com.mwombeki.peak.communication.api.DeliveryRetryReceipt
 import com.mwombeki.peak.communication.api.EnqueueNotificationRequest
 import com.mwombeki.peak.communication.api.NotificationEnqueueReceipt
 import com.mwombeki.peak.communication.api.RecordCommunicationConsentRequest
-import com.mwombeki.peak.communication.api.ReportRecipientMutationReceipt
-import com.mwombeki.peak.communication.api.ReportRecipientResponse
 import com.mwombeki.peak.communication.api.AssignContactRoleRequest
 import com.mwombeki.peak.communication.api.TemplateMutationReceipt
 import java.util.UUID
@@ -72,18 +69,6 @@ class CommunicationController(
         @RequestBody request: RecordCommunicationConsentRequest,
     ): CommunicationConsentReceipt {
         return communicationPort.recordConsent(contactId, channelId, request)
-    }
-
-    @PostMapping("/report-recipients")
-    fun configureReportRecipient(
-        @RequestBody request: ConfigureReportRecipientRequest,
-    ): ReportRecipientMutationReceipt {
-        return communicationPort.configureReportRecipient(request)
-    }
-
-    @GetMapping("/report-recipients")
-    fun listReportRecipients(): List<ReportRecipientResponse> {
-        return communicationPort.listReportRecipients()
     }
 
     @PostMapping("/templates")

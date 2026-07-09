@@ -127,9 +127,19 @@ interface PropertyOperationsPort {
         changedBy: UUID,
     )
     fun currentBusinessDate(tenantId: UUID, propertyId: UUID): LocalDate
+    fun closeSnapshotSummary(
+        tenantId: UUID,
+        propertyId: UUID,
+    ): PropertyCloseSnapshotSummary
     fun advanceBusinessDate(
         tenantId: UUID,
         propertyId: UUID,
         expectedBusinessDate: LocalDate,
     ): LocalDate
 }
+
+@NamedInterface("api")
+data class PropertyCloseSnapshotSummary(
+    val totalRooms: Int,
+    val currency: String,
+)

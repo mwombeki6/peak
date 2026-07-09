@@ -172,6 +172,22 @@ data class BillingNightAuditSummary(
     val issuedInvoiceIds: List<UUID>,
 )
 
+data class RevenueCenterCloseTotal(
+    val revenueCenterId: UUID?,
+    val amount: BigDecimal,
+)
+
+data class BillingCloseSnapshotSummary(
+    val currency: String,
+    val revenueByCenter: List<RevenueCenterCloseTotal>,
+    val roomRevenue: BigDecimal,
+    val posRevenue: BigDecimal,
+    val taxTotal: BigDecimal,
+    val grossTotal: BigDecimal,
+    val netTotal: BigDecimal,
+    val revenueJournalDifference: BigDecimal,
+)
+
 data class FiscalInvoiceSnapshot(
     val id: UUID,
     val number: String,

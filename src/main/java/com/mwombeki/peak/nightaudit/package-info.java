@@ -11,7 +11,10 @@
                 "billing::api",
                 "payment::api",
                 "fiscal::api",
-                "pos::api"
+                "pos::api",
+                "housekeeping::api",
+                "maintenance::api",
+                "inventory::api"
         }
 )
 package com.mwombeki.peak.nightaudit;
