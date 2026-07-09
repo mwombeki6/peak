@@ -8,7 +8,8 @@
                 "reliability::api",
                 "reservations::api",
                 "payment::api",
-                "fiscal::api"
+                "fiscal::api",
+                "reports::api"
         }
 )
 package com.mwombeki.peak.integrations;

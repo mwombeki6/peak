@@ -46,6 +46,10 @@ jobs:
             -f ops/production/compose.yaml \
             -f ops/testing/compose.phase4-acceptance.yaml \
             config >/tmp/peak-phase4-acceptance-compose.yaml
+          podman compose --env-file ops/production/.env.example \
+            -f ops/production/compose.yaml \
+            -f ops/testing/compose.phase5-acceptance.yaml \
+            config >/tmp/peak-phase5-acceptance-compose.yaml
 
       - name: Validate production environment contract
         run: |
@@ -67,6 +71,8 @@ jobs:
           PEAK_CLICKPESA_CHECKSUM_KEY=ci-clickpesa-checksum-key-1234
           PEAK_FISCAL_GATEWAY_CREDENTIAL=ci-fiscal-gateway-credential-1234
           PEAK_GUEST_IDENTITY_HASH_KEY=ci-guest-identity-hmac-key-1234567890
+          PEAK_REPORT_STORAGE_ACCESS_KEY=ci-report-storage-access-key
+          PEAK_REPORT_STORAGE_SECRET_KEY=ci-report-storage-secret-key-1234
           EOF
           sed -i 's/^          //' "$tmp"
           ops/scripts/validate-production-env.sh "$tmp"
@@ -80,8 +86,10 @@ jobs:
           python3 -m json.tool ops/testing/Peak-Phase-3-Guest-Identity.postman_collection.json >/dev/null
           python3 -m json.tool ops/testing/Peak-Phase-3.postman_collection.json >/dev/null
           python3 -m json.tool ops/testing/Peak-Phase-4.postman_collection.json >/dev/null
+          python3 -m json.tool ops/testing/Peak-Phase-5.postman_collection.json >/dev/null
           python3 -m json.tool ops/observability/phase3-dashboard.json >/dev/null
           python3 -m json.tool ops/observability/phase4-dashboard.json >/dev/null
+          python3 -m json.tool ops/observability/phase5-dashboard.json >/dev/null
 
       - name: Validate ops scripts
         run: |
@@ -89,6 +97,7 @@ jobs:
           bash -n ops/testing/run-phase2-acceptance.sh
           bash -n ops/testing/run-phase3-acceptance.sh
           bash -n ops/testing/run-phase4-acceptance.sh
+          bash -n ops/testing/run-phase5-acceptance.sh
           bash -n ops/testing/run-clickpesa-sandbox-acceptance.sh
 
       - name: Start Podman API socket for Testcontainers
@@ -116,62 +125,78 @@ jobs:
       - name: Validate clean migrations
         run: ./gradlew test --tests '*MigrationValidationIntegrationTests' --rerun-tasks
 
-      - name: Prepare Phase 4 acceptance environment
+      - name: Build Phase 5 container
+        run: podman build -t localhost/peak:phase5-ci .
+
+      - name: Scan Phase 5 container
         run: |
-          cp ops/production/.env.example "$RUNNER_TEMP/peak-phase4-acceptance.env"
+          mkdir -p build
+          podman save --format docker-archive \
+            -o build/peak-phase5-image.tar localhost/peak:phase5-ci
+          podman run --rm \
+            -v "$PWD/build:/scan:ro,Z" \
+            docker.io/aquasec/trivy:0.69.2 \
+            image --input /scan/peak-phase5-image.tar \
+            --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed
+
+      - name: Prepare Phase 5 acceptance environment
+        run: |
+          cp ops/production/.env.example "$RUNNER_TEMP/peak-phase5-acceptance.env"
           sed -i \
-            -e 's|^PEAK_IMAGE=.*|PEAK_IMAGE=localhost/peak:phase4-ci|' \
+            -e 's|^PEAK_IMAGE=.*|PEAK_IMAGE=localhost/peak:phase5-ci|' \
             -e 's|^KEYCLOAK_HOSTNAME=.*|KEYCLOAK_HOSTNAME=http://keycloak:8080|' \
             -e 's|^PEAK_SECURITY_JWT_ISSUER_URI=.*|PEAK_SECURITY_JWT_ISSUER_URI=http://keycloak:8080/realms/peak|' \
             -e 's|^PEAK_CORS_ALLOWED_ORIGINS=.*|PEAK_CORS_ALLOWED_ORIGINS=https://localhost:5173|' \
             -e 's|^PEAK_REALTIME_WEBSOCKET_ALLOWED_ORIGINS=.*|PEAK_REALTIME_WEBSOCKET_ALLOWED_ORIGINS=https://localhost:5173|' \
             -e 's|^PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_BASE_URL=.*|PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_BASE_URL=http://host.containers.internal:8090|' \
             -e 's|^PEAK_ACCEPTANCE_MODE=.*|PEAK_ACCEPTANCE_MODE=true|' \
-            -e 's|^POSTGRES_MIGRATOR_PASSWORD=.*|POSTGRES_MIGRATOR_PASSWORD=phase4-ci-migrator-password|' \
-            -e 's|^POSTGRES_APP_PASSWORD=.*|POSTGRES_APP_PASSWORD=phase4-ci-application-password|' \
-            -e 's|^POSTGRES_WORKER_PASSWORD=.*|POSTGRES_WORKER_PASSWORD=phase4-ci-worker-password|' \
-            -e 's|^POSTGRES_PLATFORM_SUPPORT_PASSWORD=.*|POSTGRES_PLATFORM_SUPPORT_PASSWORD=phase4-ci-platform-support-password|' \
-            -e 's|^KEYCLOAK_ADMIN_PASSWORD=.*|KEYCLOAK_ADMIN_PASSWORD=phase4-ci-keycloak-admin-password|' \
-            -e 's|^KEYCLOAK_DB_PASSWORD=.*|KEYCLOAK_DB_PASSWORD=phase4-ci-keycloak-db-password|' \
-            -e 's|^PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=.*|PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=phase4-ci-communication-provider-key|' \
+            -e 's|^POSTGRES_MIGRATOR_PASSWORD=.*|POSTGRES_MIGRATOR_PASSWORD=phase5-ci-migrator-password|' \
+            -e 's|^POSTGRES_APP_PASSWORD=.*|POSTGRES_APP_PASSWORD=phase5-ci-application-password|' \
+            -e 's|^POSTGRES_WORKER_PASSWORD=.*|POSTGRES_WORKER_PASSWORD=phase5-ci-worker-password|' \
+            -e 's|^POSTGRES_PLATFORM_SUPPORT_PASSWORD=.*|POSTGRES_PLATFORM_SUPPORT_PASSWORD=phase5-ci-platform-support-password|' \
+            -e 's|^KEYCLOAK_ADMIN_PASSWORD=.*|KEYCLOAK_ADMIN_PASSWORD=phase5-ci-keycloak-admin-password|' \
+            -e 's|^KEYCLOAK_DB_PASSWORD=.*|KEYCLOAK_DB_PASSWORD=phase5-ci-keycloak-db-password|' \
+            -e 's|^PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=.*|PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=phase5-ci-communication-provider-key|' \
             -e 's|^PEAK_ENVELOPE_KEY_BASE64=.*|PEAK_ENVELOPE_KEY_BASE64=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=|' \
-            -e 's|^PEAK_PAYMENT_GATEWAY_CREDENTIAL=.*|PEAK_PAYMENT_GATEWAY_CREDENTIAL=phase4-ci-payment-gateway-credential|' \
-            -e 's|^PEAK_PAYMENT_WEBHOOK_SECRET=.*|PEAK_PAYMENT_WEBHOOK_SECRET=phase4-ci-payment-webhook-secret|' \
-            -e 's|^PEAK_CLICKPESA_API_KEY=.*|PEAK_CLICKPESA_API_KEY=phase4-ci-clickpesa-api-key|' \
-            -e 's|^PEAK_CLICKPESA_CHECKSUM_KEY=.*|PEAK_CLICKPESA_CHECKSUM_KEY=phase4-ci-clickpesa-checksum-key|' \
-            -e 's|^PEAK_FISCAL_GATEWAY_CREDENTIAL=.*|PEAK_FISCAL_GATEWAY_CREDENTIAL=phase4-ci-fiscal-gateway-credential|' \
-            -e 's|^PEAK_GUEST_IDENTITY_HASH_KEY=.*|PEAK_GUEST_IDENTITY_HASH_KEY=phase4-ci-guest-identity-hmac-key-2026|' \
-            "$RUNNER_TEMP/peak-phase4-acceptance.env"
+            -e 's|^PEAK_PAYMENT_GATEWAY_CREDENTIAL=.*|PEAK_PAYMENT_GATEWAY_CREDENTIAL=phase5-ci-payment-gateway-credential|' \
+            -e 's|^PEAK_PAYMENT_WEBHOOK_SECRET=.*|PEAK_PAYMENT_WEBHOOK_SECRET=phase5-ci-payment-webhook-secret|' \
+            -e 's|^PEAK_CLICKPESA_API_KEY=.*|PEAK_CLICKPESA_API_KEY=phase5-ci-clickpesa-api-key|' \
+            -e 's|^PEAK_CLICKPESA_CHECKSUM_KEY=.*|PEAK_CLICKPESA_CHECKSUM_KEY=phase5-ci-clickpesa-checksum-key|' \
+            -e 's|^PEAK_FISCAL_GATEWAY_CREDENTIAL=.*|PEAK_FISCAL_GATEWAY_CREDENTIAL=phase5-ci-fiscal-gateway-credential|' \
+            -e 's|^PEAK_GUEST_IDENTITY_HASH_KEY=.*|PEAK_GUEST_IDENTITY_HASH_KEY=phase5-ci-guest-identity-hmac-key-2026|' \
+            -e 's|^PEAK_REPORT_STORAGE_ACCESS_KEY=.*|PEAK_REPORT_STORAGE_ACCESS_KEY=phase5-ci-report-access-key|' \
+            -e 's|^PEAK_REPORT_STORAGE_SECRET_KEY=.*|PEAK_REPORT_STORAGE_SECRET_KEY=phase5-ci-report-secret-key|' \
+            "$RUNNER_TEMP/peak-phase5-acceptance.env"
 
-      - name: Run Phase 4 acceptance
+      - name: Run Phase 5 acceptance
         env:
-          COMPOSE_PROJECT_NAME: peak-phase4-ci
-          ENV_FILE: ${{ runner.temp }}/peak-phase4-acceptance.env
-          PHASE2_BUILD_IMAGE: "true"
+          COMPOSE_PROJECT_NAME: peak-phase5-ci
+          ENV_FILE: ${{ runner.temp }}/peak-phase5-acceptance.env
+          PHASE2_BUILD_IMAGE: "false"
           PHASE2_RESET: "true"
-          PHASE4_TENANT_PASSWORD: Phase4-CI-Acceptance-2026
-        run: ops/testing/run-phase4-acceptance.sh
+          PHASE5_TENANT_PASSWORD: Phase5-CI-Acceptance-2026
+        run: ops/testing/run-phase5-acceptance.sh
 
       - name: Check whitespace
         run: git diff --check
 
-      - name: Upload Phase 4 acceptance evidence
+      - name: Upload Phase 5 acceptance evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: phase4-acceptance-evidence
-          path: build/evidence/phase4
+          name: phase5-acceptance-evidence
+          path: build/evidence/phase5
 
-      - name: Stop Phase 4 acceptance stack
+      - name: Stop Phase 5 acceptance stack
         if: always()
         env:
-          COMPOSE_PROJECT_NAME: peak-phase4-ci
+          COMPOSE_PROJECT_NAME: peak-phase5-ci
         run: |
           podman compose \
             -p "$COMPOSE_PROJECT_NAME" \
-            --env-file "$RUNNER_TEMP/peak-phase4-acceptance.env" \
+            --env-file "$RUNNER_TEMP/peak-phase5-acceptance.env" \
             -f ops/production/compose.yaml \
-            -f ops/testing/compose.phase3-acceptance.yaml \
+            -f ops/testing/compose.phase5-acceptance.yaml \
             down -v --remove-orphans || true
 
       - name: Upload test report

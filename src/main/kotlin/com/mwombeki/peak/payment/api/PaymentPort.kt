@@ -1,5 +1,6 @@
 package com.mwombeki.peak.payment.api
 
+import java.time.LocalDate
 import java.util.UUID
 import org.springframework.modulith.NamedInterface
 
@@ -90,4 +91,10 @@ interface PaymentStatusPort {
         tenantId: UUID,
         propertyId: UUID,
     ): PaymentNightAuditSummary
+
+    fun closeSnapshotSummary(
+        tenantId: UUID,
+        propertyId: UUID,
+        businessDate: LocalDate,
+    ): PaymentCloseSnapshotSummary
 }

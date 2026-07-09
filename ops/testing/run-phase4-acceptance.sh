@@ -20,7 +20,7 @@ for tool in curl date jq openssl podman python3; do
 done
 
 mkdir -p "$EVIDENCE_DIR"
-export PHASE3_TENANT_PASSWORD="${PHASE4_TENANT_PASSWORD:-P4-$(openssl rand -hex 18)}"
+export PHASE3_TENANT_PASSWORD="${PHASE4_TENANT_PASSWORD:-${PHASE3_TENANT_PASSWORD:-P4-$(openssl rand -hex 18)}}"
 export PHASE3_EVIDENCE_DIR="$EVIDENCE_DIR"
 export COMPOSE_PROJECT_NAME="$PROJECT"
 
@@ -103,10 +103,31 @@ podman run --rm \
   --env-var "outletId=$outlet_id" \
   --env-var "menuItemId=$menu_item_id"
 
+newman_response() {
+  local item_name="$1"
+  jq -cer --arg item "$item_name" '
+    .run.executions[]
+    | select(.item.name == $item)
+    | .response.stream
+    | if type == "object" and .type == "Buffer"
+      then (.data | implode | fromjson)
+      elif type == "string" then fromjson
+      else error("unsupported Newman response encoding")
+      end
+  ' "$NEWMAN_REPORT" | tail -n 1
+}
+
+pos_session_id="$(newman_response "Open POS session" | jq -er '.id')"
+pos_order_id="$(newman_response "Create offline-safe POS order" | jq -er '.id')"
+kitchen_ticket_id="$(newman_response "Send order to kitchen" | jq -er '.id')"
+
 jq -n \
   --arg generatedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg tenantId "$tenant_id" \
   --arg propertyId "$property_id" \
+  --arg posSessionId "$pos_session_id" \
+  --arg posOrderId "$pos_order_id" \
+  --arg kitchenTicketId "$kitchen_ticket_id" \
   --arg websocketEvidence "$(tr -d '\n' <"$EVIDENCE_DIR/websocket-kds.txt")" \
   --argjson requests "$(jq '.run.stats.requests' "$NEWMAN_REPORT")" \
   --argjson assertions "$(jq '.run.stats.assertions' "$NEWMAN_REPORT")" \
@@ -116,6 +137,9 @@ jq -n \
     generatedAt: $generatedAt,
     tenantId: $tenantId,
     propertyId: $propertyId,
+    posSessionId: $posSessionId,
+    posOrderId: $posOrderId,
+    kitchenTicketId: $kitchenTicketId,
     provisionedThroughApis: true,
     keycloakJwtVerified: true,
     separateApiWorkerRoles: true,

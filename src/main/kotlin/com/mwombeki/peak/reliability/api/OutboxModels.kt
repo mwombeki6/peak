@@ -76,6 +76,7 @@ enum class OutboxDestination(val databaseValue: String) {
     WHATSAPP("whatsapp"),
     POS("pos"),
     HOUSEKEEPING("housekeeping"),
+    REPORTS("reports"),
     PLATFORM("platform"),
 }
 

@@ -7,7 +7,6 @@ import com.mwombeki.peak.communication.api.ChannelVerificationReceipt
 import com.mwombeki.peak.communication.api.ChannelVerificationRequestReceipt
 import com.mwombeki.peak.communication.api.CommunicationPort
 import com.mwombeki.peak.communication.api.CommunicationConsentReceipt
-import com.mwombeki.peak.communication.api.ConfigureReportRecipientRequest
 import com.mwombeki.peak.communication.api.ContactConsentResponse
 import com.mwombeki.peak.communication.api.ContactChannelResponse
 import com.mwombeki.peak.communication.api.ContactMutationReceipt
@@ -22,8 +21,6 @@ import com.mwombeki.peak.communication.api.DeliveryRetryReceipt
 import com.mwombeki.peak.communication.api.EnqueueNotificationRequest
 import com.mwombeki.peak.communication.api.NotificationEnqueueReceipt
 import com.mwombeki.peak.communication.api.RecordCommunicationConsentRequest
-import com.mwombeki.peak.communication.api.ReportRecipientMutationReceipt
-import com.mwombeki.peak.communication.api.ReportRecipientResponse
 import com.mwombeki.peak.communication.api.AssignContactRoleRequest
 import com.mwombeki.peak.communication.api.TemplateMutationReceipt
 import com.mwombeki.peak.reliability.api.IdempotencyCommand
@@ -39,7 +36,6 @@ import java.sql.ResultSet
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.time.OffsetDateTime
-import java.time.ZoneId
 import java.util.Base64
 import java.util.UUID
 import org.springframework.jdbc.core.JdbcTemplate
@@ -561,281 +557,6 @@ class OutboxService(
     }
 
     @Transactional
-    override fun configureReportRecipient(
-        request: ConfigureReportRecipientRequest,
-    ): ReportRecipientMutationReceipt {
-        val tenantId = bindTenantContext()
-        val actorId = currentTenantUserId()
-        val reportCode = request.reportCode.normalizedCode("reportCode")
-        val subscriptionName = request.subscriptionName.normalizedRequired("subscriptionName")
-        val frequency = request.frequency.normalizedCode("frequency")
-        val deliveryFormat = request.deliveryFormat.normalizedCode("deliveryFormat")
-        val timezone = request.timezone.normalizedRequired("timezone")
-        ZoneId.of(timezone)
-        require(frequency in ALLOWED_REPORT_FREQUENCIES) {
-            "Unsupported report frequency"
-        }
-        require(deliveryFormat in ALLOWED_REPORT_FORMATS) {
-            "Unsupported report delivery format"
-        }
-
-        return withIdempotency(
-            operationType = "communication.report.recipient.configure",
-            requestPayload = request,
-            resourceType = "report_subscription_recipients",
-            replayType = ReportRecipientMutationReceipt::class.java,
-        ) { idempotencyKeyId ->
-            requireActiveContact(tenantId, request.contactId)
-            requireContactChannel(tenantId, request.contactId, request.channelId)
-            request.propertyId?.let { requirePropertyBelongsToTenant(tenantId, it) }
-            val scope = if (request.propertyId == null) "tenant" else "property"
-            requireReportScope(reportCode, scope)
-
-            var changed = false
-            val existingSubscriptionId = jdbcTemplate.query(
-                """
-                SELECT id
-                FROM report_subscriptions
-                WHERE tenant_id = ?
-                  AND property_id IS NOT DISTINCT FROM ?
-                  AND report_code = ?
-                  AND lower(subscription_name) = lower(?)
-                  AND status = 'active'
-                  AND deleted_at IS NULL
-                FOR UPDATE
-                """.trimIndent(),
-                { rs, _ -> rs.getObject("id", UUID::class.java) },
-                tenantId,
-                request.propertyId,
-                reportCode,
-                subscriptionName,
-            ).singleOrNull()
-
-            val subscriptionId = existingSubscriptionId ?: UUID.randomUUID().also { id ->
-                jdbcTemplate.update(
-                    """
-                    INSERT INTO report_subscriptions (
-                        id,
-                        tenant_id,
-                        property_id,
-                        report_code,
-                        subscription_name,
-                        scope,
-                        frequency,
-                        schedule_time,
-                        timezone,
-                        default_format,
-                        status,
-                        created_by
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
-                    """.trimIndent(),
-                    id,
-                    tenantId,
-                    request.propertyId,
-                    reportCode,
-                    subscriptionName,
-                    scope,
-                    frequency,
-                    request.scheduleTime,
-                    timezone,
-                    deliveryFormat,
-                    actorId,
-                )
-                changed = true
-            }
-
-            if (existingSubscriptionId != null) {
-                val updated = jdbcTemplate.update(
-                    """
-                    UPDATE report_subscriptions
-                    SET frequency = ?,
-                        schedule_time = ?,
-                        timezone = ?,
-                        default_format = ?,
-                        updated_at = now()
-                    WHERE id = ?
-                      AND tenant_id = ?
-                      AND (
-                          frequency IS DISTINCT FROM ?
-                          OR schedule_time IS DISTINCT FROM ?
-                          OR timezone IS DISTINCT FROM ?
-                          OR default_format IS DISTINCT FROM ?
-                      )
-                    """.trimIndent(),
-                    frequency,
-                    request.scheduleTime,
-                    timezone,
-                    deliveryFormat,
-                    subscriptionId,
-                    tenantId,
-                    frequency,
-                    request.scheduleTime,
-                    timezone,
-                    deliveryFormat,
-                )
-                changed = updated > 0
-            }
-
-            val existingRecipientId = jdbcTemplate.query(
-                """
-                SELECT id
-                FROM report_subscription_recipients
-                WHERE tenant_id = ?
-                  AND subscription_id = ?
-                  AND contact_id = ?
-                  AND contact_channel_id = ?
-                FOR UPDATE
-                """.trimIndent(),
-                { rs, _ -> rs.getObject("id", UUID::class.java) },
-                tenantId,
-                subscriptionId,
-                request.contactId,
-                request.channelId,
-            ).singleOrNull()
-
-            val recipientId = existingRecipientId ?: UUID.randomUUID().also { id ->
-                jdbcTemplate.update(
-                    """
-                    INSERT INTO report_subscription_recipients (
-                        id,
-                        tenant_id,
-                        subscription_id,
-                        contact_id,
-                        contact_channel_id,
-                        delivery_format,
-                        is_enabled
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, true)
-                    """.trimIndent(),
-                    id,
-                    tenantId,
-                    subscriptionId,
-                    request.contactId,
-                    request.channelId,
-                    deliveryFormat,
-                )
-                changed = true
-            }
-
-            if (existingRecipientId != null) {
-                val updated = jdbcTemplate.update(
-                    """
-                    UPDATE report_subscription_recipients
-                    SET delivery_format = ?,
-                        is_enabled = true,
-                        updated_at = now()
-                    WHERE id = ?
-                      AND tenant_id = ?
-                      AND (
-                          delivery_format IS DISTINCT FROM ?
-                          OR is_enabled = false
-                      )
-                    """.trimIndent(),
-                    deliveryFormat,
-                    recipientId,
-                    tenantId,
-                    deliveryFormat,
-                )
-                changed = changed || updated > 0
-            }
-
-            ReportRecipientMutationReceipt(
-                subscriptionId = subscriptionId,
-                recipientId = recipientId,
-                contactId = request.contactId,
-                channelId = request.channelId,
-                changed = changed,
-                replayed = false,
-            ).also { receipt ->
-                if (receipt.changed) {
-                    recordCommunicationSideEffects(
-                        tenantId = tenantId,
-                        action = "communication.report.recipient.configured",
-                        resourceType = "report_subscription_recipients",
-                        resourceId = recipientId,
-                        payload = mapOf(
-                            "subscriptionId" to subscriptionId,
-                            "recipientId" to recipientId,
-                            "contactId" to request.contactId,
-                            "channelId" to request.channelId,
-                            "reportCode" to reportCode,
-                            "propertyId" to request.propertyId,
-                            "frequency" to frequency,
-                        ),
-                        idempotencyKeyId = idempotencyKeyId,
-                    )
-                }
-            }
-        }
-    }
-
-    @Transactional
-    override fun listReportRecipients(): List<ReportRecipientResponse> {
-        val tenantId = bindTenantContext()
-        return jdbcTemplate.query(
-            """
-            SELECT rs.id AS subscription_id,
-                   rsr.id AS recipient_id,
-                   rs.report_code,
-                   rs.subscription_name,
-                   rs.property_id,
-                   rs.frequency,
-                   rs.timezone,
-                   rsr.contact_id,
-                   tc.full_name AS contact_name,
-                   rsr.contact_channel_id,
-                   cc.channel_type,
-                   mask_contact_channel_address(cc.channel_type::text, cc.address) AS masked_address,
-                   rsr.delivery_format,
-                   rsr.is_enabled,
-                   contact_channel_has_active_consent(
-                       rsr.tenant_id,
-                       rsr.contact_id,
-                       rsr.contact_channel_id,
-                       'operational_reports'
-                   ) AS has_active_consent
-            FROM report_subscription_recipients rsr
-            JOIN report_subscriptions rs
-              ON rs.tenant_id = rsr.tenant_id
-             AND rs.id = rsr.subscription_id
-             AND rs.deleted_at IS NULL
-            JOIN tenant_contacts tc
-              ON tc.tenant_id = rsr.tenant_id
-             AND tc.id = rsr.contact_id
-             AND tc.deleted_at IS NULL
-            JOIN contact_channels cc
-              ON cc.tenant_id = rsr.tenant_id
-             AND cc.contact_id = rsr.contact_id
-             AND cc.id = rsr.contact_channel_id
-             AND cc.deleted_at IS NULL
-            WHERE rsr.tenant_id = ?
-            ORDER BY rs.subscription_name, tc.full_name
-            """.trimIndent(),
-            { rs, _ ->
-                ReportRecipientResponse(
-                    subscriptionId = rs.getObject("subscription_id", UUID::class.java),
-                    recipientId = rs.getObject("recipient_id", UUID::class.java),
-                    reportCode = rs.getString("report_code"),
-                    subscriptionName = rs.getString("subscription_name"),
-                    propertyId = rs.getObject("property_id", UUID::class.java),
-                    frequency = rs.getString("frequency"),
-                    timezone = rs.getString("timezone"),
-                    contactId = rs.getObject("contact_id", UUID::class.java),
-                    contactName = rs.getString("contact_name"),
-                    channelId = rs.getObject("contact_channel_id", UUID::class.java),
-                    channelType = rs.getString("channel_type"),
-                    maskedAddress = rs.getString("masked_address"),
-                    deliveryFormat = rs.getString("delivery_format"),
-                    enabled = rs.getBoolean("is_enabled"),
-                    hasActiveConsent = rs.getBoolean("has_active_consent"),
-                )
-            },
-            tenantId,
-        )
-    }
-
-    @Transactional
     override fun createTemplate(request: CreateTemplateRequest): TemplateMutationReceipt {
         val tenantId = bindTenantContext()
         val name = request.name.normalizedRequired("name")
@@ -1295,24 +1016,6 @@ class OutboxService(
         }
     }
 
-    private fun requireReportScope(reportCode: String, requestedScope: String) {
-        val catalogScope = jdbcTemplate.query(
-            """
-            SELECT scope
-            FROM report_catalog
-            WHERE report_code = ?
-              AND is_active = true
-            """.trimIndent(),
-            { rs, _ -> rs.getString("scope") },
-            reportCode,
-        ).singleOrNull()
-            ?: throw NoSuchElementException("Active report definition was not found.")
-
-        require(catalogScope == requestedScope || catalogScope == "both") {
-            "Report $reportCode does not support $requestedScope subscriptions."
-        }
-    }
-
     private fun recordCommunicationSideEffects(
         tenantId: UUID,
         action: String,
@@ -1744,7 +1447,6 @@ class OutboxService(
             is DeliveryRetryReceipt -> copy(replayed = true)
             is ContactRoleMutationReceipt -> copy(replayed = true)
             is CommunicationConsentReceipt -> copy(replayed = true)
-            is ReportRecipientMutationReceipt -> copy(replayed = true)
             else -> this
         } as T
     }
@@ -1759,7 +1461,6 @@ class OutboxService(
             is DeliveryRetryReceipt -> deliveryRequestId
             is ContactRoleMutationReceipt -> roleAssignmentId
             is CommunicationConsentReceipt -> consentId
-            is ReportRecipientMutationReceipt -> recipientId
             else -> null
         }
     }
@@ -1848,14 +1549,6 @@ class OutboxService(
         private val TEMPLATE_VARIABLE = Regex("""\{\{([A-Za-z][A-Za-z0-9_.]*)}}""")
         private val TEMPLATE_VARIABLE_NAME = Regex("""[A-Za-z][A-Za-z0-9_.]*""")
         private val ALLOWED_CONSENT_STATUSES = setOf("active", "declined", "revoked")
-        private val ALLOWED_REPORT_FREQUENCIES = setOf(
-            "daily",
-            "weekly",
-            "monthly",
-            "after_night_audit",
-            "event_driven",
-        )
-        private val ALLOWED_REPORT_FORMATS = setOf("pdf", "csv", "xlsx", "json", "html")
         private val RETRYABLE_DELIVERY_STATUSES = setOf("failed", "dead_letter")
         private const val MAX_TEMPLATE_VARIABLES = 50
         private const val MAX_TEMPLATE_VARIABLE_LENGTH = 4000

@@ -15,4 +15,22 @@ interface NightAuditPort {
     fun complete(propertyId: UUID, runId: UUID): NightAuditRunResponse
     fun listRuns(propertyId: UUID): List<NightAuditRunResponse>
     fun getRun(propertyId: UUID, runId: UUID): NightAuditRunResponse?
+    fun getCloseSnapshot(
+        propertyId: UUID,
+        runId: UUID,
+    ): NightAuditCloseSnapshotResponse?
+}
+
+@NamedInterface("api")
+interface NightAuditCloseSnapshotPort {
+    fun getCloseSnapshot(
+        tenantId: UUID,
+        propertyId: UUID,
+        runId: UUID,
+    ): NightAuditCloseSnapshotResponse?
+    fun getCloseSnapshotById(
+        tenantId: UUID,
+        propertyId: UUID,
+        snapshotId: UUID,
+    ): NightAuditCloseSnapshotResponse?
 }

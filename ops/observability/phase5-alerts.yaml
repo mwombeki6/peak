@@ -1,0 +1,42 @@
+groups:
+  - name: peak-phase5-control-close-reporting
+    rules:
+      - alert: PeakReportGenerationLag
+        expr: increase(peak_reporting_generation_total{result="generated"}[30m]) == 0 and increase(peak_outbox_platform_events_published_total{event_type="night_audit.completed"}[30m]) > 0
+        for: 15m
+        labels:
+          severity: warning
+          phase: "5"
+        annotations:
+          summary: Completed night audits are not producing reports
+          description: Inspect report generation outbox events, snapshot access, and object storage health.
+
+      - alert: PeakReportStorageErrors
+        expr: increase(peak_reporting_storage_errors_total[10m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+          phase: "5"
+        annotations:
+          summary: Private report object storage is failing
+          description: Check S3 endpoint health, private bucket encryption, credentials, and conditional writes.
+
+      - alert: PeakReportDeliveryFailures
+        expr: increase(peak_reporting_delivery_total{result="failed"}[15m]) > 3
+        for: 5m
+        labels:
+          severity: warning
+          phase: "5"
+        annotations:
+          summary: Report-link deliveries are repeatedly failing
+          description: Check verified recipient channels, operational_reports consent, provider health, and dead letters.
+
+      - alert: PeakReportRetentionBacklog
+        expr: increase(peak_reporting_artifacts_expired_total[24h]) == 0
+        for: 26h
+        labels:
+          severity: warning
+          phase: "5"
+        annotations:
+          summary: Report retention cleanup has no recent activity
+          description: Confirm the worker scheduler and S3 delete permissions before expired objects accumulate.

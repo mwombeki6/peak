@@ -10,6 +10,8 @@ import com.mwombeki.peak.billing.api.BillingNotFoundException
 import com.mwombeki.peak.billing.api.BillingPort
 import com.mwombeki.peak.billing.api.BillingSnapshotPort
 import com.mwombeki.peak.billing.api.BillingNightAuditSummary
+import com.mwombeki.peak.billing.api.BillingCloseSnapshotSummary
+import com.mwombeki.peak.billing.api.RevenueCenterCloseTotal
 import com.mwombeki.peak.billing.api.CheckoutFinancialState
 import com.mwombeki.peak.billing.api.ConfirmedPaymentRequest
 import com.mwombeki.peak.billing.api.ConfirmedPaymentRefundRequest
@@ -58,6 +60,109 @@ class BillingService(
     private val objectMapper: ObjectMapper,
     private val meterRegistry: MeterRegistry,
 ) : BillingPort, BillingSnapshotPort {
+
+    override fun closeSnapshotSummary(
+        tenantId: UUID,
+        propertyId: UUID,
+        businessDate: LocalDate,
+    ): BillingCloseSnapshotSummary {
+        requireActiveContext(tenantId, propertyId)
+        val revenueByCenter = jdbcTemplate.query(
+            """
+            SELECT revenue_center_id, round(COALESCE(sum(amount), 0), 2) AS amount
+            FROM folio_charges
+            WHERE tenant_id = ?
+              AND property_id = ?
+              AND business_date = ?
+              AND status = 'POSTED'
+              AND is_reversed = false
+              AND deleted_at IS NULL
+            GROUP BY revenue_center_id
+            ORDER BY revenue_center_id NULLS LAST
+            """.trimIndent(),
+            { rs, _ ->
+                RevenueCenterCloseTotal(
+                    revenueCenterId = rs.getObject(
+                        "revenue_center_id",
+                        UUID::class.java,
+                    ),
+                    amount = rs.getBigDecimal("amount").money(),
+                )
+            },
+            tenantId,
+            propertyId,
+            businessDate,
+        )
+        return jdbcTemplate.query(
+            """
+            WITH charge_totals AS (
+                SELECT
+                    COALESCE(max(f.currency_code), 'TZS') AS currency,
+                    round(COALESCE(sum(c.subtotal) FILTER (
+                        WHERE c.charge_type = 'ROOM'
+                    ), 0), 2) AS room_revenue,
+                    round(COALESCE(sum(c.subtotal) FILTER (
+                        WHERE lower(COALESCE(c.source_type, '')) IN (
+                            'pos', 'pos_order'
+                        )
+                    ), 0), 2) AS pos_revenue,
+                    round(COALESCE(sum(c.tax_amount), 0), 2) AS tax_total,
+                    round(COALESCE(sum(c.amount), 0), 2) AS gross_total,
+                    round(COALESCE(sum(c.subtotal), 0), 2) AS net_total,
+                    round(COALESCE(sum(c.amount) FILTER (
+                        WHERE c.revenue_center_id IS NOT NULL
+                    ), 0), 2) AS revenue_center_total
+                FROM folio_charges c
+                JOIN folios f
+                  ON f.tenant_id = c.tenant_id
+                 AND f.id = c.folio_id
+                WHERE c.tenant_id = ?
+                  AND c.property_id = ?
+                  AND c.business_date = ?
+                  AND c.status = 'POSTED'
+                  AND c.is_reversed = false
+                  AND c.deleted_at IS NULL
+            ),
+            journal_total AS (
+                SELECT round(COALESCE(sum(line.credit - line.debit), 0), 2) AS amount
+                FROM journal_entries entry
+                JOIN journal_entry_lines line
+                  ON line.tenant_id = entry.tenant_id
+                 AND line.journal_entry_id = entry.id
+                WHERE entry.tenant_id = ?
+                  AND entry.property_id = ?
+                  AND entry.business_date = ?
+                  AND entry.status = 'posted'
+                  AND line.revenue_center_id IS NOT NULL
+            )
+            SELECT charge.currency, charge.room_revenue, charge.pos_revenue,
+                   charge.tax_total, charge.gross_total, charge.net_total,
+                   round(charge.revenue_center_total - journal.amount, 2)
+                       AS revenue_journal_difference
+            FROM charge_totals charge CROSS JOIN journal_total journal
+            """.trimIndent(),
+            { rs, _ ->
+                BillingCloseSnapshotSummary(
+                    currency = rs.getString("currency").trim().uppercase(),
+                    revenueByCenter = revenueByCenter,
+                    roomRevenue = rs.getBigDecimal("room_revenue").money(),
+                    posRevenue = rs.getBigDecimal("pos_revenue").money(),
+                    taxTotal = rs.getBigDecimal("tax_total").money(),
+                    grossTotal = rs.getBigDecimal("gross_total").money(),
+                    netTotal = rs.getBigDecimal("net_total").money(),
+                    revenueJournalDifference = rs.getBigDecimal(
+                        "revenue_journal_difference",
+                    ).money(),
+                )
+            },
+            tenantId,
+            propertyId,
+            businessDate,
+            tenantId,
+            propertyId,
+            businessDate,
+        ).single()
+    }
 
     override fun nightAuditSummary(
         tenantId: UUID,
@@ -860,7 +965,7 @@ class BillingService(
             resourceType = FOLIO_CHARGES,
             replayType = BillingMutationReceipt::class.java,
         ) { actor, idempotencyKeyId ->
-            requireFolio(actor.tenantId, propertyId, folioId, lock = true)
+            val folio = requireFolio(actor.tenantId, propertyId, folioId, lock = true)
             val reason = request.reason.normalizedRequired("reason")
             val original = jdbcTemplate.query(
                 """
@@ -968,6 +1073,17 @@ class BillingService(
                 actor.tenantUserId,
                 actor.tenantId,
                 chargeId,
+            )
+            recordChargeJournalEntry(
+                tenantId = actor.tenantId,
+                propertyId = propertyId,
+                folio = folio,
+                chargeId = reversalId,
+                revenueCenterId = original.revenueCenterId,
+                description = "Reversal: ${original.description}",
+                amount = original.amount.money(),
+                postedBy = actor.tenantUserId,
+                reversing = true,
             )
             recalculateFolio(folioId)
             recordSideEffects(
@@ -1298,7 +1414,7 @@ class BillingService(
         request: PostChargeRequest,
         idempotencyKeyId: UUID,
     ): UUID {
-        requireFolio(actor.tenantId, propertyId, folioId, lock = true)
+        val folio = requireFolio(actor.tenantId, propertyId, folioId, lock = true)
         val chargeType = request.chargeType.normalizedChargeType()
         val description = request.description.normalizedRequired("description")
         val quantity = request.quantity.requirePositiveMoney("quantity")
@@ -1354,6 +1470,17 @@ class BillingService(
                 taxAmount,
             )
         }
+        recordChargeJournalEntry(
+            tenantId = actor.tenantId,
+            propertyId = propertyId,
+            folio = folio,
+            chargeId = chargeId,
+            revenueCenterId = request.revenueCenterId,
+            description = description,
+            amount = amount,
+            postedBy = actor.tenantUserId,
+            reversing = false,
+        )
         recalculateFolio(folioId)
         recordSideEffects(
             tenantId = actor.tenantId,
@@ -1629,7 +1756,7 @@ class BillingService(
     ): FolioRecord {
         val rows = jdbcTemplate.query(
             """
-            SELECT id, status, total_amount, total_paid
+            SELECT id, status, total_amount, total_paid, currency_code
             FROM folios
             WHERE tenant_id = ?
               AND property_id = ?
@@ -1643,6 +1770,7 @@ class BillingService(
                     status = rs.getString("status"),
                     totalAmount = rs.getBigDecimal("total_amount").money(),
                     totalPaid = rs.getBigDecimal("total_paid").money(),
+                    currencyCode = rs.getString("currency_code").trim().uppercase(),
                 )
             },
             tenantId,
@@ -1766,6 +1894,243 @@ class BillingService(
 
     private fun recalculateFolio(folioId: UUID) {
         jdbcTemplate.queryForList("SELECT recalculate_folio_totals(?)", folioId)
+    }
+
+    private fun recordChargeJournalEntry(
+        tenantId: UUID,
+        propertyId: UUID,
+        folio: FolioRecord,
+        chargeId: UUID,
+        revenueCenterId: UUID?,
+        description: String,
+        amount: BigDecimal,
+        postedBy: UUID,
+        reversing: Boolean,
+    ) {
+        val journalAmount = amount.money()
+        if (journalAmount.compareTo(BigDecimal.ZERO.setScale(2)) == 0) {
+            return
+        }
+        val alreadyPosted = exists(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM journal_entries
+                WHERE tenant_id = ?
+                  AND source_type = 'folio_charge'
+                  AND source_id = ?
+                  AND status = 'posted'
+            )
+            """.trimIndent(),
+            tenantId,
+            chargeId,
+        )
+        if (alreadyPosted) {
+            return
+        }
+
+        val accounts = ensureChargeJournalAccounts(
+            tenantId = tenantId,
+            propertyId = propertyId,
+            currency = folio.currencyCode,
+        )
+        val journalEntryId = UUID.randomUUID()
+        val entryNumber = if (reversing) "FCR-$chargeId" else "FC-$chargeId"
+        jdbcTemplate.update(
+            """
+            INSERT INTO journal_entries (
+                id, tenant_id, property_id, entry_number, entry_date,
+                source_type, source_id, memo, currency
+            )
+            VALUES (?, ?, ?, ?, ?, 'folio_charge', ?, ?, ?)
+            """.trimIndent(),
+            journalEntryId,
+            tenantId,
+            propertyId,
+            entryNumber,
+            propertyBusinessDate(tenantId, propertyId),
+            chargeId,
+            if (reversing) "Folio charge reversal: $description" else "Folio charge: $description",
+            folio.currencyCode,
+        )
+
+        if (reversing) {
+            insertJournalLine(
+                tenantId = tenantId,
+                propertyId = propertyId,
+                journalEntryId = journalEntryId,
+                accountId = accounts.revenueAccountId,
+                revenueCenterId = revenueCenterId,
+                lineNo = 1,
+                description = "Reverse revenue for charge $chargeId",
+                debit = journalAmount,
+                credit = BigDecimal.ZERO.setScale(2),
+                sourceId = chargeId,
+            )
+            insertJournalLine(
+                tenantId = tenantId,
+                propertyId = propertyId,
+                journalEntryId = journalEntryId,
+                accountId = accounts.accountsReceivableAccountId,
+                revenueCenterId = null,
+                lineNo = 2,
+                description = "Reduce receivable for charge $chargeId",
+                debit = BigDecimal.ZERO.setScale(2),
+                credit = journalAmount,
+                sourceId = chargeId,
+            )
+        } else {
+            insertJournalLine(
+                tenantId = tenantId,
+                propertyId = propertyId,
+                journalEntryId = journalEntryId,
+                accountId = accounts.accountsReceivableAccountId,
+                revenueCenterId = null,
+                lineNo = 1,
+                description = "Receivable for charge $chargeId",
+                debit = journalAmount,
+                credit = BigDecimal.ZERO.setScale(2),
+                sourceId = chargeId,
+            )
+            insertJournalLine(
+                tenantId = tenantId,
+                propertyId = propertyId,
+                journalEntryId = journalEntryId,
+                accountId = accounts.revenueAccountId,
+                revenueCenterId = revenueCenterId,
+                lineNo = 2,
+                description = "Revenue for charge $chargeId",
+                debit = BigDecimal.ZERO.setScale(2),
+                credit = journalAmount,
+                sourceId = chargeId,
+            )
+        }
+
+        jdbcTemplate.update(
+            """
+            UPDATE journal_entries
+            SET status = 'posted',
+                posted_by = ?
+            WHERE tenant_id = ?
+              AND id = ?
+              AND status = 'draft'
+            """.trimIndent(),
+            postedBy,
+            tenantId,
+            journalEntryId,
+        )
+    }
+
+    private fun insertJournalLine(
+        tenantId: UUID,
+        propertyId: UUID,
+        journalEntryId: UUID,
+        accountId: UUID,
+        revenueCenterId: UUID?,
+        lineNo: Int,
+        description: String,
+        debit: BigDecimal,
+        credit: BigDecimal,
+        sourceId: UUID,
+    ) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO journal_entry_lines (
+                tenant_id, property_id, journal_entry_id, account_id,
+                revenue_center_id, line_no, description, debit, credit,
+                source_type, source_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'folio_charge', ?)
+            """.trimIndent(),
+            tenantId,
+            propertyId,
+            journalEntryId,
+            accountId,
+            revenueCenterId,
+            lineNo,
+            description,
+            debit.money(),
+            credit.money(),
+            sourceId,
+        )
+    }
+
+    private fun ensureChargeJournalAccounts(
+        tenantId: UUID,
+        propertyId: UUID,
+        currency: String,
+    ): ChargeJournalAccounts {
+        val normalizedCurrency = currency.trim().uppercase()
+        val accountsReceivableAccountId = upsertAccountingAccount(
+            tenantId = tenantId,
+            propertyId = propertyId,
+            code = "PEAK_AR_$normalizedCurrency",
+            name = "Peak Accounts Receivable",
+            accountType = "asset",
+            currency = normalizedCurrency,
+        )
+        val revenueAccountId = upsertAccountingAccount(
+            tenantId = tenantId,
+            propertyId = propertyId,
+            code = "PEAK_REV_$normalizedCurrency",
+            name = "Peak Revenue",
+            accountType = "revenue",
+            currency = normalizedCurrency,
+        )
+        return ChargeJournalAccounts(
+            accountsReceivableAccountId = accountsReceivableAccountId,
+            revenueAccountId = revenueAccountId,
+        )
+    }
+
+    private fun upsertAccountingAccount(
+        tenantId: UUID,
+        propertyId: UUID,
+        code: String,
+        name: String,
+        accountType: String,
+        currency: String,
+    ): UUID {
+        return jdbcTemplate.query(
+            """
+            INSERT INTO accounting_accounts (
+                tenant_id, property_id, code, name, account_type, currency,
+                is_active
+            )
+            VALUES (?, ?, ?, ?, ?, ?, true)
+            ON CONFLICT (tenant_id, property_id, code) DO UPDATE
+            SET name = EXCLUDED.name,
+                account_type = EXCLUDED.account_type,
+                is_active = true,
+                updated_at = now()
+            RETURNING id
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("id", UUID::class.java) },
+            tenantId,
+            propertyId,
+            code,
+            name,
+            accountType,
+            currency,
+        ).single()
+    }
+
+    private fun propertyBusinessDate(tenantId: UUID, propertyId: UUID): LocalDate {
+        return requireNotNull(
+            jdbcTemplate.query(
+                """
+                SELECT business_date
+                FROM properties
+                WHERE tenant_id = ?
+                  AND id = ?
+                """.trimIndent(),
+                { rs, _ -> rs.getObject("business_date", LocalDate::class.java) },
+                tenantId,
+                propertyId,
+            ).singleOrNull(),
+        ) {
+            "Property business date was not found"
+        }
     }
 
     private fun recalculateInvoice(invoiceId: UUID) {
@@ -1994,6 +2359,12 @@ class BillingService(
         val status: String,
         val totalAmount: BigDecimal,
         val totalPaid: BigDecimal,
+        val currencyCode: String,
+    )
+
+    private data class ChargeJournalAccounts(
+        val accountsReceivableAccountId: UUID,
+        val revenueAccountId: UUID,
     )
 
     private data class FolioTotals(

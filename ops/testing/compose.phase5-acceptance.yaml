@@ -1,0 +1,65 @@
+services:
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: peak-acceptance
+      MINIO_ROOT_PASSWORD: peak-acceptance-secret-key
+      MINIO_KMS_SECRET_KEY: peak-report-key:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+    volumes:
+      - peak-minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "127.0.0.1:9000:9000"
+
+  minio-init:
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    restart: "no"
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        mc alias set local http://minio:9000 peak-acceptance peak-acceptance-secret-key
+        mc mb --ignore-existing local/peak-private-reports
+        mc anonymous set none local/peak-private-reports
+        mc encrypt set sse-s3 local/peak-private-reports
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  peak-api:
+    environment:
+      SPRING_PROFILES_ACTIVE: acceptance
+      PEAK_RUNTIME_MODE: api
+      PEAK_OUTBOX_WORKER_HEALTH_REQUIRED: "true"
+      PEAK_REPORT_STORAGE_ENABLED: "true"
+      PEAK_REPORT_STORAGE_ENDPOINT: http://minio:9000
+      PEAK_REPORT_STORAGE_ACCESS_KEY: peak-acceptance
+      PEAK_REPORT_STORAGE_SECRET_KEY: peak-acceptance-secret-key
+      PEAK_REPORT_STORAGE_BUCKET: peak-private-reports
+      PEAK_REPORT_STORAGE_REGION: us-east-1
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+
+  peak-worker:
+    environment:
+      SPRING_PROFILES_ACTIVE: acceptance,worker
+      PEAK_RUNTIME_MODE: worker
+      PEAK_OUTBOX_WORKER_ENABLED: "true"
+      PEAK_REPORT_STORAGE_ENABLED: "true"
+      PEAK_REPORT_STORAGE_ENDPOINT: http://minio:9000
+      PEAK_REPORT_STORAGE_ACCESS_KEY: peak-acceptance
+      PEAK_REPORT_STORAGE_SECRET_KEY: peak-acceptance-secret-key
+      PEAK_REPORT_STORAGE_BUCKET: peak-private-reports
+      PEAK_REPORT_STORAGE_REGION: us-east-1
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+
+volumes:
+  peak-minio-data:

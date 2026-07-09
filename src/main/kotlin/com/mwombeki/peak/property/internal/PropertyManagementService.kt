@@ -22,6 +22,7 @@ import com.mwombeki.peak.property.api.PropertyManagementNotFoundException
 import com.mwombeki.peak.property.api.PropertyModuleMutationReceipt
 import com.mwombeki.peak.property.api.PropertyMutationReceipt
 import com.mwombeki.peak.property.api.PropertyOperationsPort
+import com.mwombeki.peak.property.api.PropertyCloseSnapshotSummary
 import com.mwombeki.peak.property.api.PropertyPort
 import com.mwombeki.peak.property.api.PropertyReadinessResponse
 import com.mwombeki.peak.property.api.PropertyResponse
@@ -271,6 +272,37 @@ class PropertyManagementService(
             tenantId,
             propertyId,
         ) ?: throw PropertyManagementNotFoundException("Property was not found")
+    }
+
+    override fun closeSnapshotSummary(
+        tenantId: UUID,
+        propertyId: UUID,
+    ): PropertyCloseSnapshotSummary {
+        return jdbcTemplate.query(
+            """
+            SELECT COALESCE(tenant.currency_code, 'TZS') AS currency_code,
+                   COUNT(r.id) FILTER (WHERE r.deleted_at IS NULL) AS total_rooms
+            FROM properties p
+            JOIN tenants tenant ON tenant.id = p.tenant_id
+            LEFT JOIN rooms r
+              ON r.tenant_id = p.tenant_id
+             AND r.property_id = p.id
+            WHERE p.tenant_id = ?
+              AND p.id = ?
+              AND p.deleted_at IS NULL
+            GROUP BY COALESCE(tenant.currency_code, 'TZS')
+            """.trimIndent(),
+            { rs, _ ->
+                PropertyCloseSnapshotSummary(
+                    totalRooms = rs.getInt("total_rooms"),
+                    currency = rs.getString("currency_code").trim().uppercase(),
+                )
+            },
+            tenantId,
+            propertyId,
+        ).singleOrNull() ?: throw PropertyManagementNotFoundException(
+            "Property was not found",
+        )
     }
 
     override fun advanceBusinessDate(

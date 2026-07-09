@@ -339,6 +339,21 @@ class Phase3StayLifecycleIntegrationTests {
         )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.status").value("completed"))
+            .andExpect(jsonPath("$.reportGenerationQueued").value(true))
+        mockMvc.perform(
+            get(
+                "/api/v1/properties/${fixture.propertyId}/night-audit/" +
+                    "$auditRunId/close-snapshot",
+            ).headersFor(
+                fixture,
+                "corr-night-audit-snapshot",
+                idempotencyKey = null,
+            ),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.payloadHash").isString)
+            .andExpect(jsonPath("$.revenueJournalDifference").value(0.0))
+            .andExpect(jsonPath("$.paymentAllocationDifference").value(0.0))
     }
 
     @Test
@@ -1628,6 +1643,7 @@ class Phase3StayLifecycleIntegrationTests {
             "night_audit.run",
             "night_audit.override",
             "night_audit.complete",
+            "night_audit.close_snapshot.view",
         )
     }
 }

@@ -1,5 +1,6 @@
 package com.mwombeki.peak.fiscal.api
 
+import java.time.LocalDate
 import java.util.UUID
 
 interface FiscalPort {
@@ -32,5 +33,11 @@ interface FiscalStatusPort {
         tenantId: UUID,
         propertyId: UUID,
     ): FiscalNightAuditSummary
+
+    fun closeSnapshotSummary(
+        tenantId: UUID,
+        propertyId: UUID,
+        businessDate: LocalDate,
+    ): FiscalCloseSnapshotSummary
 
 }

@@ -13,6 +13,7 @@ import com.mwombeki.peak.fiscal.api.FiscalProvider
 import com.mwombeki.peak.fiscal.api.FiscalReceiptResponse
 import com.mwombeki.peak.fiscal.api.FiscalRejectedException
 import com.mwombeki.peak.fiscal.api.FiscalNightAuditSummary
+import com.mwombeki.peak.fiscal.api.FiscalCloseSnapshotSummary
 import com.mwombeki.peak.fiscal.api.FiscalStatusPort
 import com.mwombeki.peak.reliability.api.IdempotencyCommand
 import com.mwombeki.peak.reliability.api.IdempotencyPort
@@ -25,6 +26,9 @@ import com.mwombeki.peak.shared.context.TenantRequestContext
 import com.mwombeki.peak.shared.outbound.OutboundEndpointPolicy
 import com.mwombeki.peak.shared.secrets.SecretReferenceResolver
 import java.net.URI
+import java.math.BigDecimal
+import java.math.RoundingMode
+import java.time.LocalDate
 import java.sql.ResultSet
 import java.sql.Timestamp
 import java.util.UUID
@@ -53,6 +57,9 @@ class FiscalService(
     adapters: List<FiscalProvider>,
 ) : FiscalPort, FiscalStatusPort {
     private val providerCodes = adapters.mapTo(mutableSetOf()) { it.providerCode }
+
+    private fun BigDecimal.money(): BigDecimal =
+        setScale(2, RoundingMode.HALF_UP)
 
     override fun hasAcceptedReceipt(
         tenantId: UUID,
@@ -126,6 +133,60 @@ class FiscalService(
             issuedInvoicesMissingAcceptedReceipt = missing,
             pendingCorrections = pendingCorrections,
         )
+    }
+
+    override fun closeSnapshotSummary(
+        tenantId: UUID,
+        propertyId: UUID,
+        businessDate: LocalDate,
+    ): FiscalCloseSnapshotSummary {
+        return jdbcTemplate.query(
+            """
+            SELECT
+                round(COALESCE(sum(invoice.total) FILTER (
+                    WHERE receipt.status = 'accepted'
+                ), 0), 2) AS accepted_total,
+                round(COALESCE(sum(invoice.total) FILTER (
+                    WHERE receipt.status IN ('submitted', 'pending')
+                ), 0), 2) AS pending_total,
+                round(COALESCE(sum(invoice.total) FILTER (
+                    WHERE receipt.status = 'rejected'
+                ), 0), 2) AS failed_total,
+                round(COALESCE((
+                    SELECT sum(note.total_amount)
+                    FROM credit_notes note
+                    WHERE note.tenant_id = ?
+                      AND note.property_id = ?
+                      AND note.fiscal_status IN (
+                          'pending', 'submitted', 'accepted', 'rejected'
+                      )
+                      AND note.issued_at::date = ?
+                ), 0), 2) AS correction_total
+            FROM fiscal_receipts receipt
+            JOIN invoices invoice
+              ON invoice.tenant_id = receipt.tenant_id
+             AND invoice.id = receipt.invoice_id
+            WHERE receipt.tenant_id = ?
+              AND receipt.property_id = ?
+              AND receipt.business_date = ?
+            """.trimIndent(),
+            { rs, _ ->
+                FiscalCloseSnapshotSummary(
+                    acceptedTotal = rs.getBigDecimal("accepted_total").money(),
+                    pendingTotal = rs.getBigDecimal("pending_total").money(),
+                    failedTotal = rs.getBigDecimal("failed_total").money(),
+                    correctionTotal = rs.getBigDecimal(
+                        "correction_total",
+                    ).money(),
+                )
+            },
+            tenantId,
+            propertyId,
+            businessDate,
+            tenantId,
+            propertyId,
+            businessDate,
+        ).single()
     }
 
     override fun configureProvider(

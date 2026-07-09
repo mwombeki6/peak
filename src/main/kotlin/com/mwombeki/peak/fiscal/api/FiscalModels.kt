@@ -55,6 +55,13 @@ data class FiscalNightAuditSummary(
     val pendingCorrections: Int,
 )
 
+data class FiscalCloseSnapshotSummary(
+    val acceptedTotal: java.math.BigDecimal,
+    val pendingTotal: java.math.BigDecimal,
+    val failedTotal: java.math.BigDecimal,
+    val correctionTotal: java.math.BigDecimal,
+)
+
 open class FiscalException(
     message: String,
     status: HttpStatus,
