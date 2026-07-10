@@ -1,7 +1,7 @@
 {
   "info": {
     "_postman_id": "8d3552e6-a92a-45bf-b8f4-0051d6fd5005",
-    "name": "Peak Phase 5 - Control Close Reporting",
+    "name": "Peak Control, Close & Reporting",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -28,7 +28,7 @@
       "request": {
         "method": "GET",
         "header": [
-          { "key": "X-Correlation-Id", "value": "phase5-catalog" }
+          { "key": "X-Correlation-Id", "value": "close-reporting-catalog" }
         ],
         "url": "{{baseUrl}}/api/v1/tenants/{{tenantId}}/reports/catalog"
       },
@@ -50,7 +50,7 @@
       "request": {
         "method": "GET",
         "header": [
-          { "key": "X-Correlation-Id", "value": "phase5-snapshot" }
+          { "key": "X-Correlation-Id", "value": "close-reporting-snapshot" }
         ],
         "url": "{{baseUrl}}/api/v1/properties/{{propertyId}}/night-audit/{{nightAuditRunId}}/close-snapshot"
       },
@@ -73,7 +73,7 @@
       "request": {
         "method": "GET",
         "header": [
-          { "key": "X-Correlation-Id", "value": "phase5-runs" }
+          { "key": "X-Correlation-Id", "value": "close-reporting-runs" }
         ],
         "url": "{{baseUrl}}/api/v1/tenants/{{tenantId}}/report-runs"
       },
@@ -97,7 +97,7 @@
       "request": {
         "method": "GET",
         "header": [
-          { "key": "X-Correlation-Id", "value": "phase5-deliveries" }
+          { "key": "X-Correlation-Id", "value": "close-reporting-deliveries" }
         ],
         "url": "{{baseUrl}}/api/v1/tenants/{{tenantId}}/report-runs/{{dailyReportRunId}}/deliveries"
       },
@@ -120,7 +120,7 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "X-Correlation-Id", "value": "phase5-download" }
+          { "key": "X-Correlation-Id", "value": "close-reporting-download" }
         ],
         "url": "{{baseUrl}}/api/v1/tenants/{{tenantId}}/report-runs/{{dailyReportRunId}}/download-link"
       },

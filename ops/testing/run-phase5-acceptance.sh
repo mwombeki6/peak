@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
-trap 'echo "Phase 5 acceptance failed at line $LINENO." >&2' ERR
+trap 'echo "Control, close, and reporting acceptance failed at line $LINENO." >&2' ERR
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
-PROJECT="${COMPOSE_PROJECT_NAME:-peak-phase5-acceptance}"
+PROJECT="${COMPOSE_PROJECT_NAME:-peak-close-reporting-acceptance}"
 BASE_URL="${PEAK_BASE_URL:-http://localhost:8080}"
 KEYCLOAK_URL="${KEYCLOAK_BASE_URL:-http://localhost:8081}"
 EVIDENCE_DIR="${PHASE5_EVIDENCE_DIR:-$ROOT_DIR/build/evidence/phase5}"
@@ -99,7 +99,7 @@ api() {
     -X "$method"
     "$BASE_URL$path"
     -H "Authorization: Bearer $access_token"
-    -H "X-Correlation-Id: phase5-acceptance"
+    -H "X-Correlation-Id: close-reporting-acceptance"
   )
   [[ -n "$key" ]] && args+=(-H "Idempotency-Key: $key")
   [[ -n "$payload" ]] &&
@@ -116,22 +116,22 @@ api() {
 }
 
 api POST "/api/v1/tenants/$tenant_id/modules" \
-  200 "phase5-tenant-reports" '{"moduleId":"reports"}'
+  200 "close-reporting-tenant-reports" '{"moduleId":"reports"}'
 api POST "/api/v1/properties/$property_id/modules" \
-  200 "phase5-property-reports" '{"moduleId":"reports"}'
+  200 "close-reporting-property-reports" '{"moduleId":"reports"}'
 
 api POST "/api/v1/properties/$property_id/pos-orders/$pos_order_id/settle" \
-  200 "phase5-settle-pos-$pos_order_id" '{"paymentMethod":"cash"}'
+  200 "close-reporting-settle-pos-$pos_order_id" '{"paymentMethod":"cash"}'
 api GET "/api/v1/properties/$property_id/pos-sessions/$pos_session_id" 200
 expected_cash="$(jq -er '.session.expectedCash' <<<"$API_BODY")"
 api POST "/api/v1/properties/$property_id/pos-sessions/$pos_session_id/close" \
-  200 "phase5-close-pos-$pos_session_id" \
+  200 "close-reporting-close-pos-$pos_session_id" \
   "$(jq -nc --argjson cash "$expected_cash" '{actualCash:$cash}')"
 
 api POST "/api/v1/properties/$property_id/report-subscriptions" \
-  200 "phase5-daily-subscription" '{
+  200 "close-reporting-daily-subscription" '{
     "reportCode":"daily_management_summary",
-    "subscriptionName":"Phase 5 Daily Owner Report",
+    "subscriptionName":"Daily Owner Report",
     "frequency":"after_night_audit",
     "timezone":"Africa/Dar_es_Salaam",
     "languageCode":"en"
@@ -139,13 +139,13 @@ api POST "/api/v1/properties/$property_id/report-subscriptions" \
 subscription_id="$(jq -er '.id' <<<"$API_BODY")"
 api POST \
   "/api/v1/tenants/$tenant_id/report-subscriptions/$subscription_id/recipients" \
-  200 "phase5-daily-recipient" "$(
+  200 "close-reporting-daily-recipient" "$(
     jq -nc --arg contact "$contact_id" --arg channel "$channel_id" \
       '{contactId:$contact,contactChannelId:$channel}'
   )"
 
 api POST "/api/v1/properties/$property_id/night-audit" \
-  200 "phase5-night-audit" '{}'
+  200 "close-reporting-night-audit" '{}'
 jq -e '.status == "ready"' <<<"$API_BODY" >/dev/null || {
   jq '.issues' <<<"$API_BODY" >&2
   exit 1
@@ -153,7 +153,7 @@ jq -e '.status == "ready"' <<<"$API_BODY" >/dev/null || {
 night_audit_run_id="$(jq -er '.id' <<<"$API_BODY")"
 api POST \
   "/api/v1/properties/$property_id/night-audit/$night_audit_run_id/complete" \
-  200 "phase5-night-audit-complete" '{}'
+  200 "close-reporting-night-audit-complete" '{}'
 jq -e '.status == "completed" and .reportGenerationQueued == true' \
   <<<"$API_BODY" >/dev/null
 audit_date="$(jq -er '.auditDate' <<<"$API_BODY")"
