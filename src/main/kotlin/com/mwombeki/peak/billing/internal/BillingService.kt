@@ -2460,7 +2460,7 @@ private fun String.normalizedChargeType(): String {
 private fun String.normalizedPaymentMethod(): String {
     val normalized = trim().lowercase()
     require(normalized in BillingService.VALID_PAYMENT_METHODS) {
-        "Only cash and mobile_money payments are allowed in Phase 3"
+        "Only cash and mobile_money payments are allowed"
     }
     return normalized
 }

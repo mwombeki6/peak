@@ -59,10 +59,10 @@
     }
   ],
   "schemaVersion": 39,
-  "tags": ["peak", "phase5", "reporting"],
+  "tags": ["peak", "reporting", "close"],
   "templating": { "list": [] },
   "time": { "from": "now-24h", "to": "now" },
-  "title": "Peak Phase 5 - Control, Close & Reporting",
-  "uid": "peak-phase5-reporting",
+  "title": "Peak Control, Close & Reporting",
+  "uid": "peak-control-close-reporting",
   "version": 1
 }

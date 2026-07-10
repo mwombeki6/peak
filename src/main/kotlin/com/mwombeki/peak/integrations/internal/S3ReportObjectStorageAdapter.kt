@@ -21,6 +21,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.boot.health.contributor.Health
 import org.springframework.boot.health.contributor.HealthIndicator
 import org.springframework.stereotype.Component
+import tools.jackson.databind.json.JsonMapper
 
 @ConfigurationProperties(prefix = "peak.reporting.storage")
 data class ReportObjectStorageProperties(
@@ -69,9 +70,7 @@ class S3ReportObjectStorageAdapter(
             }
         }
         check(
-            policy == null ||
-                !policy.contains("\"Principal\":\"*\"") &&
-                !policy.contains("\"Principal\": \"*\""),
+            policy == null || !reportBucketPolicyGrantsPublicAccess(policy),
         ) {
             "Report bucket policy must not grant public access"
         }
@@ -210,3 +209,48 @@ class DisabledReportObjectStorageAdapter(
     override fun delete(objectKey: String) =
         error("Report object storage is disabled")
 }
+
+private val reportBucketPolicyMapper = JsonMapper.builder().build()
+
+internal fun reportBucketPolicyGrantsPublicAccess(policy: String): Boolean {
+    if (policy.isBlank()) {
+        return false
+    }
+    val document = try {
+        @Suppress("UNCHECKED_CAST")
+        reportBucketPolicyMapper.readValue(policy, Map::class.java) as Map<Any?, Any?>
+    } catch (ex: Exception) {
+        throw IllegalStateException("Report bucket policy must be valid JSON", ex)
+    }
+    return policyStatements(document["Statement"])
+        .any(::statementGrantsPublicAccess)
+}
+
+private fun policyStatements(value: Any?): List<Map<Any?, Any?>> {
+    @Suppress("UNCHECKED_CAST")
+    return when (value) {
+        is Map<*, *> -> listOf(value as Map<Any?, Any?>)
+        is Iterable<*> -> value.filterIsInstance<Map<Any?, Any?>>()
+        else -> emptyList()
+    }
+}
+
+private fun statementGrantsPublicAccess(statement: Map<Any?, Any?>): Boolean {
+    val effect = statement["Effect"]?.toString()?.trim()
+    if (effect != null && !effect.equals("Allow", ignoreCase = true)) {
+        return false
+    }
+    if (statement.containsKey("NotPrincipal")) {
+        return true
+    }
+    return valueContainsWildcardPrincipal(statement["Principal"])
+}
+
+private fun valueContainsWildcardPrincipal(value: Any?): Boolean =
+    when (value) {
+        is String -> value.trim() == "*"
+        is Map<*, *> -> value.values.any(::valueContainsWildcardPrincipal)
+        is Iterable<*> -> value.any(::valueContainsWildcardPrincipal)
+        is Array<*> -> value.any(::valueContainsWildcardPrincipal)
+        else -> false
+    }
