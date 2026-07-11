@@ -153,7 +153,8 @@ class ReportingService(
     override fun updateSubscription(
         subscriptionId: UUID,
         request: UpdateReportSubscriptionRequest,
-    ): ReportSubscriptionResponse = writeActor { actor ->
+        propertyId: UUID?,
+    ): ReportSubscriptionResponse = writeSubscriptionScope(propertyId) { actor ->
         val changed = jdbcTemplate.update(
             """
             UPDATE report_subscriptions
@@ -165,6 +166,7 @@ class ReportingService(
                 updated_at = now()
             WHERE tenant_id = ?
               AND id = ?
+              ${propertyPredicate(propertyId)}
               AND deleted_at IS NULL
               AND status <> 'archived'
             """.trimIndent(),
@@ -175,19 +177,21 @@ class ReportingService(
             request.languageCode.normalizedLanguage(),
             actor.tenantId,
             subscriptionId,
+            *propertyArgs(propertyId),
         )
         if (changed != 1) {
             throw ReportingNotFoundException(
                 "Active report subscription was not found",
             )
         }
-        requireSubscription(actor.tenantId, subscriptionId)
+        requireSubscription(actor.tenantId, subscriptionId, propertyId = propertyId)
     }
 
     override fun transitionSubscription(
         subscriptionId: UUID,
         action: String,
-    ): ReportSubscriptionResponse = writeActor { actor ->
+        propertyId: UUID?,
+    ): ReportSubscriptionResponse = writeSubscriptionScope(propertyId) { actor ->
         val target = when (action.lowercase()) {
             "pause" -> "paused"
             "resume" -> "active"
@@ -205,6 +209,7 @@ class ReportingService(
                 updated_at = now()
             WHERE tenant_id = ?
               AND id = ?
+              ${propertyPredicate(propertyId)}
               AND deleted_at IS NULL
               AND status <> 'archived'
             """.trimIndent(),
@@ -212,20 +217,27 @@ class ReportingService(
             target,
             actor.tenantId,
             subscriptionId,
+            *propertyArgs(propertyId),
         )
         if (changed != 1) {
             throw ReportingNotFoundException(
                 "Active report subscription was not found",
             )
         }
-        requireSubscription(actor.tenantId, subscriptionId, includeArchived = true)
+        requireSubscription(
+            actor.tenantId,
+            subscriptionId,
+            includeArchived = true,
+            propertyId = propertyId,
+        )
     }
 
     override fun addRecipient(
         subscriptionId: UUID,
         request: AddReportRecipientRequest,
-    ): ReportSubscriptionResponse = writeActor { actor ->
-        requireSubscription(actor.tenantId, subscriptionId)
+        propertyId: UUID?,
+    ): ReportSubscriptionResponse = writeSubscriptionScope(propertyId) { actor ->
+        requireSubscription(actor.tenantId, subscriptionId, propertyId = propertyId)
         try {
             jdbcTemplate.update(
                 """
@@ -250,13 +262,15 @@ class ReportingService(
                 "Recipient must use a verified email or WhatsApp channel with active operational_reports consent",
             )
         }
-        requireSubscription(actor.tenantId, subscriptionId)
+        requireSubscription(actor.tenantId, subscriptionId, propertyId = propertyId)
     }
 
     override fun disableRecipient(
         subscriptionId: UUID,
         recipientId: UUID,
-    ): ReportSubscriptionResponse = writeActor { actor ->
+        propertyId: UUID?,
+    ): ReportSubscriptionResponse = writeSubscriptionScope(propertyId) { actor ->
+        requireSubscription(actor.tenantId, subscriptionId, propertyId = propertyId)
         val changed = jdbcTemplate.update(
             """
             UPDATE report_subscription_recipients
@@ -275,7 +289,7 @@ class ReportingService(
                 "Enabled report recipient was not found",
             )
         }
-        requireSubscription(actor.tenantId, subscriptionId)
+        requireSubscription(actor.tenantId, subscriptionId, propertyId = propertyId)
     }
 
     override fun createRun(
@@ -525,17 +539,20 @@ class ReportingService(
         tenantId: UUID,
         subscriptionId: UUID,
         includeArchived: Boolean = false,
+        propertyId: UUID? = null,
     ): ReportSubscriptionResponse {
         return jdbcTemplate.query(
             """
             $SUBSCRIPTION_SELECT
             WHERE subscription.tenant_id = ?
               AND subscription.id = ?
+              ${propertyPredicate(propertyId, "subscription")}
               ${if (includeArchived) "" else "AND subscription.deleted_at IS NULL"}
             """.trimIndent(),
             { rs, _ -> mapSubscription(rs) },
             tenantId,
             subscriptionId,
+            *propertyArgs(propertyId),
         ).singleOrNull() ?: throw ReportingNotFoundException(
             "Report subscription was not found",
         )
@@ -828,6 +845,31 @@ class ReportingService(
         )
         block(actor)
     }
+
+    private fun <T> writeSubscriptionScope(
+        propertyId: UUID?,
+        block: (TenantActor) -> T,
+    ): T {
+        return if (propertyId == null) {
+            writeActor(block)
+        } else {
+            writeProperty(propertyId, block)
+        }
+    }
+
+    private fun propertyPredicate(
+        propertyId: UUID?,
+        qualifier: String? = null,
+    ): String {
+        if (propertyId == null) {
+            return ""
+        }
+        val prefix = qualifier?.let { "$it." } ?: ""
+        return "AND ${prefix}property_id = ?"
+    }
+
+    private fun propertyArgs(propertyId: UUID?): Array<Any> =
+        if (propertyId == null) emptyArray() else arrayOf(propertyId)
 
     private fun <T> readActor(block: (TenantActor) -> T): T =
         requireNotNull(transactionTemplate.execute {

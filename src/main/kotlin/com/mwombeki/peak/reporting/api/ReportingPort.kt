@@ -29,18 +29,22 @@ interface ReportingPort {
     fun updateSubscription(
         subscriptionId: UUID,
         request: UpdateReportSubscriptionRequest,
+        propertyId: UUID? = null,
     ): ReportSubscriptionResponse
     fun transitionSubscription(
         subscriptionId: UUID,
         action: String,
+        propertyId: UUID? = null,
     ): ReportSubscriptionResponse
     fun addRecipient(
         subscriptionId: UUID,
         request: AddReportRecipientRequest,
+        propertyId: UUID? = null,
     ): ReportSubscriptionResponse
     fun disableRecipient(
         subscriptionId: UUID,
         recipientId: UUID,
+        propertyId: UUID? = null,
     ): ReportSubscriptionResponse
     fun createRun(
         propertyId: UUID,
