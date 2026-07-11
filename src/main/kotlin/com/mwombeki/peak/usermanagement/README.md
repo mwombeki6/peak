@@ -20,7 +20,8 @@ User management owns authorization, external identity resolution, platform admin
 - Tenant admins manage property access with `tenant.properties.manage_access`; actual property operations still require a property-scoped role assignment.
 - Property roles are tenant-owned role templates in `roles`; `user_property_roles` scopes an assignment to one property.
 - Dynamic role creation and update cannot grant permissions the acting user
-  does not already hold.
+  does not already hold. Mutating an existing role or user also requires the
+  actor to hold the target's current effective permission set.
 - System tenant roles are immutable through tenant self-service. Assignment, revocation, and invitation flows must reject `tenant_roles.is_system=true`.
 - Public property routes are resolved through `resolve_public_property_scope`; public headers are not trusted.
 - Staff and platform guards bind database session context before permission checks; public module guards stay unbound.
@@ -52,7 +53,7 @@ All routes below are platform-scoped and are covered by `module_access_matrix`. 
 | `POST` | `/api/v1/platform/tenants/{tenantId}/administrators` | Provision the tenant's first administrator, immutable system role, permissions, and OIDC link. |
 | `POST` | `/api/v1/platform/tenants/{tenantId}/profile/verify` | Verify the tenant business profile after platform review. |
 
-Mutating platform administration routes require `Idempotency-Key`. Successful changes write a `platform_audit_logs` record and enqueue a platform outbox event. System platform roles cannot be modified, and an operator cannot lock, disable, assign roles to, or revoke roles from themselves. Dynamic platform role creation, update, deactivation, assignment, and revocation cannot manage permissions above the actor's effective platform permission set.
+Mutating platform administration routes require `Idempotency-Key`. Successful changes write a `platform_audit_logs` record and enqueue a platform outbox event. System platform roles cannot be modified, and an operator cannot lock, disable, assign roles to, revoke roles from, link identities for, or revoke identity links from themselves. Dynamic platform role creation, update, deactivation, assignment, and revocation cannot manage permissions above the actor's effective platform permission set. Platform user profile, lifecycle, role assignment, role revocation, identity-link creation, and identity-link revocation also require the actor to hold the target user's current effective platform permissions; `platform.admin.all` satisfies this hierarchy check.
 
 The initial platform root is created once with the non-web `bootstrap` runtime. It requires a real Keycloak issuer/subject, writes an audit event, and closes after a platform user exists. Run `ops/scripts/bootstrap-platform.sh`; never seed platform identities with application SQL.
 

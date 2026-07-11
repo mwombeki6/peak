@@ -150,7 +150,9 @@ class PlatformAdministrationService(
             resourceType = "platform_users",
             replayType = PlatformUserMutationReceipt::class.java,
         ) { reservationId ->
+            val actorId = currentPlatformActorId()
             requirePlatformUser(command.platformUserId)
+            requireActorCanManagePlatformUser(actorId, command.platformUserId)
             val rows = try {
                 jdbcTemplate.update(
                     """
@@ -207,6 +209,7 @@ class PlatformAdministrationService(
                 "Platform operator cannot change own lifecycle state"
             }
             requirePlatformUser(command.platformUserId)
+            requireActorCanManagePlatformUser(actorId, command.platformUserId)
 
             val rows = jdbcTemplate.update(
                 """
@@ -434,6 +437,7 @@ class PlatformAdministrationService(
             requireActivePlatformUser(command.platformUserId)
             requireActivePlatformRole(command.platformRoleId)
             requireDelegablePlatformRole(command.platformRoleId)
+            requireActorCanManagePlatformUser(actorId, command.platformUserId)
             val inserted = jdbcTemplate.update(
                 """
                 INSERT INTO platform_user_roles (platform_user_id, platform_role_id, assigned_by)
@@ -484,6 +488,7 @@ class PlatformAdministrationService(
             requirePlatformUser(command.platformUserId)
             requirePlatformRole(command.platformRoleId)
             requireDelegablePlatformRole(command.platformRoleId)
+            requireActorCanManagePlatformUser(actorId, command.platformUserId)
             val deleted = jdbcTemplate.update(
                 """
                 DELETE FROM platform_user_roles
@@ -542,7 +547,12 @@ class PlatformAdministrationService(
             resourceType = "identity_links",
             replayType = PlatformIdentityLinkReceipt::class.java,
         ) { reservationId ->
+            val actorId = currentPlatformActorId()
+            require(actorId != command.platformUserId) {
+                "Platform operator cannot link own identity"
+            }
             requireActivePlatformUser(command.platformUserId)
+            requireActorCanManagePlatformUser(actorId, command.platformUserId)
             val issuer = command.issuer.normalizedRequired("issuer")
             val subject = command.subject.normalizedRequired("subject")
             val existing = activeIdentityFor(issuer, subject)
@@ -578,7 +588,7 @@ class PlatformAdministrationService(
                     subject,
                     command.platformUserId,
                     command.email?.normalizedEmail(),
-                    currentPlatformActorId(),
+                    actorId,
                 )
                 PlatformIdentityLinkReceipt(
                     platformUserId = command.platformUserId,
@@ -612,7 +622,12 @@ class PlatformAdministrationService(
             resourceType = "identity_links",
             replayType = PlatformIdentityLinkReceipt::class.java,
         ) { reservationId ->
+            val actorId = currentPlatformActorId()
+            require(actorId != command.platformUserId) {
+                "Platform operator cannot revoke own identity link"
+            }
             requirePlatformUser(command.platformUserId)
+            requireActorCanManagePlatformUser(actorId, command.platformUserId)
             val rows = jdbcTemplate.update(
                 """
                 UPDATE identity_links
@@ -944,6 +959,44 @@ class PlatformAdministrationService(
         if (!exists) {
             throw PlatformAdministrationNotFoundException("Active platform user was not found")
         }
+    }
+
+    private fun requireActorCanManagePlatformUser(
+        actorUserId: UUID,
+        targetUserId: UUID,
+    ) {
+        val missingPermissions = targetPlatformPermissionCodes(targetUserId)
+            .filterNot { permissionCode ->
+                jdbcTemplate.queryForObject(
+                    "SELECT platform_user_has_permission(?, ?)",
+                    Boolean::class.java,
+                    actorUserId,
+                    permissionCode,
+                ) == true
+            }
+        require(missingPermissions.isEmpty()) {
+            "Platform operator cannot manage a user with permissions the actor does not hold"
+        }
+    }
+
+    private fun targetPlatformPermissionCodes(platformUserId: UUID): List<String> {
+        return jdbcTemplate.queryForList(
+            """
+            SELECT DISTINCT pp.code
+            FROM platform_user_roles pur
+            JOIN platform_roles pr
+              ON pr.id = pur.platform_role_id
+            JOIN platform_role_permissions prp
+              ON prp.platform_role_id = pr.id
+            JOIN platform_permissions pp
+              ON pp.id = prp.platform_permission_id
+            WHERE pur.platform_user_id = ?
+              AND pr.is_active = true
+            ORDER BY pp.code
+            """.trimIndent(),
+            String::class.java,
+            platformUserId,
+        ).filterNotNull()
     }
 
     private fun requirePlatformRole(platformRoleId: UUID) {
