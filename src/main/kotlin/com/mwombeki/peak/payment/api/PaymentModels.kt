@@ -225,6 +225,9 @@ class PaymentNotFoundException(message: String) :
 class PaymentConflictException(message: String) :
     PaymentException(message, HttpStatus.CONFLICT, "PAYMENT_CONFLICT")
 
+class PaymentAccessDeniedException(message: String) :
+    PaymentException(message, HttpStatus.FORBIDDEN, "PAYMENT_ACCESS_DENIED")
+
 class PaymentRejectedException(message: String) :
     PaymentException(message, HttpStatus.BAD_REQUEST, "PAYMENT_REJECTED")
 

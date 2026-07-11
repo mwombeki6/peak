@@ -1559,6 +1559,26 @@ class Phase3StayLifecycleIntegrationTests {
             """.trimIndent(),
             fixture.tenantId,
         )
+        jdbcTemplate.update(
+            """
+            INSERT INTO payment_providers (
+                tenant_id,
+                provider_code,
+                name,
+                provider_type,
+                country_code,
+                supported_currencies,
+                supports_collections,
+                is_active
+            )
+            VALUES (?, 'clickpesa', 'ClickPesa', 'mobile_money', 'TZ', ARRAY['TZS'], true, true)
+            ON CONFLICT (tenant_id, provider_code) DO UPDATE SET
+                name = EXCLUDED.name,
+                is_active = true,
+                updated_at = now()
+            """.trimIndent(),
+            fixture.tenantId,
+        )
     }
 
     private fun MockHttpServletRequestBuilder.secureJson(
