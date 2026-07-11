@@ -1,6 +1,6 @@
 # User Management Module
 
-User management owns authorization, external identity resolution, platform administration, tenant user invitations, tenant user lifecycle, and tenant role assignment. It is the permission boundary for platform and tenant-facing modules.
+User management owns authorization, external identity resolution, platform administration, tenant user invitations, tenant user lifecycle, tenant role assignment, and tenant-managed property access administration. It is the permission boundary for platform and tenant-facing modules.
 
 ## Responsibilities
 
@@ -17,6 +17,8 @@ User management owns authorization, external identity resolution, platform admin
 - Platform permissions are checked through platform roles and tenant access helpers.
 - Tenant permissions are checked through tenant roles, role permissions, and active tenant user state.
 - Tenant-created roles are dynamic but tenant-scoped; a tenant route cannot assign a role from another tenant.
+- Tenant admins manage property access with `tenant.properties.manage_access`; actual property operations still require a property-scoped role assignment.
+- Property roles are tenant-owned role templates in `roles`; `user_property_roles` scopes an assignment to one property.
 - Dynamic role creation and update cannot grant permissions the acting user
   does not already hold.
 - System tenant roles are immutable through tenant self-service. Assignment, revocation, and invitation flows must reject `tenant_roles.is_system=true`.
@@ -26,7 +28,7 @@ User management owns authorization, external identity resolution, platform admin
 
 ## Platform Administration API
 
-All routes below are platform-scoped, require `platform.security.manage`, and are covered by `module_access_matrix`.
+All routes below are platform-scoped and are covered by `module_access_matrix`. Narrow permissions such as `platform.users.view`, `platform.users.manage`, `platform.roles.view`, `platform.roles.manage`, `platform.permissions.view`, and `platform.identity_links.manage` are preferred. `platform.security.manage` remains a compatibility permission during the transition.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
@@ -74,6 +76,23 @@ All tenant role routes are tenant-scoped, require `tenant.users.manage`, and are
 | `POST` | `/api/v1/tenants/{tenantId}/users/{userId}/roles/{tenantRoleId}/revoke` | Revoke a dynamic tenant role from a tenant user. |
 
 Mutating tenant role routes require `Idempotency-Key`. Successful dynamic role definition changes write `audit_logs` entries and enqueue platform outbox events. Tenant system roles are read-only through tenant self-service, a tenant user cannot change their own role assignments, and delegated permissions cannot exceed the actor's effective permission set.
+
+## Tenant-Managed Property Access API
+
+These routes are tenant-scoped, require `tenant.properties.manage_access`, and validate that the property belongs to the tenant.
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/roles` | List tenant-owned property role templates. |
+| `GET` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/roles/{propertyRoleId}` | View one property role template. |
+| `POST` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/roles` | Create a mutable property role template. |
+| `PUT` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/roles/{propertyRoleId}` | Update a mutable property role template. |
+| `DELETE` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/roles/{propertyRoleId}` | Deactivate a mutable property role template and remove assignments. |
+| `GET` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/users/{userId}/roles` | List a user's roles for one property. |
+| `POST` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/users/{userId}/roles/{propertyRoleId}/assign` | Assign a property role to a tenant user for one property. |
+| `POST` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/users/{userId}/roles/{propertyRoleId}/revoke` | Revoke a property role from a tenant user for one property. |
+
+Mutating property access routes require `Idempotency-Key`, write audit entries, and enqueue platform outbox events. System property roles are immutable through these APIs; property creation uses an internal bootstrap port to assign the creator the system Property Administrator role.
 
 ## Production Rules
 

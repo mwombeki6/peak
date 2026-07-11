@@ -1,5 +1,6 @@
 package com.mwombeki.peak.platformgovernance.internal
 
+import com.mwombeki.peak.audit.api.AuditOutcome
 import com.mwombeki.peak.audit.api.AuditPort
 import com.mwombeki.peak.audit.api.AuditResource
 import com.mwombeki.peak.audit.api.PlatformAuditEvent
@@ -38,6 +39,11 @@ class TenantGovernanceService(
         reason: String,
     ): GovernanceActionResponse {
         bindPlatformContext(operatorId)
+        requireSupportBreakGlassAccess(
+            tenantId = tenantId,
+            actionCode = "platform.tenants.manage",
+            operation = "platform.tenants.approve",
+        )
         return idempotentTransition(
             tenantId = tenantId,
             operationType = "platform.tenant.approve",
@@ -64,6 +70,11 @@ class TenantGovernanceService(
         reason: String,
     ): GovernanceActionResponse {
         bindPlatformContext(operatorId)
+        requireSupportBreakGlassAccess(
+            tenantId = tenantId,
+            actionCode = "platform.tenants.manage",
+            operation = "platform.tenants.suspend",
+        )
         return idempotentTransition(
             tenantId = tenantId,
             operationType = "platform.tenant.suspend",
@@ -251,5 +262,41 @@ class TenantGovernanceService(
             "Governance operator must match the active request identity"
         }
         databaseSessionContext.bind(identity)
+    }
+
+    private fun requireSupportBreakGlassAccess(
+        tenantId: UUID,
+        actionCode: String,
+        operation: String,
+    ) {
+        val identity = requestContextHolder.current().identity
+        if (identity !is RequestIdentity.Support) {
+            return
+        }
+        val allowed = jdbcTemplate.queryForObject(
+            "SELECT can_platform_admin_access_tenant(?, ?, ?)",
+            Boolean::class.java,
+            identity.platformUserId,
+            tenantId,
+            actionCode,
+        ) == true
+        auditPort.recordPlatformEvent(
+            PlatformAuditEvent(
+                action = "platform.support.break_glass.access",
+                targetTenantId = tenantId,
+                resource = AuditResource("platform_break_glass_access", tenantId),
+                outcome = if (allowed) AuditOutcome.SUCCESS else AuditOutcome.DENIED,
+                after = mapOf(
+                    "tenantId" to tenantId,
+                    "platformUserId" to identity.platformUserId,
+                    "supportSessionId" to identity.supportSessionId,
+                    "actionCode" to actionCode,
+                    "operation" to operation,
+                ),
+            ),
+        )
+        require(allowed) {
+            "Active approved support break-glass access is required for tenant operation"
+        }
     }
 }

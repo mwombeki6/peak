@@ -1,5 +1,6 @@
 package com.mwombeki.peak.usermanagement.internal.application
 
+import com.mwombeki.peak.audit.api.AuditOutcome
 import com.mwombeki.peak.audit.api.AuditPort
 import com.mwombeki.peak.audit.api.AuditResource
 import com.mwombeki.peak.audit.api.PlatformAuditEvent
@@ -658,6 +659,11 @@ class PlatformAdministrationService(
             resourceType = "users",
             replayType = TenantAdministratorProvisioningReceipt::class.java,
         ) { reservationId ->
+            requireSupportBreakGlassAccess(
+                tenantId = command.tenantId,
+                actionCode = "platform.security.manage",
+                operation = "platform.tenants.administrator.provision",
+            )
             val row = jdbcTemplate.query(
                 """
                 SELECT user_id, tenant_role_id, identity_link_id, changed
@@ -707,6 +713,11 @@ class PlatformAdministrationService(
             resourceType = "tenant_profiles",
             replayType = TenantProfileVerificationReceipt::class.java,
         ) { reservationId ->
+            requireSupportBreakGlassAccess(
+                tenantId = command.tenantId,
+                actionCode = "platform.tenants.verify",
+                operation = "platform.tenants.profile.verify",
+            )
             val row = jdbcTemplate.query(
                 """
                 SELECT verification_status, changed
@@ -849,6 +860,42 @@ class PlatformAdministrationService(
             is RequestIdentity.Platform -> identity.platformUserId
             is RequestIdentity.Support -> identity.platformUserId
             else -> throw IllegalStateException("Platform identity is required")
+        }
+    }
+
+    private fun requireSupportBreakGlassAccess(
+        tenantId: UUID,
+        actionCode: String,
+        operation: String,
+    ) {
+        val identity = requestContextHolder.current().identity
+        if (identity !is RequestIdentity.Support) {
+            return
+        }
+        val allowed = jdbcTemplate.queryForObject(
+            "SELECT can_platform_admin_access_tenant(?, ?, ?)",
+            Boolean::class.java,
+            identity.platformUserId,
+            tenantId,
+            actionCode,
+        ) == true
+        auditPort.recordPlatformEvent(
+            PlatformAuditEvent(
+                action = "platform.support.break_glass.access",
+                targetTenantId = tenantId,
+                resource = AuditResource("platform_break_glass_access", tenantId),
+                outcome = if (allowed) AuditOutcome.SUCCESS else AuditOutcome.DENIED,
+                after = mapOf(
+                    "tenantId" to tenantId,
+                    "platformUserId" to identity.platformUserId,
+                    "supportSessionId" to identity.supportSessionId,
+                    "actionCode" to actionCode,
+                    "operation" to operation,
+                ),
+            ),
+        )
+        require(allowed) {
+            "Active approved support break-glass access is required for tenant operation"
         }
     }
 

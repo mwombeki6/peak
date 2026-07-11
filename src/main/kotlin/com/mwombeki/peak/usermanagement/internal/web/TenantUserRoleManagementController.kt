@@ -197,6 +197,7 @@ class TenantUserRoleManagementController(
             isSystem = isSystem,
             isActive = isActive,
             permissionCodes = permissionCodes,
+            scope = "TENANT",
         )
     }
 
@@ -257,6 +258,7 @@ data class TenantRoleHttpResponse(
     val isSystem: Boolean,
     val isActive: Boolean,
     val permissionCodes: List<String>,
+    val scope: String,
 )
 
 data class TenantPermissionHttpResponse(
