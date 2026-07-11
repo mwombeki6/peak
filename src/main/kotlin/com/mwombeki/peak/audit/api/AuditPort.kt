@@ -7,4 +7,8 @@ interface AuditPort {
     fun recordTenantEvent(event: TenantAuditEvent)
 
     fun recordPlatformEvent(event: PlatformAuditEvent)
+
+    fun recordPlatformEventImmediately(event: PlatformAuditEvent) {
+        recordPlatformEvent(event)
+    }
 }
