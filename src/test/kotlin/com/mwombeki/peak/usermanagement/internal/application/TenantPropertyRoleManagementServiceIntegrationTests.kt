@@ -106,6 +106,130 @@ class TenantPropertyRoleManagementServiceIntegrationTests {
     }
 
     @Test
+    fun accessManagerCanOnlyCreatePropertyRoleWithPermissionsHeldForThatProperty() {
+        val fixture = propertyRoleFixture()
+        insertPropertyRoleFixture(fixture, grantTenantAdmin = false)
+        val actorRoleId = insertPropertyRole(
+            fixture = fixture,
+            name = "Actor Viewer ${fixture.propertyId}",
+            permissionCodes = listOf("property.view"),
+        )
+        insertPropertyRoleAssignment(fixture, actorRoleId, fixture.actorUserId)
+        requestContextHolder.set(tenantContext(fixture, "idem-property-role-delegated-create"))
+
+        val role = propertyRoleManagementPort.createPropertyRole(
+            CreatePropertyRoleCommand(
+                tenantId = fixture.tenantId,
+                propertyId = fixture.propertyId,
+                name = "Delegated Viewer ${fixture.propertyId}",
+                permissionCodes = listOf("property.view"),
+            ),
+        )
+
+        assertTrue(role.changed)
+    }
+
+    @Test
+    fun rejectsCreatingPropertyRoleWithPermissionActorDoesNotHold() {
+        val fixture = propertyRoleFixture()
+        insertPropertyRoleFixture(fixture, grantTenantAdmin = false)
+        requestContextHolder.set(tenantContext(fixture, "idem-property-role-escalation-create"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            propertyRoleManagementPort.createPropertyRole(
+                CreatePropertyRoleCommand(
+                    tenantId = fixture.tenantId,
+                    propertyId = fixture.propertyId,
+                    name = "Escalated Manager ${fixture.propertyId}",
+                    permissionCodes = listOf("property.manage"),
+                ),
+            )
+        }
+
+        assertEquals(
+            "Property roles cannot include permissions the actor does not hold for this property",
+            error.message,
+        )
+        assertEquals(0, propertyRoleCount(fixture, "Escalated Manager ${fixture.propertyId}"))
+    }
+
+    @Test
+    fun rejectsAssigningPropertyRoleWithPermissionActorDoesNotHold() {
+        val fixture = propertyRoleFixture()
+        insertPropertyRoleFixture(fixture, grantTenantAdmin = false)
+        val roleId = insertPropertyRole(
+            fixture = fixture,
+            name = "Escalated Assign ${fixture.propertyId}",
+            permissionCodes = listOf("property.manage"),
+        )
+        requestContextHolder.set(tenantContext(fixture, "idem-property-role-escalation-assign"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            propertyRoleManagementPort.assignPropertyUserRole(
+                AssignPropertyUserRoleCommand(
+                    tenantId = fixture.tenantId,
+                    propertyId = fixture.propertyId,
+                    userId = fixture.targetUserId,
+                    propertyRoleId = roleId,
+                ),
+            )
+        }
+
+        assertEquals(
+            "Property roles cannot include permissions the actor does not hold for this property",
+            error.message,
+        )
+        assertEquals(0, propertyAssignmentCount(fixture, roleId))
+    }
+
+    @Test
+    fun rejectsAssigningAndRevokingSystemPropertyRolesThroughTenantApi() {
+        val fixture = propertyRoleFixture()
+        insertPropertyRoleFixture(fixture)
+        requestContextHolder.set(tenantContext(fixture, "idem-property-role-system-bootstrap"))
+        val systemRoleId = propertyAccessBootstrapPort.ensurePropertyAdministrator(
+            EnsurePropertyAdministratorCommand(
+                tenantId = fixture.tenantId,
+                propertyId = fixture.propertyId,
+                tenantUserId = fixture.targetUserId,
+            ),
+        ).propertyRoleId
+
+        requestContextHolder.set(tenantContext(fixture, "idem-property-role-system-assign"))
+        val assignError = assertFailsWith<IllegalArgumentException> {
+            propertyRoleManagementPort.assignPropertyUserRole(
+                AssignPropertyUserRoleCommand(
+                    tenantId = fixture.tenantId,
+                    propertyId = fixture.propertyId,
+                    userId = fixture.targetUserId,
+                    propertyRoleId = systemRoleId,
+                ),
+            )
+        }
+        assertEquals(
+            "System property roles cannot be assigned or revoked through tenant property role management",
+            assignError.message,
+        )
+
+        requestContextHolder.set(tenantContext(fixture, "idem-property-role-system-revoke"))
+        val revokeError = assertFailsWith<IllegalArgumentException> {
+            propertyRoleManagementPort.revokePropertyUserRole(
+                RevokePropertyUserRoleCommand(
+                    tenantId = fixture.tenantId,
+                    propertyId = fixture.propertyId,
+                    userId = fixture.targetUserId,
+                    propertyRoleId = systemRoleId,
+                ),
+            )
+        }
+        assertEquals(
+            "System property roles cannot be assigned or revoked through tenant property role management",
+            revokeError.message,
+        )
+        assertEquals(1, propertyAssignmentCount(fixture, systemRoleId))
+    }
+
+    @Test
     fun rejectsSelfPropertyRoleAssignment() {
         val fixture = propertyRoleFixture()
         insertPropertyRoleFixture(fixture)
@@ -208,7 +332,10 @@ class TenantPropertyRoleManagementServiceIntegrationTests {
         )
     }
 
-    private fun insertPropertyRoleFixture(fixture: PropertyRoleFixture) {
+    private fun insertPropertyRoleFixture(
+        fixture: PropertyRoleFixture,
+        grantTenantAdmin: Boolean = true,
+    ) {
         insertPlan(fixture.planId)
         insertTenant(fixture.tenantId, fixture.planId)
         insertProperty(fixture.tenantId, fixture.propertyId)
@@ -218,6 +345,7 @@ class TenantPropertyRoleManagementServiceIntegrationTests {
         insertTenantUser(fixture.tenantId, fixture.actorUserId, "actor-${fixture.actorUserId}@example.com")
         insertTenantUser(fixture.tenantId, fixture.targetUserId, "target-${fixture.targetUserId}@example.com")
         ensureTenantPermission(fixture.tenantId, "tenant.properties.manage_access")
+        ensureTenantPermission(fixture.tenantId, "tenant.admin.all")
         ensureTenantPermission(fixture.tenantId, "property.view")
         ensureTenantPermission(fixture.tenantId, "property.manage")
         ensureTenantPermission(fixture.tenantId, "property.lifecycle")
@@ -227,6 +355,9 @@ class TenantPropertyRoleManagementServiceIntegrationTests {
         ensureTenantPermission(fixture.tenantId, "admin.all")
         insertTenantRole(fixture.tenantId, fixture.actorRoleId)
         insertTenantRolePermission(fixture.actorRoleId, fixture.tenantId, "tenant.properties.manage_access")
+        if (grantTenantAdmin) {
+            insertTenantRolePermission(fixture.actorRoleId, fixture.tenantId, "tenant.admin.all")
+        }
         jdbcTemplate.update(
             """
             INSERT INTO user_tenant_roles (user_id, tenant_id, tenant_role_id)
@@ -270,6 +401,23 @@ class TenantPropertyRoleManagementServiceIntegrationTests {
         return roleId
     }
 
+    private fun insertPropertyRoleAssignment(
+        fixture: PropertyRoleFixture,
+        propertyRoleId: UUID,
+        userId: UUID,
+    ) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO user_property_roles (user_id, property_id, role_id, tenant_id)
+            VALUES (?, ?, ?, ?)
+            """.trimIndent(),
+            userId,
+            fixture.propertyId,
+            propertyRoleId,
+            fixture.tenantId,
+        )
+    }
+
     private fun propertyAssignmentCount(
         fixture: PropertyRoleFixture,
         propertyRoleId: UUID,
@@ -290,6 +438,22 @@ class TenantPropertyRoleManagementServiceIntegrationTests {
                 fixture.propertyId,
                 userId,
                 propertyRoleId,
+            ),
+        )
+    }
+
+    private fun propertyRoleCount(fixture: PropertyRoleFixture, name: String): Int {
+        return requireNotNull(
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*)
+                FROM roles
+                WHERE tenant_id = ?
+                  AND name = ?
+                """.trimIndent(),
+                Int::class.java,
+                fixture.tenantId,
+                name,
             ),
         )
     }
