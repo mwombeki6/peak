@@ -112,6 +112,81 @@ class JdbcAuthorizationPortIntegrationTests {
     }
 
     @Test
+    fun deniesTenantScopedCatalogWriteWhenUserOnlyHasPropertyRolePermission() {
+        val fixture = catalogWriteFixture()
+
+        val decision = requireNotNull(
+            transactionTemplate.execute {
+                insertCatalogWriteFixture(
+                    fixture = fixture,
+                    grantTenantCatalogPermission = false,
+                    grantPropertyInventoryPermission = true,
+                )
+                requestContextHolder.set(
+                    requestContext(
+                        RequestIdentity.Tenant(
+                            tenantId = fixture.tenantId,
+                            tenantUserId = fixture.userId,
+                            correlationId = "corr-auth-catalog-property-denied",
+                        ),
+                    ),
+                )
+
+                authorizationPort.authorize(
+                    RouteAuthorizationRequest(
+                        moduleId = "inventory",
+                        guardMode = GuardMode.STAFF_PERMISSION,
+                        routeScope = RouteScope.TENANT,
+                        permissionCode = "inventory.catalog.manage",
+                        tenantId = fixture.tenantId,
+                        propertyId = fixture.propertyId,
+                    ),
+                )
+            },
+        )
+
+        assertFalse(decision.allowed)
+        assertEquals("Tenant user lacks required module permission", decision.reason)
+    }
+
+    @Test
+    fun allowsTenantScopedCatalogWriteWhenUserHasTenantCatalogPermission() {
+        val fixture = catalogWriteFixture()
+
+        val decision = requireNotNull(
+            transactionTemplate.execute {
+                insertCatalogWriteFixture(
+                    fixture = fixture,
+                    grantTenantCatalogPermission = true,
+                    grantPropertyInventoryPermission = false,
+                )
+                requestContextHolder.set(
+                    requestContext(
+                        RequestIdentity.Tenant(
+                            tenantId = fixture.tenantId,
+                            tenantUserId = fixture.userId,
+                            correlationId = "corr-auth-catalog-tenant-allowed",
+                        ),
+                    ),
+                )
+
+                authorizationPort.authorize(
+                    RouteAuthorizationRequest(
+                        moduleId = "inventory",
+                        guardMode = GuardMode.STAFF_PERMISSION,
+                        routeScope = RouteScope.TENANT,
+                        permissionCode = "inventory.catalog.manage",
+                        tenantId = fixture.tenantId,
+                        propertyId = fixture.propertyId,
+                    ),
+                )
+            },
+        )
+
+        assertTrue(decision.allowed)
+    }
+
+    @Test
     fun deniesPlatformIdentityOnTenantStaffGuard() {
         val fixture = tenantFixture("tenant.profile.manage")
         val platformUserId = UUID.randomUUID()
@@ -466,6 +541,19 @@ class JdbcAuthorizationPortIntegrationTests {
         )
     }
 
+    private fun catalogWriteFixture(): CatalogWriteFixture {
+        return CatalogWriteFixture(
+            planId = UUID.randomUUID(),
+            tenantId = UUID.randomUUID(),
+            propertyId = UUID.randomUUID(),
+            userId = UUID.randomUUID(),
+            propertyRoleId = UUID.randomUUID(),
+            propertyPermissionId = UUID.randomUUID(),
+            tenantRoleId = UUID.randomUUID(),
+            tenantPermissionId = UUID.randomUUID(),
+        )
+    }
+
     private fun insertTenantFixture(fixture: TenantFixture) {
         insertPlan(fixture.planId)
         insertTenant(fixture.tenantId, fixture.planId)
@@ -508,6 +596,94 @@ class JdbcAuthorizationPortIntegrationTests {
             fixture.tenantId,
             fixture.roleId,
         )
+    }
+
+    private fun insertCatalogWriteFixture(
+        fixture: CatalogWriteFixture,
+        grantTenantCatalogPermission: Boolean,
+        grantPropertyInventoryPermission: Boolean,
+    ) {
+        insertPlan(fixture.planId)
+        insertTenant(fixture.tenantId, fixture.planId)
+        insertTenantModule(fixture.tenantId, "inventory")
+        insertProperty(fixture.tenantId, fixture.propertyId)
+        insertTenantUser(fixture.tenantId, fixture.userId)
+
+        if (grantPropertyInventoryPermission) {
+            jdbcTemplate.update(
+                """
+                INSERT INTO permissions (id, tenant_id, code, description)
+                VALUES (?, ?, 'inventory.manage', 'Manage property inventory')
+                """.trimIndent(),
+                fixture.propertyPermissionId,
+                fixture.tenantId,
+            )
+            jdbcTemplate.update(
+                """
+                INSERT INTO roles (id, tenant_id, name)
+                VALUES (?, ?, ?)
+                """.trimIndent(),
+                fixture.propertyRoleId,
+                fixture.tenantId,
+                "Catalog Property Role ${fixture.propertyRoleId}",
+            )
+            jdbcTemplate.update(
+                """
+                INSERT INTO role_permissions (role_id, permission_id)
+                VALUES (?, ?)
+                """.trimIndent(),
+                fixture.propertyRoleId,
+                fixture.propertyPermissionId,
+            )
+            jdbcTemplate.update(
+                """
+                INSERT INTO user_property_roles (user_id, property_id, role_id, tenant_id)
+                VALUES (?, ?, ?, ?)
+                """.trimIndent(),
+                fixture.userId,
+                fixture.propertyId,
+                fixture.propertyRoleId,
+                fixture.tenantId,
+            )
+        }
+
+        if (grantTenantCatalogPermission) {
+            jdbcTemplate.update(
+                """
+                INSERT INTO permissions (id, tenant_id, code, description)
+                VALUES (?, ?, 'inventory.catalog.manage', 'Manage tenant inventory catalog')
+                """.trimIndent(),
+                fixture.tenantPermissionId,
+                fixture.tenantId,
+            )
+            jdbcTemplate.update(
+                """
+                INSERT INTO tenant_roles (id, tenant_id, name, code)
+                VALUES (?, ?, ?, ?)
+                """.trimIndent(),
+                fixture.tenantRoleId,
+                fixture.tenantId,
+                "Catalog Tenant Role ${fixture.tenantRoleId}",
+                "catalog-tenant-${fixture.tenantRoleId}",
+            )
+            jdbcTemplate.update(
+                """
+                INSERT INTO tenant_role_permissions (tenant_role_id, permission_id)
+                VALUES (?, ?)
+                """.trimIndent(),
+                fixture.tenantRoleId,
+                fixture.tenantPermissionId,
+            )
+            jdbcTemplate.update(
+                """
+                INSERT INTO user_tenant_roles (user_id, tenant_id, tenant_role_id)
+                VALUES (?, ?, ?)
+                """.trimIndent(),
+                fixture.userId,
+                fixture.tenantId,
+                fixture.tenantRoleId,
+            )
+        }
     }
 
     private fun publicModuleFixture(): PublicModuleFixture {
@@ -658,6 +834,17 @@ class JdbcAuthorizationPortIntegrationTests {
         val roleId: UUID,
         val permissionId: UUID,
         val permissionCode: String,
+    )
+
+    private data class CatalogWriteFixture(
+        val planId: UUID,
+        val tenantId: UUID,
+        val propertyId: UUID,
+        val userId: UUID,
+        val propertyRoleId: UUID,
+        val propertyPermissionId: UUID,
+        val tenantRoleId: UUID,
+        val tenantPermissionId: UUID,
     )
 
     private data class PublicModuleFixture(
