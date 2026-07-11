@@ -13,8 +13,10 @@ import org.springframework.context.annotation.Import
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.testcontainers.junit.jupiter.Testcontainers
@@ -205,6 +207,70 @@ class PlatformAdministrationControllerIntegrationTests {
                 jsonPath("$.detail")
                     .value("Platform roles cannot include permissions the actor does not hold"),
             )
+    }
+
+    @Test
+    fun rejectsUpdatingPlatformRoleWithCurrentPermissionActorDoesNotHold() {
+        val actorId = insertPlatformActorWithPermissions("platform.security.manage")
+        val roleId = insertPlatformRoleWithPermissions("platform.audit.view")
+
+        mockMvc.perform(
+            put("/api/v1/platform/roles/$roleId")
+                .platform(actorId, "corr-platform-role-update-escalation", "idem-platform-role-update-escalation")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "name": "Renamed Audit Role"
+                    }
+                    """.trimIndent(),
+                ),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(
+                jsonPath("$.detail")
+                    .value("Platform roles cannot include permissions the actor does not hold"),
+            )
+
+        check(platformRoleName(roleId)?.startsWith("Escalated Platform Role") == true)
+    }
+
+    @Test
+    fun rejectsDeactivatingPlatformRoleWithCurrentPermissionActorDoesNotHold() {
+        val actorId = insertPlatformActorWithPermissions("platform.security.manage")
+        val roleId = insertPlatformRoleWithPermissions("platform.audit.view")
+
+        mockMvc.perform(
+            delete("/api/v1/platform/roles/$roleId")
+                .platform(actorId, "corr-platform-role-deactivate-escalation", "idem-platform-role-deactivate-escalation"),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(
+                jsonPath("$.detail")
+                    .value("Platform roles cannot include permissions the actor does not hold"),
+            )
+
+        check(platformRoleActive(roleId))
+    }
+
+    @Test
+    fun rejectsRevokingPlatformRoleWithPermissionActorDoesNotHold() {
+        val actorId = insertPlatformActorWithPermissions("platform.security.manage")
+        val targetUserId = insertPlatformUser()
+        val roleId = insertPlatformRoleWithPermissions("platform.audit.view")
+        insertPlatformUserRole(targetUserId, roleId, actorId)
+
+        mockMvc.perform(
+            post("/api/v1/platform/users/$targetUserId/roles/$roleId/revoke")
+                .platform(actorId, "corr-platform-role-revoke-escalation", "idem-platform-role-revoke-escalation"),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(
+                jsonPath("$.detail")
+                    .value("Platform roles cannot include permissions the actor does not hold"),
+            )
+
+        check(platformUserRoleAssignmentCount(targetUserId, roleId) == 1)
     }
 
     @Test
@@ -403,6 +469,79 @@ class PlatformAdministrationControllerIntegrationTests {
             platformUserId,
         )
         return platformUserId
+    }
+
+    private fun insertPlatformRoleWithPermissions(vararg permissionCodes: String): UUID {
+        val roleId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO platform_roles (id, code, name, is_system, is_active)
+            VALUES (?, ?, ?, false, true)
+            """.trimIndent(),
+            roleId,
+            "escalated-${roleId.toString().take(8)}",
+            "Escalated Platform Role $roleId",
+        )
+        permissionCodes.forEach { permissionCode ->
+            val permissionId = jdbcTemplate.queryForObject(
+                "SELECT id FROM platform_permissions WHERE code = ?",
+                UUID::class.java,
+                permissionCode,
+            )
+            jdbcTemplate.update(
+                """
+                INSERT INTO platform_role_permissions (platform_role_id, platform_permission_id)
+                VALUES (?, ?)
+                """.trimIndent(),
+                roleId,
+                permissionId,
+            )
+        }
+        return roleId
+    }
+
+    private fun insertPlatformUserRole(platformUserId: UUID, platformRoleId: UUID, assignedBy: UUID) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO platform_user_roles (platform_user_id, platform_role_id, assigned_by)
+            VALUES (?, ?, ?)
+            """.trimIndent(),
+            platformUserId,
+            platformRoleId,
+            assignedBy,
+        )
+    }
+
+    private fun platformRoleName(platformRoleId: UUID): String? {
+        return jdbcTemplate.queryForObject(
+            "SELECT name FROM platform_roles WHERE id = ?",
+            String::class.java,
+            platformRoleId,
+        )
+    }
+
+    private fun platformRoleActive(platformRoleId: UUID): Boolean {
+        return jdbcTemplate.queryForObject(
+            "SELECT is_active FROM platform_roles WHERE id = ?",
+            Boolean::class.java,
+            platformRoleId,
+        ) == true
+    }
+
+    private fun platformUserRoleAssignmentCount(platformUserId: UUID, platformRoleId: UUID): Int {
+        return requireNotNull(
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*)
+                FROM platform_user_roles
+                WHERE platform_user_id = ?
+                  AND platform_role_id = ?
+                """.trimIndent(),
+                Int::class.java,
+                platformUserId,
+                platformRoleId,
+            ),
+        )
     }
 
     private fun insertTenantForProvisioning(): UUID {

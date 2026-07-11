@@ -332,6 +332,7 @@ class PlatformAdministrationService(
             replayType = PlatformRoleMutationReceipt::class.java,
         ) { reservationId ->
             requireMutablePlatformRole(command.platformRoleId)
+            requireDelegablePlatformRole(command.platformRoleId)
             val permissionIds = command.permissionCodes
                 ?.also(::requireDelegablePlatformPermissions)
                 ?.let(::requirePlatformPermissions)
@@ -385,6 +386,7 @@ class PlatformAdministrationService(
             replayType = PlatformRoleMutationReceipt::class.java,
         ) { reservationId ->
             requireMutablePlatformRole(command.platformRoleId)
+            requireDelegablePlatformRole(command.platformRoleId)
             val rows = jdbcTemplate.update(
                 """
                 UPDATE platform_roles
@@ -481,6 +483,7 @@ class PlatformAdministrationService(
             }
             requirePlatformUser(command.platformUserId)
             requirePlatformRole(command.platformRoleId)
+            requireDelegablePlatformRole(command.platformRoleId)
             val deleted = jdbcTemplate.update(
                 """
                 DELETE FROM platform_user_roles
