@@ -101,6 +101,44 @@ class RouteAccessMatcherTests {
     }
 
     @Test
+    fun choosesTenantScopedCatalogWriteRuleBeforePropertyResourceFallback() {
+        val tenantId = UUID.fromString("11111111-1111-1111-1111-111111111111")
+        val userId = UUID.fromString("22222222-2222-2222-2222-222222222222")
+        val propertyId = UUID.fromString("33333333-3333-3333-3333-333333333333")
+        val itemId = UUID.fromString("44444444-4444-4444-4444-444444444444")
+
+        val request = matcher.match(
+            httpMethod = "PUT",
+            requestPath = "/api/v1/properties/$propertyId/inventory/items/$itemId",
+            identity = RequestIdentity.Tenant(tenantId, userId),
+            rules = listOf(
+                RouteAccessRule(
+                    moduleId = "inventory",
+                    httpMethod = "ANY",
+                    apiPattern = "/api/properties/:propertyId/inventory/items/:itemId",
+                    permissionCode = "inventory.manage",
+                    routeScope = RouteScope.PROPERTY,
+                    guardMode = GuardMode.STAFF_PERMISSION,
+                ),
+                RouteAccessRule(
+                    moduleId = "inventory",
+                    httpMethod = "PUT",
+                    apiPattern = "/api/properties/:propertyId/inventory/items/:itemId",
+                    permissionCode = "inventory.catalog.manage",
+                    routeScope = RouteScope.TENANT,
+                    guardMode = GuardMode.STAFF_PERMISSION,
+                ),
+            ),
+        )
+
+        requireNotNull(request)
+        assertEquals("inventory.catalog.manage", request.permissionCode)
+        assertEquals(RouteScope.TENANT, request.routeScope)
+        assertEquals(tenantId, request.tenantId)
+        assertEquals(propertyId, request.propertyId)
+    }
+
+    @Test
     fun returnsNullForUnregisteredRoute() {
         val request = matcher.match(
             httpMethod = "GET",

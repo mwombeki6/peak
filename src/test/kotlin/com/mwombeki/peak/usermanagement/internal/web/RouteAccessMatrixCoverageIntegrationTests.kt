@@ -6,6 +6,7 @@ import com.mwombeki.peak.usermanagement.api.GuardMode
 import com.mwombeki.peak.usermanagement.api.RouteScope
 import java.util.UUID
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Qualifier
@@ -93,10 +94,70 @@ class RouteAccessMatrixCoverageIntegrationTests {
                             pattern = pattern,
                             samplePath = pattern.toSamplePath(),
                             expectedGuardMode = pattern.expectedGuardMode(),
-                            expectedRouteScope = pattern.expectedRouteScope(),
+                            expectedRouteScope = pattern.expectedRouteScope(method),
                         )
                     }
                 }
+        }
+    }
+
+    @Test
+    fun tenantWideCatalogWriteRoutesResolveToTenantScopePermissions() {
+        val propertyId = UUID.fromString("33333333-3333-3333-3333-333333333333")
+        val itemId = UUID.fromString("77777777-7777-7777-7777-777777777794")
+        val supplierId = UUID.fromString("77777777-7777-7777-7777-777777777795")
+        val identity = RequestIdentity.Tenant(
+            tenantId = UUID.fromString("22222222-2222-2222-2222-222222222222"),
+            tenantUserId = UUID.fromString("44444444-4444-4444-4444-444444444444"),
+        )
+        val rules = ruleRepository.findEnabledRules()
+
+        val expectations = listOf(
+            RouteExpectation(
+                method = "POST",
+                path = "/api/v1/properties/$propertyId/inventory/items",
+                permissionCode = "inventory.catalog.manage",
+            ),
+            RouteExpectation(
+                method = "PUT",
+                path = "/api/v1/properties/$propertyId/inventory/items/$itemId",
+                permissionCode = "inventory.catalog.manage",
+            ),
+            RouteExpectation(
+                method = "DELETE",
+                path = "/api/v1/properties/$propertyId/inventory/items/$itemId",
+                permissionCode = "inventory.catalog.manage",
+            ),
+            RouteExpectation(
+                method = "POST",
+                path = "/api/v1/properties/$propertyId/procurement/suppliers",
+                permissionCode = "procurement.suppliers.manage",
+            ),
+            RouteExpectation(
+                method = "PUT",
+                path = "/api/v1/properties/$propertyId/procurement/suppliers/$supplierId",
+                permissionCode = "procurement.suppliers.manage",
+            ),
+            RouteExpectation(
+                method = "DELETE",
+                path = "/api/v1/properties/$propertyId/procurement/suppliers/$supplierId",
+                permissionCode = "procurement.suppliers.manage",
+            ),
+        )
+
+        expectations.forEach { expectation ->
+            val request = routeAccessMatcher.match(
+                httpMethod = expectation.method,
+                requestPath = expectation.path,
+                identity = identity,
+                rules = rules,
+            )
+
+            requireNotNull(request) {
+                "${expectation.method} ${expectation.path} did not match module_access_matrix"
+            }
+            assertEquals(RouteScope.TENANT, request.routeScope, expectation.path)
+            assertEquals(expectation.permissionCode, request.permissionCode, expectation.path)
         }
     }
 
@@ -121,7 +182,7 @@ class RouteAccessMatrixCoverageIntegrationTests {
         }
     }
 
-    private fun String.expectedRouteScope(): RouteScope {
+    private fun String.expectedRouteScope(method: RequestMethod): RouteScope {
         return when {
             startsWith("/api/v1/platform/") -> RouteScope.PLATFORM
             startsWith("/api/v1/public/properties/") -> RouteScope.PUBLIC_PROPERTY
@@ -130,10 +191,22 @@ class RouteAccessMatrixCoverageIntegrationTests {
             startsWith("/api/v1/tenants/") -> RouteScope.TENANT
             this == "/api/v1/properties" -> RouteScope.TENANT
             startsWith("/api/v1/properties/taxes") -> RouteScope.TENANT
+            isTenantWideCatalogWrite(method) -> RouteScope.TENANT
             startsWith("/api/v1/properties/") -> RouteScope.PROPERTY
             startsWith("/api/v1/communication") -> RouteScope.TENANT
             startsWith("/api/v1/realtime/") -> RouteScope.PROPERTY
             else -> error("No expected route scope for API route pattern $this")
+        }
+    }
+
+    private fun String.isTenantWideCatalogWrite(method: RequestMethod): Boolean {
+        return when (method) {
+            RequestMethod.POST -> this == "/api/v1/properties/{propertyId}/inventory/items" ||
+                    this == "/api/v1/properties/{propertyId}/procurement/suppliers"
+            RequestMethod.PUT,
+            RequestMethod.DELETE -> this == "/api/v1/properties/{propertyId}/inventory/items/{itemId}" ||
+                    this == "/api/v1/properties/{propertyId}/procurement/suppliers/{supplierId}"
+            else -> false
         }
     }
 
@@ -143,6 +216,12 @@ class RouteAccessMatrixCoverageIntegrationTests {
         val samplePath: String,
         val expectedGuardMode: GuardMode,
         val expectedRouteScope: RouteScope,
+    )
+
+    private data class RouteExpectation(
+        val method: String,
+        val path: String,
+        val permissionCode: String,
     )
 
     private companion object {
