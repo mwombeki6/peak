@@ -292,6 +292,40 @@ class TenantUserInvitationServiceIntegrationTests {
     }
 
     @Test
+    fun rejectsInvitationIntoRoleWithPermissionActorDoesNotHold() {
+        val fixture = tenantFixture()
+        insertTenantFixture(fixture)
+        ensureTenantPermission(fixture.tenantId, "reports.view")
+        insertTenantRolePermission(fixture.roleId, fixture.tenantId, "reports.view")
+        requestContextHolder.set(tenantContext(fixture, "idem-invite-escalation-role"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            invitationPort.inviteTenantUser(
+                InviteTenantUserCommand(
+                    tenantId = fixture.tenantId,
+                    email = "escalated-${fixture.tenantId}@example.com",
+                    tenantRoleId = fixture.roleId,
+                ),
+            )
+        }
+
+        assertEquals(
+            "Tenant invitation roles cannot include permissions the actor does not hold",
+            error.message,
+        )
+        val invitationCount = jdbcTemplate.queryForObject(
+            """
+            SELECT count(*)
+            FROM tenant_user_invitations
+            WHERE tenant_id = ?
+            """.trimIndent(),
+            Int::class.java,
+            fixture.tenantId,
+        )
+        assertEquals(0, invitationCount)
+    }
+
+    @Test
     fun acceptsInvitationAndLinksOidcIdentity() {
         val fixture = tenantFixture()
         insertTenantFixture(fixture)
@@ -642,6 +676,37 @@ class TenantUserInvitationServiceIntegrationTests {
             fixture.tenantId,
             "Tenant Role ${fixture.roleId}",
             "tenant-role-${fixture.roleId}",
+        )
+    }
+
+    private fun ensureTenantPermission(tenantId: UUID, code: String) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO permissions (id, tenant_id, code, description)
+            SELECT gen_random_uuid(), ?, pc.code, pc.description
+            FROM permission_catalog pc
+            WHERE pc.code = ?
+            ON CONFLICT (tenant_id, code) DO UPDATE SET
+                description = EXCLUDED.description,
+                updated_at = now()
+            """.trimIndent(),
+            tenantId,
+            code,
+        )
+    }
+
+    private fun insertTenantRolePermission(roleId: UUID, tenantId: UUID, code: String) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_role_permissions (tenant_role_id, permission_id)
+            SELECT ?, id
+            FROM permissions
+            WHERE tenant_id = ?
+              AND code = ?
+            """.trimIndent(),
+            roleId,
+            tenantId,
+            code,
         )
     }
 

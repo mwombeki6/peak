@@ -105,6 +105,7 @@ class TenantUserInvitationService(
         idempotencyKeyId: UUID,
     ): TenantUserInvitationReceipt {
         requireActiveTenantRole(command.tenantId, command.tenantRoleId)
+        requireDelegableTenantInvitationRole(command.tenantId, command.tenantRoleId, actor)
         requireNoActiveUserWithEmail(command.tenantId, command.email)
 
         val invitationId = UUID.randomUUID()
@@ -417,6 +418,43 @@ class TenantUserInvitationService(
         }
     }
 
+    private fun requireDelegableTenantInvitationRole(
+        tenantId: UUID,
+        tenantRoleId: UUID,
+        actor: InvitationActor,
+    ) {
+        val actorUserId = actor.tenantUserId ?: return
+        val permissionCodes = jdbcTemplate.queryForList(
+            """
+            SELECT p.code
+            FROM tenant_role_permissions trp
+            JOIN permissions p
+              ON p.id = trp.permission_id
+             AND p.tenant_id = ?
+            WHERE trp.tenant_role_id = ?
+            ORDER BY p.code
+            """.trimIndent(),
+            String::class.java,
+            tenantId,
+            tenantRoleId,
+        ).filterNotNull()
+        val unauthorized = permissionCodes
+            .map { it.normalizedCode() }
+            .distinct()
+            .filterNot { permissionCode ->
+                jdbcTemplate.queryForObject(
+                    "SELECT user_has_tenant_permission(?, ?, ?)",
+                    Boolean::class.java,
+                    actorUserId,
+                    tenantId,
+                    permissionCode,
+                ) == true
+            }
+        require(unauthorized.isEmpty()) {
+            "Tenant invitation roles cannot include permissions the actor does not hold"
+        }
+    }
+
     private fun requireNoActiveUserWithEmail(
         tenantId: UUID,
         email: String,
@@ -456,6 +494,12 @@ class TenantUserInvitationService(
             expiresInSeconds = expiresIn.toSeconds(),
             metadata = metadata,
         )
+    }
+
+    private fun String.normalizedCode(): String {
+        return trim().takeIf { it.isNotEmpty() }
+            ?.lowercase(Locale.ROOT)
+            ?: throw IllegalArgumentException("permission code is required")
     }
 
     private fun AcceptTenantUserInvitationCommand.normalized(): NormalizedAcceptCommand {

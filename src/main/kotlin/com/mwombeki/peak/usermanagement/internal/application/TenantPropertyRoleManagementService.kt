@@ -80,7 +80,11 @@ class TenantPropertyRoleManagementService(
             requestPayload = command,
         ) { idempotencyKeyId ->
             val propertyRoleId = UUID.randomUUID()
-            val permissionIds = requirePropertyPermissionIds(command.tenantId, command.permissionCodes)
+            val permissionIds = requireDelegablePropertyPermissionIds(
+                tenantId = command.tenantId,
+                propertyId = command.propertyId,
+                permissionCodes = command.permissionCodes,
+            )
             try {
                 jdbcTemplate.update(
                     """
@@ -132,7 +136,11 @@ class TenantPropertyRoleManagementService(
         ) { idempotencyKeyId ->
             requireMutablePropertyRole(command.tenantId, command.propertyId, command.propertyRoleId)
             val permissionIds = command.permissionCodes?.let {
-                requirePropertyPermissionIds(command.tenantId, it)
+                requireDelegablePropertyPermissionIds(
+                    tenantId = command.tenantId,
+                    propertyId = command.propertyId,
+                    permissionCodes = it,
+                )
             }
             val rows = jdbcTemplate.update(
                 """
@@ -296,7 +304,7 @@ class TenantPropertyRoleManagementService(
                 "Tenant user cannot assign own property roles"
             }
             requireActiveTenantUser(command.tenantId, command.userId)
-            requireActivePropertyRole(command.tenantId, command.propertyRoleId)
+            requireAssignablePropertyRole(command.tenantId, command.propertyId, command.propertyRoleId)
 
             val inserted = jdbcTemplate.update(
                 """
@@ -349,7 +357,7 @@ class TenantPropertyRoleManagementService(
                 "Tenant user cannot revoke own property roles"
             }
             requireTenantUser(command.tenantId, command.userId, activeOnly = false)
-            requirePropertyRole(command.tenantId, command.propertyRoleId, activeOnly = false)
+            requireRevocablePropertyRole(command.tenantId, command.propertyRoleId)
 
             val deleted = jdbcTemplate.update(
                 """
@@ -651,6 +659,30 @@ class TenantPropertyRoleManagementService(
         return requirePropertyRole(tenantId, propertyRoleId, activeOnly = true)
     }
 
+    private fun requireAssignablePropertyRole(
+        tenantId: UUID,
+        propertyId: UUID,
+        propertyRoleId: UUID,
+    ): PropertyRolePolicy {
+        val role = requireActivePropertyRole(tenantId, propertyRoleId)
+        require(!role.isSystem) {
+            "System property roles cannot be assigned or revoked through tenant property role management"
+        }
+        requireDelegablePropertyRole(tenantId, propertyId, propertyRoleId)
+        return role
+    }
+
+    private fun requireRevocablePropertyRole(
+        tenantId: UUID,
+        propertyRoleId: UUID,
+    ): PropertyRolePolicy {
+        val role = requirePropertyRole(tenantId, propertyRoleId, activeOnly = false)
+        require(!role.isSystem) {
+            "System property roles cannot be assigned or revoked through tenant property role management"
+        }
+        return role
+    }
+
     private fun requirePropertyRole(
         tenantId: UUID,
         propertyRoleId: UUID,
@@ -704,6 +736,76 @@ class TenantPropertyRoleManagementService(
         ) == true
         require(!assignedToActor) {
             "Tenant user cannot modify a property role assigned to self"
+        }
+    }
+
+    private fun requireDelegablePropertyRole(
+        tenantId: UUID,
+        propertyId: UUID,
+        propertyRoleId: UUID,
+    ) {
+        val permissionCodes = jdbcTemplate.queryForList(
+            """
+            SELECT p.code
+            FROM role_permissions rp
+            JOIN roles r
+              ON r.id = rp.role_id
+             AND r.tenant_id = ?
+            JOIN permissions p
+              ON p.id = rp.permission_id
+             AND p.tenant_id = r.tenant_id
+            WHERE rp.role_id = ?
+            ORDER BY p.code
+            """.trimIndent(),
+            String::class.java,
+            tenantId,
+            propertyRoleId,
+        ).filterNotNull()
+        requireDelegablePropertyPermissions(tenantId, propertyId, permissionCodes)
+    }
+
+    private fun requireDelegablePropertyPermissionIds(
+        tenantId: UUID,
+        propertyId: UUID,
+        permissionCodes: List<String>,
+    ): List<UUID> {
+        val permissionIds = requirePropertyPermissionIds(tenantId, permissionCodes)
+        requireDelegablePropertyPermissions(tenantId, propertyId, permissionCodes)
+        return permissionIds
+    }
+
+    private fun requireDelegablePropertyPermissions(
+        tenantId: UUID,
+        propertyId: UUID,
+        permissionCodes: List<String>,
+    ) {
+        val actorUserId = (requestContextHolder.current().identity as RequestIdentity.Tenant).tenantUserId
+        val tenantSuperAdmin = jdbcTemplate.queryForObject(
+            "SELECT user_has_tenant_permission(?, ?, ?)",
+            Boolean::class.java,
+            actorUserId,
+            tenantId,
+            TENANT_ADMIN_ALL_PERMISSION,
+        ) == true
+        if (tenantSuperAdmin) {
+            return
+        }
+
+        val unauthorized = permissionCodes
+            .map { it.normalizedCode() }
+            .distinct()
+            .filterNot { permissionCode ->
+                jdbcTemplate.queryForObject(
+                    "SELECT user_has_property_permission(?, ?, ?, ?)",
+                    Boolean::class.java,
+                    actorUserId,
+                    tenantId,
+                    propertyId,
+                    permissionCode,
+                ) == true
+            }
+        require(unauthorized.isEmpty()) {
+            "Property roles cannot include permissions the actor does not hold for this property"
         }
     }
 
@@ -976,6 +1078,7 @@ class TenantPropertyRoleManagementService(
 
     private companion object {
         private const val TENANT_PROPERTY_ACCESS_PERMISSION = "tenant.properties.manage_access"
+        private const val TENANT_ADMIN_ALL_PERMISSION = "tenant.admin.all"
         private const val PROPERTY_ADMIN_ROLE_NAME = "Property Administrator"
 
         private val PROPERTY_ADMIN_PERMISSION_CODES = setOf(

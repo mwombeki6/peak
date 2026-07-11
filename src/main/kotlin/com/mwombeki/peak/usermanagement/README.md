@@ -92,7 +92,7 @@ These routes are tenant-scoped, require `tenant.properties.manage_access`, and v
 | `POST` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/users/{userId}/roles/{propertyRoleId}/assign` | Assign a property role to a tenant user for one property. |
 | `POST` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/users/{userId}/roles/{propertyRoleId}/revoke` | Revoke a property role from a tenant user for one property. |
 
-Mutating property access routes require `Idempotency-Key`, write audit entries, and enqueue platform outbox events. System property roles are immutable through these APIs; property creation uses an internal bootstrap port to assign the creator the system Property Administrator role.
+Mutating property access routes require `Idempotency-Key`, write audit entries, and enqueue platform outbox events. Dynamic property role creation, update, and assignment cannot delegate permissions above the actor's effective tenant/property permission set. System property roles cannot be assigned, revoked, or modified through these APIs; property creation uses an internal bootstrap port to assign the creator the system Property Administrator role.
 
 ## Production Rules
 
