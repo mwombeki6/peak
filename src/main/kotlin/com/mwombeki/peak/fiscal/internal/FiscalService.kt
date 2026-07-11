@@ -238,26 +238,9 @@ class FiscalService(
             if (providerCode == HTTP_GATEWAY_PROVIDER) {
                 outboundEndpointPolicy.requireAllowedProviderEndpoint(URI.create(endpointUrl))
             }
-            val providerId = jdbcTemplate.queryForObject(
-                """
-                INSERT INTO fiscal_providers (
-                    provider_code, country_code, name, authority_name,
-                    fiscal_mode, supports_realtime, is_active
-                )
-                VALUES (?, 'TZ', ?, ?, 'EFD_VFD', true, true)
-                ON CONFLICT (provider_code)
-                DO UPDATE SET
-                    name = EXCLUDED.name,
-                    authority_name = EXCLUDED.authority_name,
-                    is_active = true,
-                    updated_at = now()
-                RETURNING id
-                """.trimIndent(),
-                UUID::class.java,
-                providerCode,
-                request.providerName.normalizedRequired("providerName"),
-                request.authorityName.normalizedRequired("authorityName"),
-            ) ?: error("Fiscal provider id was not returned")
+            request.providerName.normalizedRequired("providerName")
+            request.authorityName.normalizedRequired("authorityName")
+            val providerId = resolveFiscalProvider(providerCode)
             if (request.isDefault) {
                 jdbcTemplate.update(
                     """
@@ -333,6 +316,21 @@ class FiscalService(
                 propertyId,
             )
         }
+    }
+
+    private fun resolveFiscalProvider(providerCode: String): UUID {
+        return jdbcTemplate.query(
+            """
+            SELECT id
+            FROM fiscal_providers
+            WHERE provider_code = ?
+              AND is_active = true
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("id", UUID::class.java) },
+            providerCode,
+        ).singleOrNull() ?: throw FiscalRejectedException(
+            "Fiscal provider catalog entry is not configured for $providerCode",
+        )
     }
 
     override fun listReceipts(

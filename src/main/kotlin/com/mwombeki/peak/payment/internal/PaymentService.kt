@@ -17,6 +17,7 @@ import com.mwombeki.peak.payment.api.InitiateMobileMoneyRequest
 import com.mwombeki.peak.payment.api.InitiatePosMobileMoneyRequest
 import com.mwombeki.peak.payment.api.OpenCashSessionRequest
 import com.mwombeki.peak.payment.api.PaymentConflictException
+import com.mwombeki.peak.payment.api.PaymentAccessDeniedException
 import com.mwombeki.peak.payment.api.PaymentNotFoundException
 import com.mwombeki.peak.payment.api.PaymentPort
 import com.mwombeki.peak.payment.api.PaymentProviderAccountResponse
@@ -1286,25 +1287,11 @@ class PaymentService(
                     URI.create(endpointUrl.orEmpty()),
                 )
             }
-            val providerId = jdbcTemplate.queryForObject(
-                """
-                INSERT INTO payment_providers (
-                    tenant_id, provider_code, name, provider_type,
-                    country_code, supported_currencies, supports_collections
-                )
-                VALUES (?, ?, ?, 'mobile_money', 'TZ', ARRAY['TZS'], true)
-                ON CONFLICT (tenant_id, provider_code)
-                DO UPDATE SET
-                    name = EXCLUDED.name,
-                    is_active = true,
-                    updated_at = now()
-                RETURNING id
-                """.trimIndent(),
-                UUID::class.java,
-                actor.tenantId,
-                providerCode,
-                request.providerName.normalizedRequired("providerName"),
-            ) ?: error("Payment provider id was not returned")
+            val providerId = resolvePaymentProvider(
+                actor = actor,
+                providerCode = providerCode,
+                providerName = request.providerName.normalizedRequired("providerName"),
+            )
             if (request.isDefault) {
                 jdbcTemplate.update(
                     """
@@ -1385,6 +1372,96 @@ class PaymentService(
                 propertyId,
             )
         }
+    }
+
+    private fun resolvePaymentProvider(
+        actor: TenantActor,
+        providerCode: String,
+        providerName: String,
+    ): UUID {
+        val existing = jdbcTemplate.query(
+            """
+            SELECT id, name, is_active
+            FROM payment_providers
+            WHERE tenant_id = ? AND provider_code = ?
+            FOR UPDATE
+            """.trimIndent(),
+            { rs, _ ->
+                PaymentProviderCatalogEntry(
+                    id = rs.getObject("id", UUID::class.java),
+                    name = rs.getString("name"),
+                    isActive = rs.getBoolean("is_active"),
+                )
+            },
+            actor.tenantId,
+            providerCode,
+        ).singleOrNull()
+
+        if (existing == null) {
+            requirePaymentProviderCatalogPermission(actor)
+            return jdbcTemplate.queryForObject(
+                """
+                INSERT INTO payment_providers (
+                    tenant_id, provider_code, name, provider_type,
+                    country_code, supported_currencies, supports_collections
+                )
+                VALUES (?, ?, ?, 'mobile_money', 'TZ', ARRAY['TZS'], true)
+                RETURNING id
+                """.trimIndent(),
+                UUID::class.java,
+                actor.tenantId,
+                providerCode,
+                providerName,
+            ) ?: error("Payment provider id was not returned")
+        }
+
+        if (!existing.isActive) {
+            requirePaymentProviderCatalogPermission(actor)
+            jdbcTemplate.update(
+                """
+                UPDATE payment_providers
+                SET name = ?, is_active = true, updated_at = now()
+                WHERE tenant_id = ? AND id = ?
+                """.trimIndent(),
+                providerName,
+                actor.tenantId,
+                existing.id,
+            )
+            return existing.id
+        }
+
+        if (existing.name != providerName && hasPaymentProviderCatalogPermission(actor)) {
+            jdbcTemplate.update(
+                """
+                UPDATE payment_providers
+                SET name = ?, updated_at = now()
+                WHERE tenant_id = ? AND id = ?
+                """.trimIndent(),
+                providerName,
+                actor.tenantId,
+                existing.id,
+            )
+        }
+
+        return existing.id
+    }
+
+    private fun requirePaymentProviderCatalogPermission(actor: TenantActor) {
+        if (!hasPaymentProviderCatalogPermission(actor)) {
+            throw PaymentAccessDeniedException(
+                "Tenant-level payment provider catalog permission is required",
+            )
+        }
+    }
+
+    private fun hasPaymentProviderCatalogPermission(actor: TenantActor): Boolean {
+        return jdbcTemplate.queryForObject(
+            "SELECT user_has_tenant_permission(?, ?, ?)",
+            Boolean::class.java,
+            actor.tenantUserId,
+            actor.tenantId,
+            PAYMENT_PROVIDER_CATALOG_PERMISSION,
+        ) == true
     }
 
     override fun createReconciliation(
@@ -2161,6 +2238,12 @@ class PaymentService(
         val amount: BigDecimal,
     )
 
+    private data class PaymentProviderCatalogEntry(
+        val id: UUID,
+        val name: String,
+        val isActive: Boolean,
+    )
+
     private companion object {
         const val CONTRACT_MOCK_PROVIDER = "contract_mock"
         const val HTTP_GATEWAY_PROVIDER = "http_gateway"
@@ -2173,6 +2256,7 @@ class PaymentService(
             "payment.reconciliation.import.requested"
         const val CLICKPESA_PROVIDER = "clickpesa"
         const val CLICKPESA_ENDPOINT = "https://api.clickpesa.com/third-parties"
+        const val PAYMENT_PROVIDER_CATALOG_PERMISSION = "payments.provider_catalog.manage"
         val PROVIDER_CODE = Regex("[a-z0-9_]{3,50}")
         val TANZANIAN_PHONE = Regex("^\\+255[67][0-9]{8}$")
         val PROVIDER_REFERENCE = Regex("[A-Za-z0-9._:/-]{3,200}")
