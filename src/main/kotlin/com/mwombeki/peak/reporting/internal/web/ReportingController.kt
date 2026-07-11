@@ -196,3 +196,78 @@ class TenantReportSubscriptionMutationController(
         return reportingPort.disableRecipient(subscriptionId, recipientId)
     }
 }
+
+@RestController
+@RequestMapping("/api/v1/properties/{propertyId}/report-subscriptions")
+class PropertyReportSubscriptionMutationController(
+    private val reportingPort: ReportingPort,
+) {
+    @PutMapping("/{subscriptionId}")
+    fun update(
+        @PathVariable propertyId: UUID,
+        @PathVariable subscriptionId: UUID,
+        @RequestBody request: UpdateReportSubscriptionRequest,
+    ): ReportSubscriptionResponse =
+        reportingPort.updateSubscription(
+            subscriptionId = subscriptionId,
+            request = request,
+            propertyId = propertyId,
+        )
+
+    @PostMapping("/{subscriptionId}/pause")
+    fun pause(
+        @PathVariable propertyId: UUID,
+        @PathVariable subscriptionId: UUID,
+    ): ReportSubscriptionResponse =
+        reportingPort.transitionSubscription(
+            subscriptionId = subscriptionId,
+            action = "pause",
+            propertyId = propertyId,
+        )
+
+    @PostMapping("/{subscriptionId}/resume")
+    fun resume(
+        @PathVariable propertyId: UUID,
+        @PathVariable subscriptionId: UUID,
+    ): ReportSubscriptionResponse =
+        reportingPort.transitionSubscription(
+            subscriptionId = subscriptionId,
+            action = "resume",
+            propertyId = propertyId,
+        )
+
+    @PostMapping("/{subscriptionId}/archive")
+    fun archive(
+        @PathVariable propertyId: UUID,
+        @PathVariable subscriptionId: UUID,
+    ): ReportSubscriptionResponse =
+        reportingPort.transitionSubscription(
+            subscriptionId = subscriptionId,
+            action = "archive",
+            propertyId = propertyId,
+        )
+
+    @PostMapping("/{subscriptionId}/recipients")
+    fun addRecipient(
+        @PathVariable propertyId: UUID,
+        @PathVariable subscriptionId: UUID,
+        @RequestBody request: AddReportRecipientRequest,
+    ): ReportSubscriptionResponse =
+        reportingPort.addRecipient(
+            subscriptionId = subscriptionId,
+            request = request,
+            propertyId = propertyId,
+        )
+
+    @PostMapping("/{subscriptionId}/recipients/{recipientId}/disable")
+    fun disableRecipient(
+        @PathVariable propertyId: UUID,
+        @PathVariable subscriptionId: UUID,
+        @PathVariable recipientId: UUID,
+    ): ReportSubscriptionResponse =
+        reportingPort.disableRecipient(
+            subscriptionId = subscriptionId,
+            recipientId = recipientId,
+            propertyId = propertyId,
+        )
+}
