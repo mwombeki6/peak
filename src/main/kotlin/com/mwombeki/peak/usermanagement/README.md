@@ -77,6 +77,8 @@ All tenant role routes are tenant-scoped, require `tenant.users.manage`, and are
 
 Mutating tenant role routes require `Idempotency-Key`. Successful dynamic role definition changes write `audit_logs` entries and enqueue platform outbox events. Tenant system roles are read-only through tenant self-service, a tenant user cannot change their own role assignments, and delegated permissions cannot exceed the actor's effective permission set.
 
+Tenant user lifecycle and identity-link revocation routes also require `tenant.users.manage`. The actor cannot disable, lock, reactivate, unlock, or revoke identity links for a user whose effective tenant or property permissions exceed the actor's own effective permissions, unless the actor holds `tenant.admin.all`.
+
 ## Tenant-Managed Property Access API
 
 These routes are tenant-scoped, require `tenant.properties.manage_access`, and validate that the property belongs to the tenant.

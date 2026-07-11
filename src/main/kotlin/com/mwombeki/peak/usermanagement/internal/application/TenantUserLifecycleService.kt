@@ -85,6 +85,7 @@ class TenantUserLifecycleService(
         return when (reservation) {
             is IdempotencyReservation.Started -> applyLifecycleChange(
                 command = command,
+                actorUserId = actorUserId,
                 idempotencyKeyId = reservation.recordId,
             )
 
@@ -101,10 +102,12 @@ class TenantUserLifecycleService(
 
     private fun applyLifecycleChange(
         command: TenantUserLifecycleCommand,
+        actorUserId: UUID,
         idempotencyKeyId: UUID,
     ): TenantUserLifecycleReceipt {
         val before = findTenantUserForUpdate(command.tenantId, command.userId)
             ?: throw TenantUserLifecycleNotFoundException("Tenant user was not found")
+        requireActorCanManageTargetUser(command.tenantId, actorUserId, command.userId)
         val after = before.transition(command.action)
         val changed = before != after
 
@@ -166,6 +169,7 @@ class TenantUserLifecycleService(
         return when (reservation) {
             is IdempotencyReservation.Started -> applyIdentityLinkRevocation(
                 command = command,
+                actorUserId = actorUserId,
                 idempotencyKeyId = reservation.recordId,
             )
 
@@ -182,10 +186,12 @@ class TenantUserLifecycleService(
 
     private fun applyIdentityLinkRevocation(
         command: RevokeTenantUserIdentityLinkCommand,
+        actorUserId: UUID,
         idempotencyKeyId: UUID,
     ): TenantUserIdentityLinkRevocationReceipt {
         findTenantUserForUpdate(command.tenantId, command.userId)
             ?: throw TenantUserLifecycleNotFoundException("Tenant user was not found")
+        requireActorCanManageTargetUser(command.tenantId, actorUserId, command.userId)
 
         val before = findIdentityLinkForUpdate(command)
             ?: throw TenantUserLifecycleNotFoundException("Tenant user identity link was not found")
@@ -238,6 +244,111 @@ class TenantUserLifecycleService(
             "Requested tenant does not match identity"
         }
         return identity.tenantUserId
+    }
+
+    private fun requireActorCanManageTargetUser(
+        tenantId: UUID,
+        actorUserId: UUID,
+        targetUserId: UUID,
+    ) {
+        val tenantSuperAdmin = jdbcTemplate.queryForObject(
+            "SELECT user_has_tenant_permission(?, ?, ?)",
+            Boolean::class.java,
+            actorUserId,
+            tenantId,
+            TENANT_ADMIN_ALL_PERMISSION,
+        ) == true
+        if (tenantSuperAdmin) {
+            return
+        }
+
+        val missingTenantPermissions = targetTenantPermissionCodes(tenantId, targetUserId)
+            .filterNot { permissionCode ->
+                jdbcTemplate.queryForObject(
+                    "SELECT user_has_tenant_permission(?, ?, ?)",
+                    Boolean::class.java,
+                    actorUserId,
+                    tenantId,
+                    permissionCode,
+                ) == true
+            }
+        require(missingTenantPermissions.isEmpty()) {
+            "Tenant user cannot manage a user with permissions the actor does not hold"
+        }
+
+        val missingPropertyPermissions = targetPropertyPermissionGrants(tenantId, targetUserId)
+            .filterNot { grant ->
+                jdbcTemplate.queryForObject(
+                    "SELECT user_has_property_permission(?, ?, ?, ?)",
+                    Boolean::class.java,
+                    actorUserId,
+                    tenantId,
+                    grant.propertyId,
+                    grant.permissionCode,
+                ) == true
+            }
+        require(missingPropertyPermissions.isEmpty()) {
+            "Tenant user cannot manage a user with permissions the actor does not hold"
+        }
+    }
+
+    private fun targetTenantPermissionCodes(
+        tenantId: UUID,
+        targetUserId: UUID,
+    ): List<String> {
+        return jdbcTemplate.queryForList(
+            """
+            SELECT DISTINCT p.code
+            FROM user_tenant_roles utr
+            JOIN tenant_roles tr
+              ON tr.id = utr.tenant_role_id
+             AND tr.tenant_id = utr.tenant_id
+            JOIN tenant_role_permissions trp
+              ON trp.tenant_role_id = tr.id
+            JOIN permissions p
+              ON p.id = trp.permission_id
+             AND p.tenant_id = utr.tenant_id
+            WHERE utr.tenant_id = ?
+              AND utr.user_id = ?
+              AND tr.is_active = true
+            ORDER BY p.code
+            """.trimIndent(),
+            String::class.java,
+            tenantId,
+            targetUserId,
+        ).filterNotNull()
+    }
+
+    private fun targetPropertyPermissionGrants(
+        tenantId: UUID,
+        targetUserId: UUID,
+    ): List<PropertyPermissionGrant> {
+        return jdbcTemplate.query(
+            """
+            SELECT DISTINCT upr.property_id, p.code
+            FROM user_property_roles upr
+            JOIN roles r
+              ON r.id = upr.role_id
+             AND r.tenant_id = upr.tenant_id
+            JOIN role_permissions rp
+              ON rp.role_id = r.id
+            JOIN permissions p
+              ON p.id = rp.permission_id
+             AND p.tenant_id = upr.tenant_id
+            WHERE upr.tenant_id = ?
+              AND upr.user_id = ?
+              AND r.is_active = true
+            ORDER BY upr.property_id, p.code
+            """.trimIndent(),
+            { rs, _ ->
+                PropertyPermissionGrant(
+                    propertyId = rs.getObject("property_id", UUID::class.java),
+                    permissionCode = rs.getString("code"),
+                )
+            },
+            tenantId,
+            targetUserId,
+        )
     }
 
     private fun findTenantUserForUpdate(
@@ -472,4 +583,13 @@ class TenantUserLifecycleService(
         val identityLinkId: UUID,
         val revokedAt: Instant?,
     )
+
+    private data class PropertyPermissionGrant(
+        val propertyId: UUID,
+        val permissionCode: String,
+    )
+
+    private companion object {
+        private const val TENANT_ADMIN_ALL_PERMISSION = "tenant.admin.all"
+    }
 }

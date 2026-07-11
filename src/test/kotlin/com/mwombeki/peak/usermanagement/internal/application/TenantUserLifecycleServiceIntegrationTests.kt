@@ -191,6 +191,96 @@ class TenantUserLifecycleServiceIntegrationTests {
     }
 
     @Test
+    fun rejectsLifecycleChangeAgainstUserWithTenantPermissionActorDoesNotHold() {
+        val fixture = lifecycleFixture()
+        insertLifecycleFixture(fixture)
+        ensureTenantPermission(fixture.tenantId, "tenant.users.manage")
+        ensureTenantPermission(fixture.tenantId, "reports.view")
+        val actorRoleId = insertTenantRole(fixture.tenantId, "actor-lifecycle")
+        val targetRoleId = insertTenantRole(fixture.tenantId, "target-reporting")
+        insertTenantRolePermission(actorRoleId, fixture.tenantId, "tenant.users.manage")
+        insertTenantRolePermission(targetRoleId, fixture.tenantId, "reports.view")
+        insertTenantRoleAssignment(fixture.tenantId, fixture.actorUserId, actorRoleId)
+        insertTenantRoleAssignment(fixture.tenantId, fixture.targetUserId, targetRoleId)
+        requestContextHolder.set(tenantContext(fixture, "idem-lifecycle-hierarchy-denied"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            lifecyclePort.changeTenantUserLifecycle(
+                TenantUserLifecycleCommand(
+                    tenantId = fixture.tenantId,
+                    userId = fixture.targetUserId,
+                    action = TenantUserLifecycleAction.DISABLE,
+                ),
+            )
+        }
+
+        assertEquals(
+            "Tenant user cannot manage a user with permissions the actor does not hold",
+            error.message,
+        )
+        assertEquals("active", userRow(fixture)["status"])
+    }
+
+    @Test
+    fun tenantSuperAdminCanLifecycleHigherPrivilegeTenantUser() {
+        val fixture = lifecycleFixture()
+        insertLifecycleFixture(fixture)
+        ensureTenantPermission(fixture.tenantId, "tenant.admin.all")
+        ensureTenantPermission(fixture.tenantId, "reports.view")
+        val actorRoleId = insertTenantRole(fixture.tenantId, "actor-tenant-admin")
+        val targetRoleId = insertTenantRole(fixture.tenantId, "target-reporting")
+        insertTenantRolePermission(actorRoleId, fixture.tenantId, "tenant.admin.all")
+        insertTenantRolePermission(targetRoleId, fixture.tenantId, "reports.view")
+        insertTenantRoleAssignment(fixture.tenantId, fixture.actorUserId, actorRoleId)
+        insertTenantRoleAssignment(fixture.tenantId, fixture.targetUserId, targetRoleId)
+        requestContextHolder.set(tenantContext(fixture, "idem-lifecycle-hierarchy-admin"))
+
+        val receipt = lifecyclePort.changeTenantUserLifecycle(
+            TenantUserLifecycleCommand(
+                tenantId = fixture.tenantId,
+                userId = fixture.targetUserId,
+                action = TenantUserLifecycleAction.DISABLE,
+            ),
+        )
+
+        assertEquals("disabled", receipt.status)
+        assertEquals(true, receipt.changed)
+    }
+
+    @Test
+    fun rejectsIdentityLinkRevocationAgainstUserWithPropertyPermissionActorDoesNotHold() {
+        val fixture = lifecycleFixture()
+        val propertyId = UUID.randomUUID()
+        insertLifecycleFixture(fixture)
+        insertProperty(fixture.tenantId, propertyId)
+        ensureTenantPermission(fixture.tenantId, "tenant.users.manage")
+        ensureTenantPermission(fixture.tenantId, "property.manage")
+        val actorTenantRoleId = insertTenantRole(fixture.tenantId, "actor-lifecycle")
+        val targetPropertyRoleId = insertPropertyRole(fixture.tenantId, "target-property-manager")
+        insertTenantRolePermission(actorTenantRoleId, fixture.tenantId, "tenant.users.manage")
+        insertPropertyRolePermission(targetPropertyRoleId, fixture.tenantId, "property.manage")
+        insertTenantRoleAssignment(fixture.tenantId, fixture.actorUserId, actorTenantRoleId)
+        insertPropertyRoleAssignment(fixture.tenantId, propertyId, fixture.targetUserId, targetPropertyRoleId)
+        requestContextHolder.set(tenantContext(fixture, "idem-link-revoke-hierarchy-denied"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            lifecyclePort.revokeTenantUserIdentityLink(
+                RevokeTenantUserIdentityLinkCommand(
+                    tenantId = fixture.tenantId,
+                    userId = fixture.targetUserId,
+                    identityLinkId = fixture.identityLinkId,
+                ),
+            )
+        }
+
+        assertEquals(
+            "Tenant user cannot manage a user with permissions the actor does not hold",
+            error.message,
+        )
+        assertNull(identityLinkRevokedAt(fixture.identityLinkId))
+    }
+
+    @Test
     fun rejectsSelfLifecycleChange() {
         val fixture = lifecycleFixture()
         insertLifecycleFixture(fixture)
@@ -387,6 +477,14 @@ class TenantUserLifecycleServiceIntegrationTests {
         )
     }
 
+    private fun identityLinkRevokedAt(identityLinkId: UUID): Any? {
+        return jdbcTemplate.queryForObject(
+            "SELECT revoked_at FROM identity_links WHERE id = ?",
+            Any::class.java,
+            identityLinkId,
+        )
+    }
+
     private fun tenantContext(
         fixture: LifecycleFixture,
         idempotencyKey: String,
@@ -401,6 +499,126 @@ class TenantUserLifecycleServiceIntegrationTests {
             idempotencyKey = idempotencyKey,
             httpMethod = "POST",
             requestPath = "/api/v1/tenants/${fixture.tenantId}/users/${fixture.targetUserId}",
+        )
+    }
+
+    private fun ensureTenantPermission(tenantId: UUID, code: String) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO permissions (id, tenant_id, code, description)
+            SELECT gen_random_uuid(), ?, pc.code, pc.description
+            FROM permission_catalog pc
+            WHERE pc.code = ?
+            ON CONFLICT (tenant_id, code) DO UPDATE SET
+                description = EXCLUDED.description,
+                updated_at = now()
+            """.trimIndent(),
+            tenantId,
+            code,
+        )
+    }
+
+    private fun insertTenantRole(tenantId: UUID, codePrefix: String): UUID {
+        val roleId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_roles (id, tenant_id, name, code)
+            VALUES (?, ?, ?, ?)
+            """.trimIndent(),
+            roleId,
+            tenantId,
+            "Tenant Role $roleId",
+            "$codePrefix-$roleId",
+        )
+        return roleId
+    }
+
+    private fun insertTenantRolePermission(roleId: UUID, tenantId: UUID, code: String) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_role_permissions (tenant_role_id, permission_id)
+            SELECT ?, id
+            FROM permissions
+            WHERE tenant_id = ?
+              AND code = ?
+            """.trimIndent(),
+            roleId,
+            tenantId,
+            code,
+        )
+    }
+
+    private fun insertTenantRoleAssignment(tenantId: UUID, userId: UUID, roleId: UUID) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO user_tenant_roles (user_id, tenant_id, tenant_role_id)
+            VALUES (?, ?, ?)
+            """.trimIndent(),
+            userId,
+            tenantId,
+            roleId,
+        )
+    }
+
+    private fun insertProperty(tenantId: UUID, propertyId: UUID) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO properties (
+                id, tenant_id, name, code, type, status, timezone, business_date
+            )
+            VALUES (?, ?, ?, ?, 'HOTEL', 'draft', 'Africa/Dar_es_Salaam', CURRENT_DATE)
+            """.trimIndent(),
+            propertyId,
+            tenantId,
+            "Property $propertyId",
+            "P-${propertyId.toString().take(8)}",
+        )
+    }
+
+    private fun insertPropertyRole(tenantId: UUID, namePrefix: String): UUID {
+        val roleId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO roles (id, tenant_id, name, is_active)
+            VALUES (?, ?, ?, true)
+            """.trimIndent(),
+            roleId,
+            tenantId,
+            "$namePrefix-$roleId",
+        )
+        return roleId
+    }
+
+    private fun insertPropertyRolePermission(roleId: UUID, tenantId: UUID, code: String) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO role_permissions (role_id, permission_id)
+            SELECT ?, id
+            FROM permissions
+            WHERE tenant_id = ?
+              AND code = ?
+            """.trimIndent(),
+            roleId,
+            tenantId,
+            code,
+        )
+    }
+
+    private fun insertPropertyRoleAssignment(
+        tenantId: UUID,
+        propertyId: UUID,
+        userId: UUID,
+        roleId: UUID,
+    ) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO user_property_roles (user_id, property_id, role_id, tenant_id)
+            VALUES (?, ?, ?, ?)
+            """.trimIndent(),
+            userId,
+            propertyId,
+            roleId,
+            tenantId,
         )
     }
 
