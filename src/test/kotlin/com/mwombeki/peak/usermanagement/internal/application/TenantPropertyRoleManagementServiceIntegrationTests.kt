@@ -1,0 +1,456 @@
+package com.mwombeki.peak.usermanagement.internal.application
+
+import com.mwombeki.peak.TestcontainersConfiguration
+import com.mwombeki.peak.shared.context.DatabaseSessionContext
+import com.mwombeki.peak.shared.context.RequestContext
+import com.mwombeki.peak.shared.context.RequestContextHolder
+import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.usermanagement.api.AssignPropertyUserRoleCommand
+import com.mwombeki.peak.usermanagement.api.CreatePropertyRoleCommand
+import com.mwombeki.peak.usermanagement.api.EnsurePropertyAdministratorCommand
+import com.mwombeki.peak.usermanagement.api.PropertyAccessBootstrapPort
+import com.mwombeki.peak.usermanagement.api.RevokePropertyUserRoleCommand
+import com.mwombeki.peak.usermanagement.api.TenantPropertyRoleManagementPort
+import com.mwombeki.peak.usermanagement.api.TenantUserRoleManagementNotFoundException
+import java.util.UUID
+import kotlin.test.AfterTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.context.annotation.Import
+import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.transaction.support.TransactionTemplate
+import org.testcontainers.junit.jupiter.Testcontainers
+
+@Import(TestcontainersConfiguration::class)
+@SpringBootTest
+@Testcontainers(disabledWithoutDocker = true)
+class TenantPropertyRoleManagementServiceIntegrationTests {
+
+    @Autowired
+    private lateinit var propertyRoleManagementPort: TenantPropertyRoleManagementPort
+
+    @Autowired
+    private lateinit var propertyAccessBootstrapPort: PropertyAccessBootstrapPort
+
+    @Autowired
+    private lateinit var requestContextHolder: RequestContextHolder
+
+    @Autowired
+    private lateinit var databaseSessionContext: DatabaseSessionContext
+
+    @Autowired
+    private lateinit var jdbcTemplate: JdbcTemplate
+
+    @Autowired
+    private lateinit var transactionTemplate: TransactionTemplate
+
+    @AfterTest
+    fun clearContext() {
+        requestContextHolder.clear()
+    }
+
+    @Test
+    fun tenantAdminAssignsAndRevokesPropertyRoleAccess() {
+        val fixture = propertyRoleFixture()
+        insertPropertyRoleFixture(fixture)
+        requestContextHolder.set(tenantContext(fixture, "idem-property-role-create"))
+
+        val role = propertyRoleManagementPort.createPropertyRole(
+            CreatePropertyRoleCommand(
+                tenantId = fixture.tenantId,
+                propertyId = fixture.propertyId,
+                name = "Front Office ${fixture.propertyId}",
+                permissionCodes = listOf("property.view"),
+            ),
+        )
+
+        assertTrue(role.changed)
+        assertFalse(role.replayed)
+        assertEquals(0, propertyAssignmentCount(fixture, role.propertyRoleId))
+        assertFalse(targetCanAccessProperty(fixture, "property.view"))
+
+        requestContextHolder.set(tenantContext(fixture, "idem-property-role-assign"))
+        val assignment = propertyRoleManagementPort.assignPropertyUserRole(
+            AssignPropertyUserRoleCommand(
+                tenantId = fixture.tenantId,
+                propertyId = fixture.propertyId,
+                userId = fixture.targetUserId,
+                propertyRoleId = role.propertyRoleId,
+            ),
+        )
+
+        assertTrue(assignment.assigned)
+        assertTrue(assignment.changed)
+        assertEquals(1, propertyAssignmentCount(fixture, role.propertyRoleId))
+        assertTrue(targetCanAccessProperty(fixture, "property.view"))
+
+        requestContextHolder.set(tenantContext(fixture, "idem-property-role-revoke"))
+        val revocation = propertyRoleManagementPort.revokePropertyUserRole(
+            RevokePropertyUserRoleCommand(
+                tenantId = fixture.tenantId,
+                propertyId = fixture.propertyId,
+                userId = fixture.targetUserId,
+                propertyRoleId = role.propertyRoleId,
+            ),
+        )
+
+        assertFalse(revocation.assigned)
+        assertTrue(revocation.changed)
+        assertEquals(0, propertyAssignmentCount(fixture, role.propertyRoleId))
+        assertFalse(targetCanAccessProperty(fixture, "property.view"))
+    }
+
+    @Test
+    fun rejectsSelfPropertyRoleAssignment() {
+        val fixture = propertyRoleFixture()
+        insertPropertyRoleFixture(fixture)
+        val roleId = insertPropertyRole(fixture, "Self Guard ${fixture.propertyId}", listOf("property.view"))
+        requestContextHolder.set(tenantContext(fixture, "idem-property-role-self"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            propertyRoleManagementPort.assignPropertyUserRole(
+                AssignPropertyUserRoleCommand(
+                    tenantId = fixture.tenantId,
+                    propertyId = fixture.propertyId,
+                    userId = fixture.actorUserId,
+                    propertyRoleId = roleId,
+                ),
+            )
+        }
+
+        assertEquals("Tenant user cannot assign own property roles", error.message)
+    }
+
+    @Test
+    fun rejectsManagingPropertyOutsideTenant() {
+        val fixture = propertyRoleFixture()
+        insertPropertyRoleFixture(fixture)
+        val otherPlanId = UUID.randomUUID()
+        val otherTenantId = UUID.randomUUID()
+        val otherPropertyId = UUID.randomUUID()
+        insertPlan(otherPlanId)
+        insertTenant(otherTenantId, otherPlanId)
+        insertProperty(otherTenantId, otherPropertyId)
+        requestContextHolder.set(tenantContext(fixture, "idem-property-role-cross-tenant"))
+
+        val error = assertFailsWith<TenantUserRoleManagementNotFoundException> {
+            propertyRoleManagementPort.createPropertyRole(
+                CreatePropertyRoleCommand(
+                    tenantId = fixture.tenantId,
+                    propertyId = otherPropertyId,
+                    name = "Cross Tenant Property Role",
+                    permissionCodes = listOf("property.view"),
+                ),
+            )
+        }
+
+        assertEquals("Property was not found for tenant", error.message)
+    }
+
+    @Test
+    fun propertyBootstrapCreatesSystemAdministratorAssignment() {
+        val fixture = propertyRoleFixture()
+        insertPropertyRoleFixture(fixture)
+        requestContextHolder.set(tenantContext(fixture, "idem-property-bootstrap"))
+
+        val receipt = propertyAccessBootstrapPort.ensurePropertyAdministrator(
+            EnsurePropertyAdministratorCommand(
+                tenantId = fixture.tenantId,
+                propertyId = fixture.propertyId,
+                tenantUserId = fixture.actorUserId,
+            ),
+        )
+
+        assertTrue(receipt.changed)
+        assertEquals(1, propertyAssignmentCount(fixture, receipt.propertyRoleId, fixture.actorUserId))
+        assertTrue(
+            jdbcTemplate.queryForObject(
+                """
+                SELECT is_system
+                FROM roles
+                WHERE tenant_id = ?
+                  AND id = ?
+                """.trimIndent(),
+                Boolean::class.java,
+                fixture.tenantId,
+                receipt.propertyRoleId,
+            ) == true,
+        )
+    }
+
+    private fun targetCanAccessProperty(
+        fixture: PropertyRoleFixture,
+        permissionCode: String,
+    ): Boolean {
+        return requireNotNull(
+            transactionTemplate.execute {
+                databaseSessionContext.bind(
+                    RequestIdentity.Tenant(
+                        tenantId = fixture.tenantId,
+                        tenantUserId = fixture.targetUserId,
+                        correlationId = "corr-property-access-check",
+                    ),
+                )
+                jdbcTemplate.queryForObject(
+                    "SELECT can_access_module(?, ?, ?, 'property', ?)",
+                    Boolean::class.java,
+                    fixture.targetUserId,
+                    fixture.tenantId,
+                    fixture.propertyId,
+                    permissionCode,
+                ) == true
+            },
+        )
+    }
+
+    private fun insertPropertyRoleFixture(fixture: PropertyRoleFixture) {
+        insertPlan(fixture.planId)
+        insertTenant(fixture.tenantId, fixture.planId)
+        insertProperty(fixture.tenantId, fixture.propertyId)
+        insertTenantModule(fixture.tenantId, "tenant_admin")
+        insertTenantModule(fixture.tenantId, "property")
+        insertPropertyModule(fixture.tenantId, fixture.propertyId, "property")
+        insertTenantUser(fixture.tenantId, fixture.actorUserId, "actor-${fixture.actorUserId}@example.com")
+        insertTenantUser(fixture.tenantId, fixture.targetUserId, "target-${fixture.targetUserId}@example.com")
+        ensureTenantPermission(fixture.tenantId, "tenant.properties.manage_access")
+        ensureTenantPermission(fixture.tenantId, "property.view")
+        ensureTenantPermission(fixture.tenantId, "property.manage")
+        ensureTenantPermission(fixture.tenantId, "property.lifecycle")
+        ensureTenantPermission(fixture.tenantId, "property.roles.view")
+        ensureTenantPermission(fixture.tenantId, "property.roles.manage")
+        ensureTenantPermission(fixture.tenantId, "realtime.stream")
+        ensureTenantPermission(fixture.tenantId, "admin.all")
+        insertTenantRole(fixture.tenantId, fixture.actorRoleId)
+        insertTenantRolePermission(fixture.actorRoleId, fixture.tenantId, "tenant.properties.manage_access")
+        jdbcTemplate.update(
+            """
+            INSERT INTO user_tenant_roles (user_id, tenant_id, tenant_role_id)
+            VALUES (?, ?, ?)
+            """.trimIndent(),
+            fixture.actorUserId,
+            fixture.tenantId,
+            fixture.actorRoleId,
+        )
+    }
+
+    private fun insertPropertyRole(
+        fixture: PropertyRoleFixture,
+        name: String,
+        permissionCodes: List<String>,
+    ): UUID {
+        val roleId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO roles (id, tenant_id, name, is_active)
+            VALUES (?, ?, ?, true)
+            """.trimIndent(),
+            roleId,
+            fixture.tenantId,
+            name,
+        )
+        permissionCodes.forEach { code ->
+            jdbcTemplate.update(
+                """
+                INSERT INTO role_permissions (role_id, permission_id)
+                SELECT ?, id
+                FROM permissions
+                WHERE tenant_id = ?
+                  AND code = ?
+                """.trimIndent(),
+                roleId,
+                fixture.tenantId,
+                code,
+            )
+        }
+        return roleId
+    }
+
+    private fun propertyAssignmentCount(
+        fixture: PropertyRoleFixture,
+        propertyRoleId: UUID,
+        userId: UUID = fixture.targetUserId,
+    ): Int {
+        return requireNotNull(
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*)
+                FROM user_property_roles
+                WHERE tenant_id = ?
+                  AND property_id = ?
+                  AND user_id = ?
+                  AND role_id = ?
+                """.trimIndent(),
+                Int::class.java,
+                fixture.tenantId,
+                fixture.propertyId,
+                userId,
+                propertyRoleId,
+            ),
+        )
+    }
+
+    private fun insertPlan(planId: UUID) {
+        jdbcTemplate.update(
+            "INSERT INTO plans (id, name, code) VALUES (?, ?, ?)",
+            planId,
+            "Plan $planId",
+            "plan-$planId",
+        )
+    }
+
+    private fun insertTenant(tenantId: UUID, planId: UUID) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenants (id, name, slug, schema_name, plan_id)
+            VALUES (?, ?, ?, ?, ?)
+            """.trimIndent(),
+            tenantId,
+            "Tenant $tenantId",
+            "tenant-$tenantId",
+            "tenant_$tenantId".replace("-", "_"),
+            planId,
+        )
+    }
+
+    private fun insertProperty(tenantId: UUID, propertyId: UUID) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO properties (
+                id, tenant_id, name, code, type, status, timezone, business_date
+            )
+            VALUES (?, ?, ?, ?, 'HOTEL', 'draft', 'Africa/Dar_es_Salaam', CURRENT_DATE)
+            """.trimIndent(),
+            propertyId,
+            tenantId,
+            "Property $propertyId",
+            "P-${propertyId.toString().take(8)}",
+        )
+    }
+
+    private fun insertTenantModule(tenantId: UUID, moduleId: String) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_modules (tenant_id, module_id, is_enabled, is_configured)
+            VALUES (?, ?, true, true)
+            ON CONFLICT ON CONSTRAINT tenant_modules_tenant_id_module_id_key
+            DO UPDATE SET is_enabled = true, is_configured = true
+            """.trimIndent(),
+            tenantId,
+            moduleId,
+        )
+    }
+
+    private fun insertPropertyModule(tenantId: UUID, propertyId: UUID, moduleId: String) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO property_modules (tenant_id, property_id, module_id, is_enabled, is_configured)
+            VALUES (?, ?, ?, true, true)
+            ON CONFLICT ON CONSTRAINT property_modules_tenant_id_property_id_module_id_key
+            DO UPDATE SET is_enabled = true, is_configured = true
+            """.trimIndent(),
+            tenantId,
+            propertyId,
+            moduleId,
+        )
+    }
+
+    private fun insertTenantUser(tenantId: UUID, userId: UUID, email: String) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO users (id, tenant_id, full_name, email, status, is_active)
+            VALUES (?, ?, ?, ?, 'active', true)
+            """.trimIndent(),
+            userId,
+            tenantId,
+            "User $userId",
+            email,
+        )
+    }
+
+    private fun ensureTenantPermission(tenantId: UUID, code: String) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO permissions (id, tenant_id, code, description)
+            SELECT gen_random_uuid(), ?, pc.code, pc.description
+            FROM permission_catalog pc
+            WHERE pc.code = ?
+            ON CONFLICT (tenant_id, code) DO UPDATE SET
+                description = EXCLUDED.description,
+                updated_at = now()
+            """.trimIndent(),
+            tenantId,
+            code,
+        )
+    }
+
+    private fun insertTenantRole(tenantId: UUID, roleId: UUID) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_roles (id, tenant_id, name, code)
+            VALUES (?, ?, ?, ?)
+            """.trimIndent(),
+            roleId,
+            tenantId,
+            "Property Access Manager $roleId",
+            "property-access-manager-$roleId",
+        )
+    }
+
+    private fun insertTenantRolePermission(roleId: UUID, tenantId: UUID, code: String) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_role_permissions (tenant_role_id, permission_id)
+            SELECT ?, id
+            FROM permissions
+            WHERE tenant_id = ?
+              AND code = ?
+            """.trimIndent(),
+            roleId,
+            tenantId,
+            code,
+        )
+    }
+
+    private fun tenantContext(
+        fixture: PropertyRoleFixture,
+        idempotencyKey: String?,
+    ): RequestContext {
+        val suffix = idempotencyKey ?: "property-role-read"
+        return RequestContext(
+            identity = RequestIdentity.Tenant(
+                tenantId = fixture.tenantId,
+                tenantUserId = fixture.actorUserId,
+                correlationId = "corr-$suffix",
+            ),
+            correlationId = "corr-$suffix",
+            idempotencyKey = idempotencyKey,
+            httpMethod = "POST",
+            requestPath = "/api/v1/tenants/${fixture.tenantId}/properties/${fixture.propertyId}/roles",
+        )
+    }
+
+    private fun propertyRoleFixture(): PropertyRoleFixture {
+        return PropertyRoleFixture(
+            planId = UUID.randomUUID(),
+            tenantId = UUID.randomUUID(),
+            propertyId = UUID.randomUUID(),
+            actorUserId = UUID.randomUUID(),
+            targetUserId = UUID.randomUUID(),
+            actorRoleId = UUID.randomUUID(),
+        )
+    }
+
+    private data class PropertyRoleFixture(
+        val planId: UUID,
+        val tenantId: UUID,
+        val propertyId: UUID,
+        val actorUserId: UUID,
+        val targetUserId: UUID,
+        val actorRoleId: UUID,
+    )
+}

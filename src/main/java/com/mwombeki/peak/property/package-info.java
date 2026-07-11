@@ -5,7 +5,8 @@
                 "shared::context",
                 "shared::exception",
                 "audit::api",
-                "reliability::api"
+                "reliability::api",
+                "usermanagement::api"
         }
 )
 package com.mwombeki.peak.property;

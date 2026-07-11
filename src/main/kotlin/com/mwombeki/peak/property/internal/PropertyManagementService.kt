@@ -50,6 +50,8 @@ import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.usermanagement.api.EnsurePropertyAdministratorCommand
+import com.mwombeki.peak.usermanagement.api.PropertyAccessBootstrapPort
 import io.micrometer.core.instrument.MeterRegistry
 import java.sql.ResultSet
 import java.time.LocalDate
@@ -73,6 +75,7 @@ class PropertyManagementService(
     private val transactionTemplate: TransactionTemplate,
     private val objectMapper: ObjectMapper,
     private val meterRegistry: MeterRegistry,
+    private val propertyAccessBootstrapPort: PropertyAccessBootstrapPort,
 ) : PropertyPort, PropertyOperationsPort {
 
     override fun requireAssignableRoom(
@@ -402,7 +405,13 @@ class PropertyManagementService(
 
             enableTenantModule(identity.tenantId, PROPERTY_MODULE_ID, source = "system")
             upsertPropertyModule(identity.tenantId, propertyId, PROPERTY_MODULE_ID, enabled = true)
-            assignCreatorPropertyRole(identity.tenantId, propertyId, identity.tenantUserId)
+            propertyAccessBootstrapPort.ensurePropertyAdministrator(
+                EnsurePropertyAdministratorCommand(
+                    tenantId = identity.tenantId,
+                    propertyId = propertyId,
+                    tenantUserId = identity.tenantUserId,
+                ),
+            )
 
             PropertyMutationReceipt(
                 propertyId = propertyId,

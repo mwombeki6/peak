@@ -331,6 +331,7 @@ class PlatformAdministrationController(
             isSystem = isSystem,
             isActive = isActive,
             permissionCodes = permissionCodes,
+            scope = "PLATFORM",
         )
     }
 
@@ -475,6 +476,7 @@ data class PlatformRoleHttpResponse(
     val isSystem: Boolean,
     val isActive: Boolean,
     val permissionCodes: List<String>,
+    val scope: String,
 )
 
 data class PlatformPermissionHttpResponse(

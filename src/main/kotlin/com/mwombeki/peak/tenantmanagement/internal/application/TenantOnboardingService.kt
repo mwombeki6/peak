@@ -1,5 +1,6 @@
 package com.mwombeki.peak.tenantmanagement.internal.application
 
+import com.mwombeki.peak.audit.api.AuditOutcome
 import com.mwombeki.peak.audit.api.AuditPort
 import com.mwombeki.peak.audit.api.AuditResource
 import com.mwombeki.peak.audit.api.PlatformAuditEvent
@@ -22,6 +23,7 @@ import com.mwombeki.peak.tenantmanagement.internal.TenantProfileRepository
 import com.mwombeki.peak.tenantmanagement.internal.TenantRepository
 import java.time.Instant
 import java.util.UUID
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import tools.jackson.databind.ObjectMapper
@@ -36,6 +38,7 @@ class TenantOnboardingService(
     private val auditPort: AuditPort,
     private val outboxPort: OutboxPort,
     private val objectMapper: ObjectMapper,
+    private val jdbcTemplate: JdbcTemplate,
 ) : TenantOnboardingPort {
 
     @Transactional
@@ -113,6 +116,11 @@ class TenantOnboardingService(
     @Transactional(readOnly = true)
     override fun getTenantById(id: UUID): TenantResponse? {
         bindPlatformContext()
+        requireSupportBreakGlassAccess(
+            tenantId = id,
+            actionCode = "platform.tenants.view",
+            operation = "platform.tenants.view",
+        )
         val tenant = tenantRepository.findById(id) ?: return null
         val profile = tenantProfileRepository.findByTenantId(id)
             ?: throw IllegalStateException("Tenant profile is missing for tenant $id")
@@ -200,6 +208,42 @@ class TenantOnboardingService(
         }
         databaseSessionContext.bind(identity)
         return platformUserId
+    }
+
+    private fun requireSupportBreakGlassAccess(
+        tenantId: UUID,
+        actionCode: String,
+        operation: String,
+    ) {
+        val identity = requestContextHolder.current().identity
+        if (identity !is RequestIdentity.Support) {
+            return
+        }
+        val allowed = jdbcTemplate.queryForObject(
+            "SELECT can_platform_admin_access_tenant(?, ?, ?)",
+            Boolean::class.java,
+            identity.platformUserId,
+            tenantId,
+            actionCode,
+        ) == true
+        auditPort.recordPlatformEvent(
+            PlatformAuditEvent(
+                action = "platform.support.break_glass.access",
+                targetTenantId = tenantId,
+                resource = AuditResource("platform_break_glass_access", tenantId),
+                outcome = if (allowed) AuditOutcome.SUCCESS else AuditOutcome.DENIED,
+                after = mapOf(
+                    "tenantId" to tenantId,
+                    "platformUserId" to identity.platformUserId,
+                    "supportSessionId" to identity.supportSessionId,
+                    "actionCode" to actionCode,
+                    "operation" to operation,
+                ),
+            ),
+        )
+        require(allowed) {
+            "Active approved support break-glass access is required for tenant operation"
+        }
     }
 
     private fun response(

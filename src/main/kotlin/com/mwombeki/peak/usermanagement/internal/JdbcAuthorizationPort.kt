@@ -56,9 +56,6 @@ class JdbcAuthorizationPort(
         if (request.permissionCode.isNullOrBlank()) {
             return AuthorizationDecision.denied("Staff permission guard requires permission")
         }
-        if (request.routeScope == RouteScope.TENANT && request.propertyId != null) {
-            return AuthorizationDecision.denied("Tenant route scope must not include property id")
-        }
         if (request.routeScope == RouteScope.PROPERTY && request.propertyId == null) {
             return AuthorizationDecision.denied("Property route scope requires property id")
         }
@@ -71,7 +68,7 @@ class JdbcAuthorizationPort(
             Boolean::class.java,
             identity.tenantUserId,
             request.tenantId,
-            request.propertyId,
+            if (request.routeScope == RouteScope.TENANT) null else request.propertyId,
             request.moduleId,
             request.permissionCode,
         ) == true

@@ -53,6 +53,8 @@ peak:
     request-context:
       allow-header-identity: false
       allow-trusted-jwt-identity-claims: false
+    route-guard:
+      validate-route-matrix-on-startup: true
   integrations:
     nida:
       mode: ${PEAK_NIDA_MODE:disabled}
