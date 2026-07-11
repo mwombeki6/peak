@@ -185,6 +185,181 @@ class PlatformAdministrationControllerIntegrationTests {
     }
 
     @Test
+    fun rejectsUpdatingPlatformUserWithPermissionActorDoesNotHold() {
+        val actorId = insertPlatformActorWithPermissions("platform.security.manage")
+        val targetUserId = insertPlatformActorWithPermissions("platform.audit.view")
+
+        mockMvc.perform(
+            put("/api/v1/platform/users/$targetUserId")
+                .platform(actorId, "corr-platform-user-update-hierarchy", "idem-platform-user-update-hierarchy")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "fullName": "Renamed Platform Auditor"
+                    }
+                    """.trimIndent(),
+                ),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(
+                jsonPath("$.detail")
+                    .value("Platform operator cannot manage a user with permissions the actor does not hold"),
+            )
+
+        check(platformUserFullName(targetUserId) == "Platform User")
+    }
+
+    @Test
+    fun rejectsLifecycleChangeAgainstPlatformUserWithPermissionActorDoesNotHold() {
+        val actorId = insertPlatformActorWithPermissions("platform.security.manage")
+        val targetUserId = insertPlatformActorWithPermissions("platform.audit.view")
+
+        mockMvc.perform(
+            post("/api/v1/platform/users/$targetUserId/disable")
+                .platform(actorId, "corr-platform-user-disable-hierarchy", "idem-platform-user-disable-hierarchy"),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(
+                jsonPath("$.detail")
+                    .value("Platform operator cannot manage a user with permissions the actor does not hold"),
+            )
+
+        check(platformUserStatus(targetUserId) == "active")
+    }
+
+    @Test
+    fun platformAdminAllCanLifecycleHigherPermissionPlatformUser() {
+        val actorId = insertPlatformActorWithPermissions("platform.admin.all")
+        val targetUserId = insertPlatformActorWithPermissions("platform.audit.view")
+
+        mockMvc.perform(
+            post("/api/v1/platform/users/$targetUserId/disable")
+                .platform(actorId, "corr-platform-user-disable-admin-all", "idem-platform-user-disable-admin-all"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.status").value("disabled"))
+            .andExpect(jsonPath("$.changed").value(true))
+    }
+
+    @Test
+    fun rejectsIdentityLinkCreationAgainstPlatformUserWithPermissionActorDoesNotHold() {
+        val actorId = insertPlatformActorWithPermissions("platform.security.manage")
+        val targetUserId = insertPlatformActorWithPermissions("platform.audit.view")
+
+        mockMvc.perform(
+            post("/api/v1/platform/users/$targetUserId/identity-links")
+                .platform(actorId, "corr-platform-identity-link-hierarchy", "idem-platform-identity-link-hierarchy")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "issuer": "https://keycloak.example.com/realms/peak",
+                      "subject": "auditor-${UUID.randomUUID()}",
+                      "email": "platform-auditor@example.com"
+                    }
+                    """.trimIndent(),
+                ),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(
+                jsonPath("$.detail")
+                    .value("Platform operator cannot manage a user with permissions the actor does not hold"),
+            )
+
+        check(activePlatformIdentityLinkCount(targetUserId) == 0)
+    }
+
+    @Test
+    fun rejectsIdentityLinkRevocationAgainstPlatformUserWithPermissionActorDoesNotHold() {
+        val actorId = insertPlatformActorWithPermissions("platform.security.manage")
+        val targetUserId = insertPlatformActorWithPermissions("platform.audit.view")
+        val identityLinkId = insertPlatformIdentityLink(targetUserId)
+
+        mockMvc.perform(
+            post("/api/v1/platform/users/$targetUserId/identity-links/$identityLinkId/revoke")
+                .platform(actorId, "corr-platform-identity-revoke-hierarchy", "idem-platform-identity-revoke-hierarchy"),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(
+                jsonPath("$.detail")
+                    .value("Platform operator cannot manage a user with permissions the actor does not hold"),
+            )
+
+        check(identityLinkRevokedAt(identityLinkId) == null)
+    }
+
+    @Test
+    fun rejectsRoleAssignmentAgainstPlatformUserWithPermissionActorDoesNotHold() {
+        val actorId = insertPlatformActorWithPermissions("platform.security.manage")
+        val targetUserId = insertPlatformActorWithPermissions("platform.audit.view")
+        val roleId = insertPlatformRoleWithPermissions("platform.security.manage")
+
+        mockMvc.perform(
+            post("/api/v1/platform/users/$targetUserId/roles/$roleId/assign")
+                .platform(actorId, "corr-platform-role-assign-target-hierarchy", "idem-platform-role-assign-target-hierarchy"),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(
+                jsonPath("$.detail")
+                    .value("Platform operator cannot manage a user with permissions the actor does not hold"),
+            )
+
+        check(platformUserRoleAssignmentCount(targetUserId, roleId) == 0)
+    }
+
+    @Test
+    fun rejectsRoleRevocationAgainstPlatformUserWithPermissionActorDoesNotHold() {
+        val actorId = insertPlatformActorWithPermissions("platform.security.manage")
+        val targetUserId = insertPlatformActorWithPermissions("platform.audit.view")
+        val roleId = insertPlatformRoleWithPermissions("platform.security.manage")
+        insertPlatformUserRole(targetUserId, roleId, actorId)
+
+        mockMvc.perform(
+            post("/api/v1/platform/users/$targetUserId/roles/$roleId/revoke")
+                .platform(actorId, "corr-platform-role-revoke-target-hierarchy", "idem-platform-role-revoke-target-hierarchy"),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(
+                jsonPath("$.detail")
+                    .value("Platform operator cannot manage a user with permissions the actor does not hold"),
+            )
+
+        check(platformUserRoleAssignmentCount(targetUserId, roleId) == 1)
+    }
+
+    @Test
+    fun rejectsSelfIdentityLinkManagement() {
+        val actorId = insertPlatformSecurityActor()
+        val identityLinkId = insertPlatformIdentityLink(actorId)
+
+        mockMvc.perform(
+            post("/api/v1/platform/users/$actorId/identity-links")
+                .platform(actorId, "corr-platform-self-identity-link", "idem-platform-self-identity-link")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "issuer": "https://keycloak.example.com/realms/peak",
+                      "subject": "self-link-${UUID.randomUUID()}"
+                    }
+                    """.trimIndent(),
+                ),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.detail").value("Platform operator cannot link own identity"))
+
+        mockMvc.perform(
+            post("/api/v1/platform/users/$actorId/identity-links/$identityLinkId/revoke")
+                .platform(actorId, "corr-platform-self-identity-revoke", "idem-platform-self-identity-revoke"),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.detail").value("Platform operator cannot revoke own identity link"))
+
+        check(identityLinkRevokedAt(identityLinkId) == null)
+    }
+
+    @Test
     fun rejectsPlatformRolePermissionEscalation() {
         val actorId = insertPlatformActorWithPermissions("platform.security.manage")
 
@@ -528,6 +703,22 @@ class PlatformAdministrationControllerIntegrationTests {
         ) == true
     }
 
+    private fun platformUserFullName(platformUserId: UUID): String? {
+        return jdbcTemplate.queryForObject(
+            "SELECT full_name FROM platform_users WHERE id = ?",
+            String::class.java,
+            platformUserId,
+        )
+    }
+
+    private fun platformUserStatus(platformUserId: UUID): String? {
+        return jdbcTemplate.queryForObject(
+            "SELECT status FROM platform_users WHERE id = ?",
+            String::class.java,
+            platformUserId,
+        )
+    }
+
     private fun platformUserRoleAssignmentCount(platformUserId: UUID, platformRoleId: UUID): Int {
         return requireNotNull(
             jdbcTemplate.queryForObject(
@@ -541,6 +732,54 @@ class PlatformAdministrationControllerIntegrationTests {
                 platformUserId,
                 platformRoleId,
             ),
+        )
+    }
+
+    private fun insertPlatformIdentityLink(platformUserId: UUID): UUID {
+        val identityLinkId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO identity_links (
+                id,
+                identity_mode,
+                provider,
+                issuer,
+                subject,
+                platform_user_id,
+                email
+            )
+            VALUES (?, 'platform', 'oidc', ?, ?, ?, ?)
+            """.trimIndent(),
+            identityLinkId,
+            "https://keycloak.example.com/realms/peak",
+            "platform-subject-${identityLinkId.toString().take(8)}",
+            platformUserId,
+            "platform-link-${identityLinkId.toString().take(8)}@example.com",
+        )
+        return identityLinkId
+    }
+
+    private fun activePlatformIdentityLinkCount(platformUserId: UUID): Int {
+        return requireNotNull(
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*)
+                FROM identity_links
+                WHERE identity_mode = 'platform'
+                  AND platform_user_id = ?
+                  AND revoked_at IS NULL
+                """.trimIndent(),
+                Int::class.java,
+                platformUserId,
+            ),
+        )
+    }
+
+    private fun identityLinkRevokedAt(identityLinkId: UUID): java.sql.Timestamp? {
+        return jdbcTemplate.queryForObject(
+            "SELECT revoked_at FROM identity_links WHERE id = ?",
+            java.sql.Timestamp::class.java,
+            identityLinkId,
         )
     }
 
