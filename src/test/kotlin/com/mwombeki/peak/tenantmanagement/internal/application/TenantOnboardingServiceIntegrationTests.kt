@@ -11,6 +11,7 @@ import java.util.UUID
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
@@ -105,6 +106,51 @@ class TenantOnboardingServiceIntegrationTests {
         assertEquals(platformUserId, lifecycle["performed_by_platform_user_id"])
     }
 
+    @Test
+    fun rejectsSupportTenantLookupWhenSessionTenantDoesNotMatchTargetTenant() {
+        val platformUserId = UUID.randomUUID()
+        val supportTenantId = UUID.randomUUID()
+        val targetTenantId = UUID.randomUUID()
+        val supportPlanId = UUID.randomUUID()
+        val targetPlanId = UUID.randomUUID()
+        insertPlatformFixture(platformUserId)
+        insertPlan(supportPlanId)
+        insertPlan(targetPlanId)
+        insertTenantWithProfile(supportTenantId, supportPlanId)
+        insertTenantWithProfile(targetTenantId, targetPlanId)
+        insertActiveBreakGlassGrant(
+            platformUserId = platformUserId,
+            tenantId = targetTenantId,
+            actionCode = "platform.tenants.view",
+        )
+        requestContextHolder.set(
+            supportContext(
+                platformUserId = platformUserId,
+                supportTenantId = supportTenantId,
+                correlationId = "corr-support-tenant-lookup-mismatch",
+            ),
+        )
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            tenantOnboardingPort.getTenantById(targetTenantId)
+        }
+
+        assertEquals("Support session tenant does not match target tenant", error.message)
+        val auditOutcome = jdbcTemplate.queryForObject(
+            """
+            SELECT outcome
+            FROM platform_audit_logs
+            WHERE action = 'platform.support.break_glass.access'
+              AND tenant_id = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """.trimIndent(),
+            String::class.java,
+            targetTenantId,
+        )
+        assertEquals("denied", auditOutcome)
+    }
+
     private fun insertPlatformFixture(platformUserId: UUID) {
         val roleId = UUID.randomUUID()
         jdbcTemplate.update(
@@ -156,6 +202,73 @@ class TenantOnboardingServiceIntegrationTests {
         )
     }
 
+    private fun insertTenantWithProfile(tenantId: UUID, planId: UUID) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenants (id, name, slug, schema_name, plan_id, status)
+            VALUES (?, ?, ?, ?, ?, 'active')
+            """.trimIndent(),
+            tenantId,
+            "Tenant $tenantId",
+            "tenant-$tenantId",
+            "tenant_${tenantId.toString().replace("-", "")}",
+            planId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_profiles (
+                tenant_id,
+                legal_name,
+                entity_type,
+                business_phone,
+                business_email
+            )
+            VALUES (?, ?, 'limited_company', '+255712345678', ?)
+            """.trimIndent(),
+            tenantId,
+            "Tenant $tenantId Limited",
+            "business-$tenantId@example.com",
+        )
+    }
+
+    private fun insertActiveBreakGlassGrant(
+        platformUserId: UUID,
+        tenantId: UUID,
+        actionCode: String,
+    ) {
+        val approverId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO platform_users (id, full_name, email, status)
+            VALUES (?, ?, ?, 'active')
+            """.trimIndent(),
+            approverId,
+            "Break Glass Approver $approverId",
+            "approver-$approverId@example.com",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO platform_break_glass_access (
+                platform_user_id,
+                tenant_id,
+                action_code,
+                reason,
+                status,
+                approved_by,
+                approved_at,
+                activated_at,
+                starts_at,
+                expires_at
+            )
+            VALUES (?, ?, ?, 'Regression test support access', 'active', ?, now(), now(), now() - interval '1 minute', now() + interval '1 hour')
+            """.trimIndent(),
+            platformUserId,
+            tenantId,
+            actionCode,
+            approverId,
+        )
+    }
+
     private fun platformContext(
         platformUserId: UUID,
         correlationId: String,
@@ -168,6 +281,25 @@ class TenantOnboardingServiceIntegrationTests {
             correlationId = correlationId,
             idempotencyKey = "idem-$correlationId",
             httpMethod = "POST",
+            requestPath = "/api/v1/platform/tenants",
+        )
+    }
+
+    private fun supportContext(
+        platformUserId: UUID,
+        supportTenantId: UUID,
+        correlationId: String,
+    ): RequestContext {
+        return RequestContext(
+            identity = RequestIdentity.Support(
+                platformUserId = platformUserId,
+                tenantId = supportTenantId,
+                supportSessionId = UUID.randomUUID(),
+                correlationId = correlationId,
+            ),
+            correlationId = correlationId,
+            idempotencyKey = "idem-$correlationId",
+            httpMethod = "GET",
             requestPath = "/api/v1/platform/tenants",
         )
     }

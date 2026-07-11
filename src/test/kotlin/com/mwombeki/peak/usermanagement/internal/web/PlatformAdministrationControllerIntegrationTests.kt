@@ -291,6 +291,59 @@ class PlatformAdministrationControllerIntegrationTests {
         check(verificationStatus == "verified")
     }
 
+    @Test
+    fun rejectsSupportSessionForDifferentTenantEvenWithBreakGlassGrant() {
+        val actorId = insertPlatformActorWithPermissions("platform.security.manage")
+        val supportTenantId = insertTenantForProvisioning()
+        val targetTenantId = insertTenantForProvisioning()
+        insertActiveBreakGlassGrant(
+            platformUserId = actorId,
+            tenantId = targetTenantId,
+            actionCode = "platform.security.manage",
+        )
+        val subject = "tenant-admin-${UUID.randomUUID()}"
+
+        mockMvc.perform(
+            post("/api/v1/platform/tenants/$targetTenantId/administrators")
+                .support(
+                    platformUserId = actorId,
+                    supportTenantId = supportTenantId,
+                    supportSessionId = UUID.randomUUID(),
+                    correlationId = "corr-support-tenant-mismatch",
+                    idempotencyKey = "idem-support-tenant-mismatch",
+                )
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "fullName": "Wrong Tenant Support Admin",
+                      "email": "wrong-support-$targetTenantId@example.com",
+                      "issuer": "https://keycloak.example.com/realms/peak",
+                      "subject": "$subject"
+                    }
+                    """.trimIndent(),
+                ),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.detail").value("Support session tenant does not match target tenant"))
+
+        val auditOutcome = jdbcTemplate.queryForObject(
+            """
+            SELECT outcome
+            FROM platform_audit_logs
+            WHERE action = 'platform.support.break_glass.access'
+              AND tenant_id = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """.trimIndent(),
+            String::class.java,
+            targetTenantId,
+        )
+        check(auditOutcome == "denied") {
+            "Expected denied support break-glass audit outcome for tenant mismatch"
+        }
+    }
+
     private fun insertPlatformSecurityActor(): UUID {
         return insertPlatformActorWithPermissions(
             "platform.security.manage",
@@ -390,6 +443,35 @@ class PlatformAdministrationControllerIntegrationTests {
         return tenantId
     }
 
+    private fun insertActiveBreakGlassGrant(
+        platformUserId: UUID,
+        tenantId: UUID,
+        actionCode: String,
+    ) {
+        val approverId = insertPlatformUser()
+        jdbcTemplate.update(
+            """
+            INSERT INTO platform_break_glass_access (
+                platform_user_id,
+                tenant_id,
+                action_code,
+                reason,
+                status,
+                approved_by,
+                approved_at,
+                activated_at,
+                starts_at,
+                expires_at
+            )
+            VALUES (?, ?, ?, 'Regression test support access', 'active', ?, now(), now(), now() - interval '1 minute', now() + interval '1 hour')
+            """.trimIndent(),
+            platformUserId,
+            tenantId,
+            actionCode,
+            approverId,
+        )
+    }
+
     private fun assertPlatformAuditAndOutboxWereRecorded(platformUserId: UUID) {
         val auditCount = jdbcTemplate.queryForObject(
             """
@@ -425,6 +507,21 @@ class PlatformAdministrationControllerIntegrationTests {
         idempotencyKey: String? = null,
     ): org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder {
         header(PeakRequestHeaders.PLATFORM_USER_ID, platformUserId.toString())
+        header(PeakRequestHeaders.CORRELATION_ID, correlationId)
+        idempotencyKey?.let { header(PeakRequestHeaders.IDEMPOTENCY_KEY, it) }
+        return this
+    }
+
+    private fun org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder.support(
+        platformUserId: UUID,
+        supportTenantId: UUID,
+        supportSessionId: UUID,
+        correlationId: String,
+        idempotencyKey: String? = null,
+    ): org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder {
+        header(PeakRequestHeaders.PLATFORM_USER_ID, platformUserId.toString())
+        header(PeakRequestHeaders.SUPPORT_TENANT_ID, supportTenantId.toString())
+        header(PeakRequestHeaders.SUPPORT_SESSION_ID, supportSessionId.toString())
         header(PeakRequestHeaders.CORRELATION_ID, correlationId)
         idempotencyKey?.let { header(PeakRequestHeaders.IDEMPOTENCY_KEY, it) }
         return this

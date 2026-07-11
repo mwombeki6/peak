@@ -3,18 +3,24 @@ package com.mwombeki.peak.audit.internal
 import com.mwombeki.peak.audit.api.AuditPort
 import com.mwombeki.peak.audit.api.PlatformAuditEvent
 import com.mwombeki.peak.audit.api.TenantAuditEvent
+import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
 import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionSynchronizationManager
+import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.ObjectMapper
 
 @Component
 class JdbcAuditPort(
     private val jdbcTemplate: JdbcTemplate,
     private val requestContextHolder: RequestContextHolder,
+    private val databaseSessionContext: DatabaseSessionContext,
+    private val transactionManager: PlatformTransactionManager,
     private val payloadSanitizer: AuditPayloadSanitizer,
     private val objectMapper: ObjectMapper,
     private val meterRegistry: MeterRegistry,
@@ -68,7 +74,20 @@ class JdbcAuditPort(
 
     override fun recordPlatformEvent(event: PlatformAuditEvent) {
         requireActiveTransaction()
+        insertPlatformEvent(event)
+    }
 
+    override fun recordPlatformEventImmediately(event: PlatformAuditEvent) {
+        TransactionTemplate(transactionManager).apply {
+            propagationBehavior = TransactionDefinition.PROPAGATION_REQUIRES_NEW
+            isReadOnly = false
+        }.executeWithoutResult {
+            databaseSessionContext.bind(requestContextHolder.current().identity)
+            insertPlatformEvent(event)
+        }
+    }
+
+    private fun insertPlatformEvent(event: PlatformAuditEvent) {
         val context = requestContextHolder.current()
         val platformUserId = when (val identity = context.identity) {
             is RequestIdentity.Platform -> identity.platformUserId
