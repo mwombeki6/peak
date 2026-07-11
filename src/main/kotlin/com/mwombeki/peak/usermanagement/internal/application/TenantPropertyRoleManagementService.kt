@@ -135,6 +135,7 @@ class TenantPropertyRoleManagementService(
             requestPayload = command,
         ) { idempotencyKeyId ->
             requireMutablePropertyRole(command.tenantId, command.propertyId, command.propertyRoleId)
+            requireDelegablePropertyRole(command.tenantId, command.propertyId, command.propertyRoleId)
             val permissionIds = command.permissionCodes?.let {
                 requireDelegablePropertyPermissionIds(
                     tenantId = command.tenantId,
@@ -195,6 +196,7 @@ class TenantPropertyRoleManagementService(
             requestPayload = command,
         ) { idempotencyKeyId ->
             requireMutablePropertyRole(command.tenantId, command.propertyId, command.propertyRoleId)
+            requireDelegablePropertyRole(command.tenantId, command.propertyId, command.propertyRoleId)
             val rows = jdbcTemplate.update(
                 """
                 UPDATE roles
@@ -358,6 +360,7 @@ class TenantPropertyRoleManagementService(
             }
             requireTenantUser(command.tenantId, command.userId, activeOnly = false)
             requireRevocablePropertyRole(command.tenantId, command.propertyRoleId)
+            requireDelegablePropertyRole(command.tenantId, command.propertyId, command.propertyRoleId)
 
             val deleted = jdbcTemplate.update(
                 """

@@ -209,6 +209,7 @@ class TenantUserRoleManagementService(
             requestPayload = command,
         ) { idempotencyKeyId ->
             requireMutableTenantRole(command.tenantId, command.tenantRoleId)
+            requireDelegableTenantRole(command.tenantId, command.tenantRoleId)
             val permissionIds = command.permissionCodes
                 ?.also { requireDelegableTenantPermissions(command.tenantId, it) }
                 ?.let { requireTenantPermissions(command.tenantId, it) }
@@ -265,6 +266,7 @@ class TenantUserRoleManagementService(
             requestPayload = command,
         ) { idempotencyKeyId ->
             requireMutableTenantRole(command.tenantId, command.tenantRoleId)
+            requireDelegableTenantRole(command.tenantId, command.tenantRoleId)
             val rows = jdbcTemplate.update(
                 """
                 UPDATE tenant_roles
@@ -397,6 +399,7 @@ class TenantUserRoleManagementService(
         return when (reservation) {
             is IdempotencyReservation.Started -> applyRevocation(
                 command = command,
+                actorUserId = actorUserId,
                 idempotencyKeyId = reservation.recordId,
             )
 
@@ -471,10 +474,12 @@ class TenantUserRoleManagementService(
 
     private fun applyRevocation(
         command: RevokeTenantUserRoleCommand,
+        actorUserId: UUID,
         idempotencyKeyId: UUID,
     ): TenantUserRoleAssignmentReceipt {
         requireTenantUser(command.tenantId, command.userId)
         requireTenantRole(command.tenantId, command.tenantRoleId)
+        requireDelegableTenantRole(command.tenantId, command.tenantRoleId, actorUserId)
 
         val deleted = jdbcTemplate.update(
             """
@@ -807,7 +812,11 @@ class TenantUserRoleManagementService(
         }
     }
 
-    private fun requireDelegableTenantRole(tenantId: UUID, tenantRoleId: UUID) {
+    private fun requireDelegableTenantRole(
+        tenantId: UUID,
+        tenantRoleId: UUID,
+        actorUserId: UUID = requireTenantActor(tenantId),
+    ) {
         val permissionCodes = jdbcTemplate.queryForList(
             """
             SELECT p.code
@@ -822,11 +831,14 @@ class TenantUserRoleManagementService(
             tenantId,
             tenantRoleId,
         ).filterNotNull()
-        requireDelegableTenantPermissions(tenantId, permissionCodes)
+        requireDelegableTenantPermissions(tenantId, permissionCodes, actorUserId)
     }
 
-    private fun requireDelegableTenantPermissions(tenantId: UUID, permissionCodes: List<String>) {
-        val actorUserId = requireTenantActor(tenantId)
+    private fun requireDelegableTenantPermissions(
+        tenantId: UUID,
+        permissionCodes: List<String>,
+        actorUserId: UUID = requireTenantActor(tenantId),
+    ) {
         val unauthorized = permissionCodes
             .map { it.normalizedCode() }
             .distinct()

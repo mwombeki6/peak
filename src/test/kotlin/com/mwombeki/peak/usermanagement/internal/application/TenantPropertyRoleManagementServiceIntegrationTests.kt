@@ -7,11 +7,13 @@ import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.usermanagement.api.AssignPropertyUserRoleCommand
 import com.mwombeki.peak.usermanagement.api.CreatePropertyRoleCommand
+import com.mwombeki.peak.usermanagement.api.DeactivatePropertyRoleCommand
 import com.mwombeki.peak.usermanagement.api.EnsurePropertyAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.PropertyAccessBootstrapPort
 import com.mwombeki.peak.usermanagement.api.RevokePropertyUserRoleCommand
 import com.mwombeki.peak.usermanagement.api.TenantPropertyRoleManagementPort
 import com.mwombeki.peak.usermanagement.api.TenantUserRoleManagementNotFoundException
+import com.mwombeki.peak.usermanagement.api.UpdatePropertyRoleCommand
 import java.util.UUID
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -180,6 +182,97 @@ class TenantPropertyRoleManagementServiceIntegrationTests {
             error.message,
         )
         assertEquals(0, propertyAssignmentCount(fixture, roleId))
+    }
+
+    @Test
+    fun rejectsRevokingPropertyRoleWithPermissionActorDoesNotHold() {
+        val fixture = propertyRoleFixture()
+        insertPropertyRoleFixture(fixture, grantTenantAdmin = false)
+        val roleId = insertPropertyRole(
+            fixture = fixture,
+            name = "Escalated Revoke ${fixture.propertyId}",
+            permissionCodes = listOf("property.manage"),
+        )
+        insertPropertyRoleAssignment(fixture, roleId, fixture.targetUserId)
+        requestContextHolder.set(tenantContext(fixture, "idem-property-role-escalation-revoke"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            propertyRoleManagementPort.revokePropertyUserRole(
+                RevokePropertyUserRoleCommand(
+                    tenantId = fixture.tenantId,
+                    propertyId = fixture.propertyId,
+                    userId = fixture.targetUserId,
+                    propertyRoleId = roleId,
+                ),
+            )
+        }
+
+        assertEquals(
+            "Property roles cannot include permissions the actor does not hold for this property",
+            error.message,
+        )
+        assertEquals(1, propertyAssignmentCount(fixture, roleId))
+    }
+
+    @Test
+    fun rejectsUpdatingPropertyRoleWithCurrentPermissionActorDoesNotHold() {
+        val fixture = propertyRoleFixture()
+        insertPropertyRoleFixture(fixture, grantTenantAdmin = false)
+        val roleName = "Escalated Update ${fixture.propertyId}"
+        val roleId = insertPropertyRole(
+            fixture = fixture,
+            name = roleName,
+            permissionCodes = listOf("property.manage"),
+        )
+        requestContextHolder.set(tenantContext(fixture, "idem-property-role-escalation-update"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            propertyRoleManagementPort.updatePropertyRole(
+                UpdatePropertyRoleCommand(
+                    tenantId = fixture.tenantId,
+                    propertyId = fixture.propertyId,
+                    propertyRoleId = roleId,
+                    name = "Renamed ${fixture.propertyId}",
+                    permissionCodes = null,
+                ),
+            )
+        }
+
+        assertEquals(
+            "Property roles cannot include permissions the actor does not hold for this property",
+            error.message,
+        )
+        assertEquals(roleName, propertyRoleName(fixture, roleId))
+    }
+
+    @Test
+    fun rejectsDeactivatingPropertyRoleWithCurrentPermissionActorDoesNotHold() {
+        val fixture = propertyRoleFixture()
+        insertPropertyRoleFixture(fixture, grantTenantAdmin = false)
+        val roleId = insertPropertyRole(
+            fixture = fixture,
+            name = "Escalated Deactivate ${fixture.propertyId}",
+            permissionCodes = listOf("property.manage"),
+        )
+        insertPropertyRoleAssignment(fixture, roleId, fixture.targetUserId)
+        requestContextHolder.set(tenantContext(fixture, "idem-property-role-escalation-deactivate"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            propertyRoleManagementPort.deactivatePropertyRole(
+                DeactivatePropertyRoleCommand(
+                    tenantId = fixture.tenantId,
+                    propertyId = fixture.propertyId,
+                    propertyRoleId = roleId,
+                ),
+            )
+        }
+
+        assertEquals(
+            "Property roles cannot include permissions the actor does not hold for this property",
+            error.message,
+        )
+        assertTrue(propertyRoleActive(fixture, roleId))
+        assertEquals(1, propertyAssignmentCount(fixture, roleId))
     }
 
     @Test
@@ -456,6 +549,34 @@ class TenantPropertyRoleManagementServiceIntegrationTests {
                 name,
             ),
         )
+    }
+
+    private fun propertyRoleName(fixture: PropertyRoleFixture, propertyRoleId: UUID): String? {
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT name
+            FROM roles
+            WHERE tenant_id = ?
+              AND id = ?
+            """.trimIndent(),
+            String::class.java,
+            fixture.tenantId,
+            propertyRoleId,
+        )
+    }
+
+    private fun propertyRoleActive(fixture: PropertyRoleFixture, propertyRoleId: UUID): Boolean {
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT is_active
+            FROM roles
+            WHERE tenant_id = ?
+              AND id = ?
+            """.trimIndent(),
+            Boolean::class.java,
+            fixture.tenantId,
+            propertyRoleId,
+        ) == true
     }
 
     private fun insertPlan(planId: UUID) {
