@@ -273,14 +273,16 @@ class TenantGovernanceService(
         if (identity !is RequestIdentity.Support) {
             return
         }
-        val allowed = jdbcTemplate.queryForObject(
-            "SELECT can_platform_admin_access_tenant(?, ?, ?)",
-            Boolean::class.java,
-            identity.platformUserId,
-            tenantId,
-            actionCode,
-        ) == true
-        auditPort.recordPlatformEvent(
+        val supportTenantMatches = identity.tenantId == tenantId
+        val allowed = supportTenantMatches &&
+                jdbcTemplate.queryForObject(
+                    "SELECT can_platform_admin_access_tenant(?, ?, ?)",
+                    Boolean::class.java,
+                    identity.platformUserId,
+                    tenantId,
+                    actionCode,
+                ) == true
+        auditPort.recordPlatformEventImmediately(
             PlatformAuditEvent(
                 action = "platform.support.break_glass.access",
                 targetTenantId = tenantId,
@@ -288,6 +290,7 @@ class TenantGovernanceService(
                 outcome = if (allowed) AuditOutcome.SUCCESS else AuditOutcome.DENIED,
                 after = mapOf(
                     "tenantId" to tenantId,
+                    "supportTenantId" to identity.tenantId,
                     "platformUserId" to identity.platformUserId,
                     "supportSessionId" to identity.supportSessionId,
                     "actionCode" to actionCode,
@@ -295,6 +298,9 @@ class TenantGovernanceService(
                 ),
             ),
         )
+        require(supportTenantMatches) {
+            "Support session tenant does not match target tenant"
+        }
         require(allowed) {
             "Active approved support break-glass access is required for tenant operation"
         }

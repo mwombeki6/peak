@@ -9,6 +9,7 @@ import java.util.UUID
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.annotation.Import
@@ -76,6 +77,56 @@ class TenantGovernanceServiceIntegrationTests {
             tenantId,
         )
         assertEquals(listOf("activated", "suspended"), eventTypes)
+    }
+
+    @Test
+    fun rejectsSupportGovernanceWhenSessionTenantDoesNotMatchTargetTenant() {
+        val platformUserId = UUID.randomUUID()
+        val supportTenantId = UUID.randomUUID()
+        val targetTenantId = UUID.randomUUID()
+        val supportPlanId = UUID.randomUUID()
+        val targetPlanId = UUID.randomUUID()
+        insertPlatformFixture(platformUserId)
+        insertPlan(supportPlanId)
+        insertPlan(targetPlanId)
+        insertTenant(supportTenantId, supportPlanId, "active")
+        insertTenant(targetTenantId, targetPlanId, "active")
+        insertActiveBreakGlassGrant(
+            platformUserId = platformUserId,
+            tenantId = targetTenantId,
+            actionCode = "platform.tenants.manage",
+        )
+        requestContextHolder.set(
+            supportContext(
+                platformUserId = platformUserId,
+                supportTenantId = supportTenantId,
+                correlationId = "corr-governance-support-mismatch",
+            ),
+        )
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            tenantGovernancePort.suspendTenant(
+                tenantId = targetTenantId,
+                operatorId = platformUserId,
+                reason = "Regression test mismatch",
+            )
+        }
+
+        assertEquals("Support session tenant does not match target tenant", error.message)
+        assertEquals("active", tenantStatus(targetTenantId))
+        val auditOutcome = jdbcTemplate.queryForObject(
+            """
+            SELECT outcome
+            FROM platform_audit_logs
+            WHERE action = 'platform.support.break_glass.access'
+              AND tenant_id = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """.trimIndent(),
+            String::class.java,
+            targetTenantId,
+        )
+        assertEquals("denied", auditOutcome)
     }
 
     private fun tenantStatus(tenantId: UUID): String {
@@ -158,6 +209,36 @@ class TenantGovernanceServiceIntegrationTests {
         )
     }
 
+    private fun insertActiveBreakGlassGrant(
+        platformUserId: UUID,
+        tenantId: UUID,
+        actionCode: String,
+    ) {
+        val approverId = UUID.randomUUID()
+        insertPlatformFixture(approverId)
+        jdbcTemplate.update(
+            """
+            INSERT INTO platform_break_glass_access (
+                platform_user_id,
+                tenant_id,
+                action_code,
+                reason,
+                status,
+                approved_by,
+                approved_at,
+                activated_at,
+                starts_at,
+                expires_at
+            )
+            VALUES (?, ?, ?, 'Regression test support access', 'active', ?, now(), now(), now() - interval '1 minute', now() + interval '1 hour')
+            """.trimIndent(),
+            platformUserId,
+            tenantId,
+            actionCode,
+            approverId,
+        )
+    }
+
     private fun platformContext(
         platformUserId: UUID,
         correlationId: String,
@@ -165,6 +246,25 @@ class TenantGovernanceServiceIntegrationTests {
         return RequestContext(
             identity = RequestIdentity.Platform(
                 platformUserId = platformUserId,
+                correlationId = correlationId,
+            ),
+            correlationId = correlationId,
+            idempotencyKey = "idem-$correlationId",
+            httpMethod = "POST",
+            requestPath = "/api/v1/platform/tenants",
+        )
+    }
+
+    private fun supportContext(
+        platformUserId: UUID,
+        supportTenantId: UUID,
+        correlationId: String,
+    ): RequestContext {
+        return RequestContext(
+            identity = RequestIdentity.Support(
+                platformUserId = platformUserId,
+                tenantId = supportTenantId,
+                supportSessionId = UUID.randomUUID(),
                 correlationId = correlationId,
             ),
             correlationId = correlationId,
