@@ -422,6 +422,7 @@ class TenantUserRoleManagementService(
         requireActiveTenantUser(command.tenantId, command.userId)
         requireActiveTenantRole(command.tenantId, command.tenantRoleId)
         requireDelegableTenantRole(command.tenantId, command.tenantRoleId)
+        requireActorCanManageTargetUser(command.tenantId, actorUserId, command.userId)
 
         val inserted = jdbcTemplate.update(
             """
@@ -480,6 +481,7 @@ class TenantUserRoleManagementService(
         requireTenantUser(command.tenantId, command.userId)
         requireTenantRole(command.tenantId, command.tenantRoleId)
         requireDelegableTenantRole(command.tenantId, command.tenantRoleId, actorUserId)
+        requireActorCanManageTargetUser(command.tenantId, actorUserId, command.userId)
 
         val deleted = jdbcTemplate.update(
             """
@@ -534,6 +536,111 @@ class TenantUserRoleManagementService(
             "Requested tenant does not match identity"
         }
         return identity.tenantUserId
+    }
+
+    private fun requireActorCanManageTargetUser(
+        tenantId: UUID,
+        actorUserId: UUID,
+        targetUserId: UUID,
+    ) {
+        val tenantSuperAdmin = jdbcTemplate.queryForObject(
+            "SELECT user_has_tenant_permission(?, ?, ?)",
+            Boolean::class.java,
+            actorUserId,
+            tenantId,
+            TENANT_ADMIN_ALL_PERMISSION,
+        ) == true
+        if (tenantSuperAdmin) {
+            return
+        }
+
+        val missingTenantPermissions = targetTenantPermissionCodes(tenantId, targetUserId)
+            .filterNot { permissionCode ->
+                jdbcTemplate.queryForObject(
+                    "SELECT user_has_tenant_permission(?, ?, ?)",
+                    Boolean::class.java,
+                    actorUserId,
+                    tenantId,
+                    permissionCode,
+                ) == true
+            }
+        require(missingTenantPermissions.isEmpty()) {
+            "Tenant user cannot manage a user with permissions the actor does not hold"
+        }
+
+        val missingPropertyPermissions = targetPropertyPermissionGrants(tenantId, targetUserId)
+            .filterNot { grant ->
+                jdbcTemplate.queryForObject(
+                    "SELECT user_has_property_permission(?, ?, ?, ?)",
+                    Boolean::class.java,
+                    actorUserId,
+                    tenantId,
+                    grant.propertyId,
+                    grant.permissionCode,
+                ) == true
+            }
+        require(missingPropertyPermissions.isEmpty()) {
+            "Tenant user cannot manage a user with permissions the actor does not hold"
+        }
+    }
+
+    private fun targetTenantPermissionCodes(
+        tenantId: UUID,
+        targetUserId: UUID,
+    ): List<String> {
+        return jdbcTemplate.queryForList(
+            """
+            SELECT DISTINCT p.code
+            FROM user_tenant_roles utr
+            JOIN tenant_roles tr
+              ON tr.id = utr.tenant_role_id
+             AND tr.tenant_id = utr.tenant_id
+            JOIN tenant_role_permissions trp
+              ON trp.tenant_role_id = tr.id
+            JOIN permissions p
+              ON p.id = trp.permission_id
+             AND p.tenant_id = utr.tenant_id
+            WHERE utr.tenant_id = ?
+              AND utr.user_id = ?
+              AND tr.is_active = true
+            ORDER BY p.code
+            """.trimIndent(),
+            String::class.java,
+            tenantId,
+            targetUserId,
+        ).filterNotNull()
+    }
+
+    private fun targetPropertyPermissionGrants(
+        tenantId: UUID,
+        targetUserId: UUID,
+    ): List<PropertyPermissionGrant> {
+        return jdbcTemplate.query(
+            """
+            SELECT DISTINCT upr.property_id, p.code
+            FROM user_property_roles upr
+            JOIN roles r
+              ON r.id = upr.role_id
+             AND r.tenant_id = upr.tenant_id
+            JOIN role_permissions rp
+              ON rp.role_id = r.id
+            JOIN permissions p
+              ON p.id = rp.permission_id
+             AND p.tenant_id = upr.tenant_id
+            WHERE upr.tenant_id = ?
+              AND upr.user_id = ?
+              AND r.is_active = true
+            ORDER BY upr.property_id, p.code
+            """.trimIndent(),
+            { rs, _ ->
+                PropertyPermissionGrant(
+                    propertyId = rs.getObject("property_id", UUID::class.java),
+                    permissionCode = rs.getString("code"),
+                )
+            },
+            tenantId,
+            targetUserId,
+        )
     }
 
     private fun requireActiveTenantUser(tenantId: UUID, userId: UUID) {
@@ -951,4 +1058,13 @@ class TenantUserRoleManagementService(
     private data class TenantRolePolicy(
         val isSystem: Boolean,
     )
+
+    private data class PropertyPermissionGrant(
+        val propertyId: UUID,
+        val permissionCode: String,
+    )
+
+    private companion object {
+        const val TENANT_ADMIN_ALL_PERMISSION = "tenant.admin.all"
+    }
 }

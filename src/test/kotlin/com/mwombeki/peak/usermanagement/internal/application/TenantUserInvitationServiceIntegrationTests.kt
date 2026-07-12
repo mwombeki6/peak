@@ -326,6 +326,38 @@ class TenantUserInvitationServiceIntegrationTests {
     }
 
     @Test
+    fun rejectsPlatformIdentityCreatingTenantInvitation() {
+        val fixture = tenantFixture()
+        insertTenantFixture(fixture)
+        requestContextHolder.set(platformContext("idem-invite-platform-denied"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            invitationPort.inviteTenantUser(
+                InviteTenantUserCommand(
+                    tenantId = fixture.tenantId,
+                    email = "platform-denied-${fixture.tenantId}@example.com",
+                    tenantRoleId = fixture.roleId,
+                ),
+            )
+        }
+
+        assertEquals(
+            "Tenant user identity is required to invite tenant users",
+            error.message,
+        )
+        val invitationCount = jdbcTemplate.queryForObject(
+            """
+            SELECT count(*)
+            FROM tenant_user_invitations
+            WHERE tenant_id = ?
+            """.trimIndent(),
+            Int::class.java,
+            fixture.tenantId,
+        )
+        assertEquals(0, invitationCount)
+    }
+
+    @Test
     fun acceptsInvitationAndLinksOidcIdentity() {
         val fixture = tenantFixture()
         insertTenantFixture(fixture)
@@ -633,6 +665,19 @@ class TenantUserInvitationServiceIntegrationTests {
             idempotencyKey = idempotencyKey,
             httpMethod = "POST",
             requestPath = "/api/v1/invitations/accept",
+        )
+    }
+
+    private fun platformContext(idempotencyKey: String): RequestContext {
+        return RequestContext(
+            identity = RequestIdentity.Platform(
+                platformUserId = UUID.randomUUID(),
+                correlationId = "corr-$idempotencyKey",
+            ),
+            correlationId = "corr-$idempotencyKey",
+            idempotencyKey = idempotencyKey,
+            httpMethod = "POST",
+            requestPath = "/api/v1/tenants/${UUID.randomUUID()}/users/invitations",
         )
     }
 
