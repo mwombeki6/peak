@@ -211,6 +211,142 @@ class RouteAccessMatrixCoverageIntegrationTests {
         }
     }
 
+    @Test
+    fun administrativeReadRoutesResolveToViewPermissionsBeforeManageRoutes() {
+        val tenantId = UUID.fromString("22222222-2222-2222-2222-222222222222")
+        val propertyId = UUID.fromString("33333333-3333-3333-3333-333333333333")
+        val tenantRoleId = UUID.fromString("66666666-6666-6666-6666-666666666666")
+        val propertyRoleId = UUID.fromString("77777777-7777-7777-7777-777777777798")
+        val userId = UUID.fromString("44444444-4444-4444-4444-444444444444")
+        val platformUserId = UUID.fromString("55555555-5555-5555-5555-555555555555")
+        val menuItemId = UUID.fromString("77777777-7777-7777-7777-777777777799")
+        val tenantIdentity = RequestIdentity.Tenant(
+            tenantId = tenantId,
+            tenantUserId = userId,
+        )
+        val platformIdentity = RequestIdentity.Platform(platformUserId = platformUserId)
+        val rules = ruleRepository.findEnabledRules()
+
+        val expectations = listOf(
+            ScopedRouteExpectation(
+                method = "GET",
+                path = "/api/v1/platform/tenants/$tenantId",
+                permissionCode = "platform.tenants.view",
+                routeScope = RouteScope.PLATFORM,
+            ),
+            ScopedRouteExpectation(
+                method = "POST",
+                path = "/api/v1/platform/tenants",
+                permissionCode = "platform.tenants.manage",
+                routeScope = RouteScope.PLATFORM,
+            ),
+            ScopedRouteExpectation(
+                method = "GET",
+                path = "/api/v1/properties/$propertyId/inventory/recipes",
+                permissionCode = "inventory.view",
+                routeScope = RouteScope.PROPERTY,
+            ),
+            ScopedRouteExpectation(
+                method = "PUT",
+                path = "/api/v1/properties/$propertyId/inventory/recipes",
+                permissionCode = "inventory.manage",
+                routeScope = RouteScope.PROPERTY,
+            ),
+            ScopedRouteExpectation(
+                method = "DELETE",
+                path = "/api/v1/properties/$propertyId/inventory/recipes/$menuItemId",
+                permissionCode = "inventory.manage",
+                routeScope = RouteScope.PROPERTY,
+            ),
+            ScopedRouteExpectation(
+                method = "GET",
+                path = "/api/v1/tenants/$tenantId/modules",
+                permissionCode = "module.view",
+                routeScope = RouteScope.TENANT,
+            ),
+            ScopedRouteExpectation(
+                method = "POST",
+                path = "/api/v1/tenants/$tenantId/modules",
+                permissionCode = "module.manage",
+                routeScope = RouteScope.TENANT,
+            ),
+            ScopedRouteExpectation(
+                method = "GET",
+                path = "/api/v1/tenants/$tenantId/roles",
+                permissionCode = "tenant.roles.view",
+                routeScope = RouteScope.TENANT,
+            ),
+            ScopedRouteExpectation(
+                method = "GET",
+                path = "/api/v1/tenants/$tenantId/roles/$tenantRoleId",
+                permissionCode = "tenant.roles.view",
+                routeScope = RouteScope.TENANT,
+            ),
+            ScopedRouteExpectation(
+                method = "GET",
+                path = "/api/v1/tenants/$tenantId/permissions",
+                permissionCode = "tenant.roles.view",
+                routeScope = RouteScope.TENANT,
+            ),
+            ScopedRouteExpectation(
+                method = "POST",
+                path = "/api/v1/tenants/$tenantId/roles",
+                permissionCode = "tenant.users.manage",
+                routeScope = RouteScope.TENANT,
+            ),
+            ScopedRouteExpectation(
+                method = "PUT",
+                path = "/api/v1/tenants/$tenantId/roles/$tenantRoleId",
+                permissionCode = "tenant.users.manage",
+                routeScope = RouteScope.TENANT,
+            ),
+            ScopedRouteExpectation(
+                method = "GET",
+                path = "/api/v1/tenants/$tenantId/properties/$propertyId/roles",
+                permissionCode = "tenant.properties.roles.view",
+                routeScope = RouteScope.TENANT,
+            ),
+            ScopedRouteExpectation(
+                method = "GET",
+                path = "/api/v1/tenants/$tenantId/properties/$propertyId/roles/$propertyRoleId",
+                permissionCode = "tenant.properties.roles.view",
+                routeScope = RouteScope.TENANT,
+            ),
+            ScopedRouteExpectation(
+                method = "GET",
+                path = "/api/v1/tenants/$tenantId/properties/$propertyId/users/$userId/roles",
+                permissionCode = "tenant.properties.roles.view",
+                routeScope = RouteScope.TENANT,
+            ),
+            ScopedRouteExpectation(
+                method = "POST",
+                path = "/api/v1/tenants/$tenantId/properties/$propertyId/users/$userId/roles/$propertyRoleId/assign",
+                permissionCode = "tenant.properties.manage_access",
+                routeScope = RouteScope.TENANT,
+            ),
+        )
+
+        expectations.forEach { expectation ->
+            val identity = if (expectation.routeScope == RouteScope.PLATFORM) {
+                platformIdentity
+            } else {
+                tenantIdentity
+            }
+            val request = routeAccessMatcher.match(
+                httpMethod = expectation.method,
+                requestPath = expectation.path,
+                identity = identity,
+                rules = rules,
+            )
+
+            requireNotNull(request) {
+                "${expectation.method} ${expectation.path} did not match module_access_matrix"
+            }
+            assertEquals(expectation.routeScope, request.routeScope, expectation.path)
+            assertEquals(expectation.permissionCode, request.permissionCode, expectation.path)
+        }
+    }
+
     private fun String.toSamplePath(): String {
         return PATH_VARIABLE_PATTERN.replace(this) { match ->
             val variableName = match.groupValues[1].substringBefore(":")
@@ -272,6 +408,13 @@ class RouteAccessMatrixCoverageIntegrationTests {
         val method: String,
         val path: String,
         val permissionCode: String,
+    )
+
+    private data class ScopedRouteExpectation(
+        val method: String,
+        val path: String,
+        val permissionCode: String,
+        val routeScope: RouteScope,
     )
 
     private companion object {

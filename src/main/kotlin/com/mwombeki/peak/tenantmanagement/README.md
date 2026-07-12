@@ -6,15 +6,15 @@ Tenant management owns platform-led tenant onboarding, tenant account reads, ten
 
 These routes require a platform identity and the corresponding platform tenant permissions:
 
-| Method | Route | Purpose |
-| --- | --- | --- |
-| `POST` | `/api/v1/platform/tenants` | Register a tenant and canonical business profile. |
-| `GET` | `/api/v1/platform/tenants/{id}` | View tenant account and profile state. |
-| `PATCH` | `/api/v1/platform/tenants/{id}/status` | Change tenant lifecycle status. |
-| `POST` | `/api/v1/platform/tenants/{id}/administrators` | Provision the first tenant administrator and OIDC identity. |
-| `POST` | `/api/v1/platform/tenants/{id}/profile/verify` | Mark a reviewed business profile as verified. |
+| Method | Route | Permission | Purpose |
+| --- | --- | --- | --- |
+| `POST` | `/api/v1/platform/tenants` | `platform.tenants.manage` | Register a tenant and canonical business profile. |
+| `GET` | `/api/v1/platform/tenants/{id}` | `platform.tenants.view` | View tenant account and profile state. |
+| `PATCH` | `/api/v1/platform/tenants/{id}/status` | `platform.tenants.manage` | Change tenant lifecycle status. |
+| `POST` | `/api/v1/platform/tenants/{id}/administrators` | `platform.users.manage` | Provision the first tenant administrator and OIDC identity. |
+| `POST` | `/api/v1/platform/tenants/{id}/profile/verify` | `platform.tenants.verify` | Mark a reviewed business profile as verified. |
 
-The platform routes are covered by the canonical `module_access_matrix` pattern `/api/platform/tenants*` after API version normalization.
+The platform routes are covered by `module_access_matrix` after API version normalization. Tenant detail reads have an exact `GET` route contract so platform read-only users do not need tenant lifecycle mutation permission.
 
 Tenant registration and administrator provisioning are separate idempotent operations. Provisioning creates the active tenant user, immutable `tenant_admin` role, complete tenant permission grant, role assignment, `tenant_admin` module enablement, and DB-backed OIDC link atomically.
 
@@ -24,7 +24,7 @@ These routes require a tenant identity and route-guard permission coverage:
 
 | Method | Route | Permission | Purpose |
 | --- | --- | --- | --- |
-| `GET` | `/api/v1/tenants/{tenantId}/modules` | `module.manage` | List tenant-level module enablement state. |
+| `GET` | `/api/v1/tenants/{tenantId}/modules` | `module.view` | List tenant-level module enablement state. |
 | `POST` | `/api/v1/tenants/{tenantId}/modules` | `module.manage` | Enable an active tenant-visible module. |
 | `DELETE` | `/api/v1/tenants/{tenantId}/modules/{moduleId}` | `module.manage` | Disable a tenant-level module without deleting configuration history. |
 | `GET` | `/api/v1/tenants/{tenantId}/readiness` | `tenant.profile.view` | Return readiness status and missing requirements. |
