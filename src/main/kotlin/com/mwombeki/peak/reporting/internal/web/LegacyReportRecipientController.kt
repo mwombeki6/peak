@@ -118,6 +118,7 @@ class LegacyReportRecipientController(
                 contactId = request.contactId,
                 contactChannelId = request.channelId,
             ),
+            propertyId = request.propertyId,
         )
         val recipient = updated.recipients.first {
             it.contactId == request.contactId &&

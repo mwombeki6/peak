@@ -514,7 +514,7 @@ class ReportingService(
                 "An active report subscription with this name already exists",
             )
         }
-        return requireSubscription(actor.tenantId, id)
+        return requireSubscription(actor.tenantId, id, propertyId = propertyId)
     }
 
     private fun subscriptions(
@@ -861,11 +861,12 @@ class ReportingService(
         propertyId: UUID?,
         qualifier: String? = null,
     ): String {
-        if (propertyId == null) {
-            return ""
-        }
         val prefix = qualifier?.let { "$it." } ?: ""
-        return "AND ${prefix}property_id = ?"
+        return if (propertyId == null) {
+            "AND ${prefix}property_id IS NULL"
+        } else {
+            "AND ${prefix}property_id = ?"
+        }
     }
 
     private fun propertyArgs(propertyId: UUID?): Array<Any> =

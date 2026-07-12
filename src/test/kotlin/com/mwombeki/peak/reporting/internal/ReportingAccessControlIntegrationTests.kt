@@ -113,6 +113,72 @@ class ReportingAccessControlIntegrationTests {
         assertEquals(ReportSubscriptionState.PAUSED, paused.state)
     }
 
+    @Test
+    fun `tenant scoped subscription mutations reject property scoped subscriptions`() {
+        val fixture = fixture()
+        bind(fixture, fixture.propertyOneId, "reporting-property-subscription-create")
+        val propertySubscription = reporting.createSubscription(
+            propertyId = fixture.propertyOneId,
+            request = CreateReportSubscriptionRequest(
+                reportCode = "daily_management_summary",
+                subscriptionName = "Daily property scoped",
+            ),
+        )
+
+        bindTenant(fixture, "reporting-tenant-update-property-subscription")
+        assertFailsWith<ReportingNotFoundException> {
+            reporting.updateSubscription(
+                subscriptionId = propertySubscription.id,
+                request = UpdateReportSubscriptionRequest(
+                    subscriptionName = "Tenant route attempted rename",
+                ),
+            )
+        }
+        assertEquals(
+            "Daily property scoped",
+            subscriptionName(fixture.tenantId, propertySubscription.id),
+        )
+
+        assertFailsWith<ReportingNotFoundException> {
+            reporting.transitionSubscription(
+                subscriptionId = propertySubscription.id,
+                action = "pause",
+            )
+        }
+
+        assertFailsWith<ReportingNotFoundException> {
+            reporting.addRecipient(
+                subscriptionId = propertySubscription.id,
+                request = AddReportRecipientRequest(
+                    contactId = UUID.randomUUID(),
+                    contactChannelId = UUID.randomUUID(),
+                ),
+            )
+        }
+
+        assertFailsWith<ReportingNotFoundException> {
+            reporting.disableRecipient(
+                subscriptionId = propertySubscription.id,
+                recipientId = UUID.randomUUID(),
+            )
+        }
+
+        val tenantSubscription = reporting.createSubscription(
+            tenantId = fixture.tenantId,
+            request = CreateReportSubscriptionRequest(
+                reportCode = "monthly_executive_summary",
+                subscriptionName = "Daily tenant scoped",
+            ),
+        )
+        val updated = reporting.updateSubscription(
+            subscriptionId = tenantSubscription.id,
+            request = UpdateReportSubscriptionRequest(
+                subscriptionName = "Daily tenant scoped updated",
+            ),
+        )
+        assertEquals("Daily tenant scoped updated", updated.subscriptionName)
+    }
+
     private fun fixture(): Fixture {
         val fixture = Fixture()
         tenants += fixture.tenantId
@@ -177,6 +243,21 @@ class ReportingAccessControlIntegrationTests {
                 idempotencyKey = key,
                 httpMethod = "POST",
                 requestPath = "/api/v1/properties/$propertyId/report-subscriptions",
+            ),
+        )
+    }
+
+    private fun bindTenant(
+        fixture: Fixture,
+        key: String,
+    ) {
+        contexts.set(
+            RequestContext(
+                identity = RequestIdentity.Tenant(fixture.tenantId, fixture.userId),
+                correlationId = "corr-$key",
+                idempotencyKey = key,
+                httpMethod = "POST",
+                requestPath = "/api/v1/tenants/${fixture.tenantId}/report-subscriptions",
             ),
         )
     }
