@@ -45,7 +45,7 @@ class OidcJwtRouteAuthorizationIntegrationTests {
             .andExpect(status().isOk)
             .andExpect(jsonPath("$[*].tenantRoleId", hasItem(fixture.actorRoleId.toString())))
             .andExpect(jsonPath("$[*].code", hasItem(fixture.actorRoleCode)))
-            .andExpect(content().string(containsString("tenant.users.manage")))
+            .andExpect(content().string(containsString("tenant.roles.view")))
     }
 
     @Test
@@ -217,7 +217,7 @@ class OidcJwtRouteAuthorizationIntegrationTests {
         jdbcTemplate.update(
             """
             INSERT INTO permissions (id, tenant_id, code, description)
-            VALUES (?, ?, 'tenant.users.manage', 'Manage tenant users')
+            VALUES (?, ?, 'tenant.roles.view', 'View tenant roles')
             """.trimIndent(),
             fixture.permissionId,
             fixture.tenantId,

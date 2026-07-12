@@ -9,5 +9,6 @@ stock only through that API.
 
 ## Access control
 
-Inventory location detail reads require `inventory.view`; location mutations
-require `inventory.manage`.
+Inventory item, location, stock, movement, and recipe reads require
+`inventory.view`. Location and recipe mutations require `inventory.manage`;
+stock-affecting adjustments require `inventory.adjust`.

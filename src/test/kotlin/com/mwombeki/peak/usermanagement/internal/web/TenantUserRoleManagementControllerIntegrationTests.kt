@@ -248,6 +248,7 @@ class TenantUserRoleManagementControllerIntegrationTests {
             targetUserId = UUID.randomUUID(),
             actorRoleId = actorRoleId,
             targetRoleId = targetRoleId,
+            viewPermissionId = UUID.randomUUID(),
             managePermissionId = UUID.randomUUID(),
             reportsPermissionId = UUID.randomUUID(),
             actorRoleCode = "actor-$actorRoleId",
@@ -262,16 +263,22 @@ class TenantUserRoleManagementControllerIntegrationTests {
         jdbcTemplate.update(
             """
             INSERT INTO permissions (id, tenant_id, code, description)
-            VALUES (?, ?, 'tenant.users.manage', 'Manage tenant users')
+            VALUES
+                (?, ?, 'tenant.roles.view', 'View tenant roles'),
+                (?, ?, 'tenant.users.manage', 'Manage tenant users')
             """.trimIndent(),
+            fixture.viewPermissionId,
+            fixture.tenantId,
             fixture.managePermissionId,
             fixture.tenantId,
         )
         jdbcTemplate.update(
             """
             INSERT INTO tenant_role_permissions (tenant_role_id, permission_id)
-            VALUES (?, ?), (?, ?)
+            VALUES (?, ?), (?, ?), (?, ?)
             """.trimIndent(),
+            fixture.actorRoleId,
+            fixture.viewPermissionId,
             fixture.actorRoleId,
             fixture.managePermissionId,
             fixture.actorRoleId,
@@ -460,6 +467,7 @@ class TenantUserRoleManagementControllerIntegrationTests {
         val targetUserId: UUID,
         val actorRoleId: UUID,
         val targetRoleId: UUID,
+        val viewPermissionId: UUID,
         val managePermissionId: UUID,
         val reportsPermissionId: UUID,
         val actorRoleCode: String,

@@ -168,6 +168,7 @@ class TenantAdministrationControllerIntegrationTests {
 
     private fun insertAuthorizedFixture(fixture: TenantAdministrationFixture) {
         insertFixtureWithoutPermissions(fixture)
+        grantPermissionToActor(fixture, "module.view")
         grantPermissionToActor(fixture, "module.manage")
         grantPermissionToActor(fixture, "tenant.profile.view")
     }

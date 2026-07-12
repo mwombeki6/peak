@@ -63,18 +63,18 @@ Metrics:
 
 ## Tenant Role Administration API
 
-All tenant role routes are tenant-scoped, require `tenant.users.manage`, and are covered by `module_access_matrix`.
+Tenant role routes are tenant-scoped and covered by `module_access_matrix`. Reads require `tenant.roles.view`; mutations and user assignment changes require `tenant.users.manage`.
 
-| Method | Route | Purpose |
-| --- | --- | --- |
-| `GET` | `/api/v1/tenants/{tenantId}/roles` | List tenant roles and their permissions. |
-| `GET` | `/api/v1/tenants/{tenantId}/roles/{tenantRoleId}` | View one tenant role. |
-| `POST` | `/api/v1/tenants/{tenantId}/roles` | Create a dynamic tenant role. |
-| `PUT` | `/api/v1/tenants/{tenantId}/roles/{tenantRoleId}` | Update a dynamic tenant role and its permission set. |
-| `DELETE` | `/api/v1/tenants/{tenantId}/roles/{tenantRoleId}` | Deactivate a dynamic tenant role and remove assignments. |
-| `GET` | `/api/v1/tenants/{tenantId}/permissions` | List tenant permission codes available for tenant roles. |
-| `POST` | `/api/v1/tenants/{tenantId}/users/{userId}/roles/{tenantRoleId}/assign` | Assign a dynamic tenant role to a tenant user. |
-| `POST` | `/api/v1/tenants/{tenantId}/users/{userId}/roles/{tenantRoleId}/revoke` | Revoke a dynamic tenant role from a tenant user. |
+| Method | Route | Permission | Purpose |
+| --- | --- | --- | --- |
+| `GET` | `/api/v1/tenants/{tenantId}/roles` | `tenant.roles.view` | List tenant roles and their permissions. |
+| `GET` | `/api/v1/tenants/{tenantId}/roles/{tenantRoleId}` | `tenant.roles.view` | View one tenant role. |
+| `POST` | `/api/v1/tenants/{tenantId}/roles` | `tenant.users.manage` | Create a dynamic tenant role. |
+| `PUT` | `/api/v1/tenants/{tenantId}/roles/{tenantRoleId}` | `tenant.users.manage` | Update a dynamic tenant role and its permission set. |
+| `DELETE` | `/api/v1/tenants/{tenantId}/roles/{tenantRoleId}` | `tenant.users.manage` | Deactivate a dynamic tenant role and remove assignments. |
+| `GET` | `/api/v1/tenants/{tenantId}/permissions` | `tenant.roles.view` | List tenant permission codes available for tenant roles. |
+| `POST` | `/api/v1/tenants/{tenantId}/users/{userId}/roles/{tenantRoleId}/assign` | `tenant.users.manage` | Assign a dynamic tenant role to a tenant user. |
+| `POST` | `/api/v1/tenants/{tenantId}/users/{userId}/roles/{tenantRoleId}/revoke` | `tenant.users.manage` | Revoke a dynamic tenant role from a tenant user. |
 
 Mutating tenant role routes require `Idempotency-Key`. Successful dynamic role definition changes write `audit_logs` entries and enqueue platform outbox events. Tenant system roles are read-only through tenant self-service, a tenant user cannot change their own role assignments, and delegated permissions cannot exceed the actor's effective permission set. Updating, deactivating, assigning, or revoking a role also requires the actor to hold the role's current permission set.
 
@@ -82,18 +82,18 @@ Tenant user lifecycle and identity-link revocation routes also require `tenant.u
 
 ## Tenant-Managed Property Access API
 
-These routes are tenant-scoped, require `tenant.properties.manage_access`, and validate that the property belongs to the tenant.
+These routes are tenant-scoped and validate that the property belongs to the tenant. Reads require `tenant.properties.roles.view`; mutations and assignments require `tenant.properties.manage_access`.
 
-| Method | Route | Purpose |
-| --- | --- | --- |
-| `GET` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/roles` | List tenant-owned property role templates. |
-| `GET` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/roles/{propertyRoleId}` | View one property role template. |
-| `POST` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/roles` | Create a mutable property role template. |
-| `PUT` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/roles/{propertyRoleId}` | Update a mutable property role template. |
-| `DELETE` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/roles/{propertyRoleId}` | Deactivate a mutable property role template and remove assignments. |
-| `GET` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/users/{userId}/roles` | List a user's roles for one property. |
-| `POST` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/users/{userId}/roles/{propertyRoleId}/assign` | Assign a property role to a tenant user for one property. |
-| `POST` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/users/{userId}/roles/{propertyRoleId}/revoke` | Revoke a property role from a tenant user for one property. |
+| Method | Route | Permission | Purpose |
+| --- | --- | --- | --- |
+| `GET` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/roles` | `tenant.properties.roles.view` | List tenant-owned property role templates. |
+| `GET` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/roles/{propertyRoleId}` | `tenant.properties.roles.view` | View one property role template. |
+| `POST` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/roles` | `tenant.properties.manage_access` | Create a mutable property role template. |
+| `PUT` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/roles/{propertyRoleId}` | `tenant.properties.manage_access` | Update a mutable property role template. |
+| `DELETE` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/roles/{propertyRoleId}` | `tenant.properties.manage_access` | Deactivate a mutable property role template and remove assignments. |
+| `GET` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/users/{userId}/roles` | `tenant.properties.roles.view` | List a user's roles for one property. |
+| `POST` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/users/{userId}/roles/{propertyRoleId}/assign` | `tenant.properties.manage_access` | Assign a property role to a tenant user for one property. |
+| `POST` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/users/{userId}/roles/{propertyRoleId}/revoke` | `tenant.properties.manage_access` | Revoke a property role from a tenant user for one property. |
 
 Mutating property access routes require `Idempotency-Key`, write audit entries, and enqueue platform outbox events. Dynamic property role creation, update, deactivation, assignment, and revocation cannot delegate or manage permissions above the actor's effective tenant/property permission set. System property roles cannot be assigned, revoked, or modified through these APIs; property creation uses an internal bootstrap port to assign the creator the system Property Administrator role.
 
