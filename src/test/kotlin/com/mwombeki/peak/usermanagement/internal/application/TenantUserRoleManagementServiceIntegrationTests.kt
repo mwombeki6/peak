@@ -309,6 +309,79 @@ class TenantUserRoleManagementServiceIntegrationTests {
     }
 
     @Test
+    fun rejectsAssigningTenantRoleToUserWithTenantPermissionActorDoesNotHold() {
+        val fixture = roleManagementFixture()
+        insertRoleManagementFixture(fixture)
+        insertHigherPrivilegeTargetTenantRoleAssignment(fixture)
+        requestContextHolder.set(tenantContext(fixture, "idem-role-target-tenant-hierarchy-assign"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            roleManagementPort.assignTenantUserRole(
+                AssignTenantUserRoleCommand(
+                    tenantId = fixture.tenantId,
+                    userId = fixture.targetUserId,
+                    tenantRoleId = fixture.targetRoleId,
+                ),
+            )
+        }
+
+        assertEquals(
+            "Tenant user cannot manage a user with permissions the actor does not hold",
+            error.message,
+        )
+        assertEquals(0, roleAssignmentCount(fixture))
+    }
+
+    @Test
+    fun rejectsRevokingTenantRoleFromUserWithTenantPermissionActorDoesNotHold() {
+        val fixture = roleManagementFixture()
+        insertRoleManagementFixture(fixture)
+        insertTargetRoleAssignment(fixture)
+        insertHigherPrivilegeTargetTenantRoleAssignment(fixture)
+        requestContextHolder.set(tenantContext(fixture, "idem-role-target-tenant-hierarchy-revoke"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            roleManagementPort.revokeTenantUserRole(
+                RevokeTenantUserRoleCommand(
+                    tenantId = fixture.tenantId,
+                    userId = fixture.targetUserId,
+                    tenantRoleId = fixture.targetRoleId,
+                ),
+            )
+        }
+
+        assertEquals(
+            "Tenant user cannot manage a user with permissions the actor does not hold",
+            error.message,
+        )
+        assertEquals(1, roleAssignmentCount(fixture))
+    }
+
+    @Test
+    fun rejectsAssigningTenantRoleToUserWithPropertyPermissionActorDoesNotHold() {
+        val fixture = roleManagementFixture()
+        insertRoleManagementFixture(fixture)
+        insertHigherPrivilegeTargetPropertyRoleAssignment(fixture)
+        requestContextHolder.set(tenantContext(fixture, "idem-role-target-property-hierarchy-assign"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            roleManagementPort.assignTenantUserRole(
+                AssignTenantUserRoleCommand(
+                    tenantId = fixture.tenantId,
+                    userId = fixture.targetUserId,
+                    tenantRoleId = fixture.targetRoleId,
+                ),
+            )
+        }
+
+        assertEquals(
+            "Tenant user cannot manage a user with permissions the actor does not hold",
+            error.message,
+        )
+        assertEquals(0, roleAssignmentCount(fixture))
+    }
+
+    @Test
     fun rejectsUpdatingTenantRoleWithCurrentPermissionActorDoesNotHold() {
         val fixture = roleManagementFixture()
         insertRoleManagementFixture(fixture)
@@ -536,6 +609,88 @@ class TenantUserRoleManagementServiceIntegrationTests {
             fixture.tenantId,
             fixture.targetRoleId,
             fixture.actorUserId,
+        )
+    }
+
+    private fun insertHigherPrivilegeTargetTenantRoleAssignment(fixture: RoleManagementFixture) {
+        val elevatedPermissionId = UUID.randomUUID()
+        val elevatedRoleId = UUID.randomUUID()
+        insertPermission(
+            tenantId = fixture.tenantId,
+            permissionId = elevatedPermissionId,
+            code = "tenant.roles.view",
+            description = "View tenant roles",
+        )
+        insertTenantRole(
+            tenantId = fixture.tenantId,
+            roleId = elevatedRoleId,
+            name = "Elevated Tenant Role $elevatedRoleId",
+            code = "elevated-tenant-role-$elevatedRoleId",
+        )
+        insertRolePermission(elevatedRoleId, elevatedPermissionId)
+        jdbcTemplate.update(
+            """
+            INSERT INTO user_tenant_roles (user_id, tenant_id, tenant_role_id)
+            VALUES (?, ?, ?)
+            """.trimIndent(),
+            fixture.targetUserId,
+            fixture.tenantId,
+            elevatedRoleId,
+        )
+    }
+
+    private fun insertHigherPrivilegeTargetPropertyRoleAssignment(fixture: RoleManagementFixture) {
+        val propertyId = UUID.randomUUID()
+        val propertyRoleId = UUID.randomUUID()
+        val propertyPermissionId = UUID.randomUUID()
+        insertProperty(fixture.tenantId, propertyId)
+        insertPermission(
+            tenantId = fixture.tenantId,
+            permissionId = propertyPermissionId,
+            code = "property.manage",
+            description = "Manage property",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO roles (id, tenant_id, name, is_active)
+            VALUES (?, ?, ?, true)
+            """.trimIndent(),
+            propertyRoleId,
+            fixture.tenantId,
+            "Elevated Property Role $propertyRoleId",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO role_permissions (role_id, permission_id)
+            VALUES (?, ?)
+            """.trimIndent(),
+            propertyRoleId,
+            propertyPermissionId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO user_property_roles (user_id, property_id, role_id, tenant_id)
+            VALUES (?, ?, ?, ?)
+            """.trimIndent(),
+            fixture.targetUserId,
+            propertyId,
+            propertyRoleId,
+            fixture.tenantId,
+        )
+    }
+
+    private fun insertProperty(tenantId: UUID, propertyId: UUID) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO properties (
+                id, tenant_id, name, code, type, status, timezone, business_date
+            )
+            VALUES (?, ?, ?, ?, 'HOTEL', 'draft', 'Africa/Dar_es_Salaam', CURRENT_DATE)
+            """.trimIndent(),
+            propertyId,
+            tenantId,
+            "Property $propertyId",
+            "P-${propertyId.toString().take(8)}",
         )
     }
 

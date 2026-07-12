@@ -376,20 +376,11 @@ class TenantUserInvitationService(
                 InvitationActor(tenantUserId = identity.tenantUserId, platformUserId = null)
             }
 
-            is RequestIdentity.Support -> {
-                require(identity.tenantId == tenantId) {
-                    "Invitation tenant does not match support identity"
-                }
-                InvitationActor(tenantUserId = null, platformUserId = identity.platformUserId)
-            }
-
-            is RequestIdentity.Platform -> {
-                InvitationActor(tenantUserId = null, platformUserId = identity.platformUserId)
-            }
-
-            is RequestIdentity.Public -> {
-                throw IllegalArgumentException("Public identity cannot invite tenant users")
-            }
+            is RequestIdentity.Platform,
+            is RequestIdentity.Public,
+            is RequestIdentity.Support -> throw IllegalArgumentException(
+                "Tenant user identity is required to invite tenant users",
+            )
         }
     }
 
