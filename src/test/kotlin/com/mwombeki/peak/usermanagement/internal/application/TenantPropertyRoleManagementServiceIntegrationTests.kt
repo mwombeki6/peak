@@ -9,6 +9,9 @@ import com.mwombeki.peak.usermanagement.api.AssignPropertyUserRoleCommand
 import com.mwombeki.peak.usermanagement.api.CreatePropertyRoleCommand
 import com.mwombeki.peak.usermanagement.api.DeactivatePropertyRoleCommand
 import com.mwombeki.peak.usermanagement.api.EnsurePropertyAdministratorCommand
+import com.mwombeki.peak.usermanagement.api.GetPropertyRoleQuery
+import com.mwombeki.peak.usermanagement.api.ListPropertyRolesQuery
+import com.mwombeki.peak.usermanagement.api.ListUserPropertyRolesQuery
 import com.mwombeki.peak.usermanagement.api.PropertyAccessBootstrapPort
 import com.mwombeki.peak.usermanagement.api.RevokePropertyUserRoleCommand
 import com.mwombeki.peak.usermanagement.api.TenantPropertyRoleManagementPort
@@ -105,6 +108,51 @@ class TenantPropertyRoleManagementServiceIntegrationTests {
         assertTrue(revocation.changed)
         assertEquals(0, propertyAssignmentCount(fixture, role.propertyRoleId))
         assertFalse(targetCanAccessProperty(fixture, "property.view"))
+    }
+
+    @Test
+    fun propertyRoleViewerCanReadWithoutManageAccess() {
+        val fixture = propertyRoleFixture()
+        insertPropertyRoleFixture(
+            fixture = fixture,
+            grantTenantAdmin = false,
+            grantManageAccess = false,
+            grantPropertyRoleView = true,
+        )
+        val roleId = insertPropertyRole(
+            fixture = fixture,
+            name = "Read Only Visible ${fixture.propertyId}",
+            permissionCodes = listOf("property.view"),
+        )
+        insertPropertyRoleAssignment(fixture, roleId, fixture.targetUserId)
+        requestContextHolder.set(tenantContext(fixture, idempotencyKey = null))
+
+        assertFalse(actorHasDirectTenantPermission(fixture, "tenant.properties.manage_access"))
+
+        val roles = propertyRoleManagementPort.listPropertyRoles(
+            ListPropertyRolesQuery(
+                tenantId = fixture.tenantId,
+                propertyId = fixture.propertyId,
+            ),
+        )
+        val role = propertyRoleManagementPort.getPropertyRole(
+            GetPropertyRoleQuery(
+                tenantId = fixture.tenantId,
+                propertyId = fixture.propertyId,
+                propertyRoleId = roleId,
+            ),
+        )
+        val userRoles = propertyRoleManagementPort.listUserPropertyRoles(
+            ListUserPropertyRolesQuery(
+                tenantId = fixture.tenantId,
+                propertyId = fixture.propertyId,
+                userId = fixture.targetUserId,
+            ),
+        )
+
+        assertTrue(roles.any { it.propertyRoleId == roleId })
+        assertEquals(roleId, role?.propertyRoleId)
+        assertEquals(listOf(roleId), userRoles.map { it.propertyRoleId })
     }
 
     @Test
@@ -428,6 +476,8 @@ class TenantPropertyRoleManagementServiceIntegrationTests {
     private fun insertPropertyRoleFixture(
         fixture: PropertyRoleFixture,
         grantTenantAdmin: Boolean = true,
+        grantManageAccess: Boolean = true,
+        grantPropertyRoleView: Boolean = false,
     ) {
         insertPlan(fixture.planId)
         insertTenant(fixture.tenantId, fixture.planId)
@@ -438,6 +488,7 @@ class TenantPropertyRoleManagementServiceIntegrationTests {
         insertTenantUser(fixture.tenantId, fixture.actorUserId, "actor-${fixture.actorUserId}@example.com")
         insertTenantUser(fixture.tenantId, fixture.targetUserId, "target-${fixture.targetUserId}@example.com")
         ensureTenantPermission(fixture.tenantId, "tenant.properties.manage_access")
+        ensureTenantPermission(fixture.tenantId, "tenant.properties.roles.view")
         ensureTenantPermission(fixture.tenantId, "tenant.admin.all")
         ensureTenantPermission(fixture.tenantId, "property.view")
         ensureTenantPermission(fixture.tenantId, "property.manage")
@@ -447,7 +498,12 @@ class TenantPropertyRoleManagementServiceIntegrationTests {
         ensureTenantPermission(fixture.tenantId, "realtime.stream")
         ensureTenantPermission(fixture.tenantId, "admin.all")
         insertTenantRole(fixture.tenantId, fixture.actorRoleId)
-        insertTenantRolePermission(fixture.actorRoleId, fixture.tenantId, "tenant.properties.manage_access")
+        if (grantManageAccess) {
+            insertTenantRolePermission(fixture.actorRoleId, fixture.tenantId, "tenant.properties.manage_access")
+        }
+        if (grantPropertyRoleView) {
+            insertTenantRolePermission(fixture.actorRoleId, fixture.tenantId, "tenant.properties.roles.view")
+        }
         if (grantTenantAdmin) {
             insertTenantRolePermission(fixture.actorRoleId, fixture.tenantId, "tenant.admin.all")
         }
@@ -717,6 +773,29 @@ class TenantPropertyRoleManagementServiceIntegrationTests {
             httpMethod = "POST",
             requestPath = "/api/v1/tenants/${fixture.tenantId}/properties/${fixture.propertyId}/roles",
         )
+    }
+
+    private fun actorHasDirectTenantPermission(fixture: PropertyRoleFixture, code: String): Boolean {
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM user_tenant_roles utr
+                JOIN tenant_role_permissions trp
+                  ON trp.tenant_role_id = utr.tenant_role_id
+                JOIN permissions p
+                  ON p.id = trp.permission_id
+                 AND p.tenant_id = utr.tenant_id
+                WHERE utr.tenant_id = ?
+                  AND utr.user_id = ?
+                  AND p.code = ?
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            fixture.tenantId,
+            fixture.actorUserId,
+            code,
+        ) == true
     }
 
     private fun propertyRoleFixture(): PropertyRoleFixture {

@@ -54,7 +54,7 @@ class TenantPropertyRoleManagementService(
     override fun listPropertyRoles(query: ListPropertyRolesQuery): List<PropertyRoleSummary> {
         return requireNotNull(
             transactionTemplate.execute {
-                bindTenantAccessManager(query.tenantId)
+                bindTenantPropertyRoleViewer(query.tenantId)
                 requirePropertyBelongsToTenant(query.tenantId, query.propertyId)
                 queryPropertyRoles(query.tenantId, query.propertyId, null)
             },
@@ -64,7 +64,7 @@ class TenantPropertyRoleManagementService(
     override fun getPropertyRole(query: GetPropertyRoleQuery): PropertyRoleSummary? {
         return requireNotNull(
             transactionTemplate.execute {
-                bindTenantAccessManager(query.tenantId)
+                bindTenantPropertyRoleViewer(query.tenantId)
                 requirePropertyBelongsToTenant(query.tenantId, query.propertyId)
                 queryPropertyRoles(query.tenantId, query.propertyId, query.propertyRoleId)
                     .singleOrNull()
@@ -252,7 +252,7 @@ class TenantPropertyRoleManagementService(
     override fun listUserPropertyRoles(query: ListUserPropertyRolesQuery): List<PropertyRoleSummary> {
         return requireNotNull(
             transactionTemplate.execute {
-                bindTenantAccessManager(query.tenantId)
+                bindTenantPropertyRoleViewer(query.tenantId)
                 requirePropertyBelongsToTenant(query.tenantId, query.propertyId)
                 requireTenantUser(query.tenantId, query.userId, activeOnly = false)
                 jdbcTemplate.query(
@@ -581,6 +581,26 @@ class TenantPropertyRoleManagementService(
     }
 
     private fun bindTenantAccessManager(tenantId: UUID): UUID {
+        return bindTenantActorWithPermission(
+            tenantId = tenantId,
+            permissionCode = TENANT_PROPERTY_ACCESS_PERMISSION,
+            denialMessage = "Tenant user lacks property access management permission",
+        )
+    }
+
+    private fun bindTenantPropertyRoleViewer(tenantId: UUID): UUID {
+        return bindTenantActorWithPermission(
+            tenantId = tenantId,
+            permissionCode = TENANT_PROPERTY_ROLE_VIEW_PERMISSION,
+            denialMessage = "Tenant user lacks property role view permission",
+        )
+    }
+
+    private fun bindTenantActorWithPermission(
+        tenantId: UUID,
+        permissionCode: String,
+        denialMessage: String,
+    ): UUID {
         val identity = requestContextHolder.current().identity
         require(identity is RequestIdentity.Tenant) {
             "Tenant user identity is required"
@@ -594,10 +614,10 @@ class TenantPropertyRoleManagementService(
             Boolean::class.java,
             identity.tenantUserId,
             tenantId,
-            TENANT_PROPERTY_ACCESS_PERMISSION,
+            permissionCode,
         ) == true
         require(allowed) {
-            "Tenant user lacks property access management permission"
+            denialMessage
         }
         return identity.tenantUserId
     }
@@ -1081,6 +1101,7 @@ class TenantPropertyRoleManagementService(
 
     private companion object {
         private const val TENANT_PROPERTY_ACCESS_PERMISSION = "tenant.properties.manage_access"
+        private const val TENANT_PROPERTY_ROLE_VIEW_PERMISSION = "tenant.properties.roles.view"
         private const val TENANT_ADMIN_ALL_PERMISSION = "tenant.admin.all"
         private const val PROPERTY_ADMIN_ROLE_NAME = "Property Administrator"
 
