@@ -138,7 +138,7 @@ api POST "/api/v1/properties/$property_id/report-subscriptions" \
   }'
 subscription_id="$(jq -er '.id' <<<"$API_BODY")"
 api POST \
-  "/api/v1/tenants/$tenant_id/report-subscriptions/$subscription_id/recipients" \
+  "/api/v1/properties/$property_id/report-subscriptions/$subscription_id/recipients" \
   200 "close-reporting-daily-recipient" "$(
     jq -nc --arg contact "$contact_id" --arg channel "$channel_id" \
       '{contactId:$contact,contactChannelId:$channel}'
