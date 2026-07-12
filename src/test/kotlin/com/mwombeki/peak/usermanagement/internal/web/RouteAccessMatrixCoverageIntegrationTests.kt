@@ -161,6 +161,56 @@ class RouteAccessMatrixCoverageIntegrationTests {
         }
     }
 
+    @Test
+    fun resourceReadRoutesResolveToViewPermissionsBeforeLegacyAnyManageRows() {
+        val propertyId = UUID.fromString("33333333-3333-3333-3333-333333333333")
+        val locationId = UUID.fromString("77777777-7777-7777-7777-777777777796")
+        val purchaseOrderId = UUID.fromString("77777777-7777-7777-7777-777777777797")
+        val identity = RequestIdentity.Tenant(
+            tenantId = UUID.fromString("22222222-2222-2222-2222-222222222222"),
+            tenantUserId = UUID.fromString("44444444-4444-4444-4444-444444444444"),
+        )
+        val rules = ruleRepository.findEnabledRules()
+
+        val expectations = listOf(
+            RouteExpectation(
+                method = "GET",
+                path = "/api/v1/properties/$propertyId/inventory/locations/$locationId",
+                permissionCode = "inventory.view",
+            ),
+            RouteExpectation(
+                method = "PUT",
+                path = "/api/v1/properties/$propertyId/inventory/locations/$locationId",
+                permissionCode = "inventory.manage",
+            ),
+            RouteExpectation(
+                method = "GET",
+                path = "/api/v1/properties/$propertyId/purchase-orders/$purchaseOrderId",
+                permissionCode = "procurement.view",
+            ),
+            RouteExpectation(
+                method = "PUT",
+                path = "/api/v1/properties/$propertyId/purchase-orders/$purchaseOrderId",
+                permissionCode = "procurement.manage",
+            ),
+        )
+
+        expectations.forEach { expectation ->
+            val request = routeAccessMatcher.match(
+                httpMethod = expectation.method,
+                requestPath = expectation.path,
+                identity = identity,
+                rules = rules,
+            )
+
+            requireNotNull(request) {
+                "${expectation.method} ${expectation.path} did not match module_access_matrix"
+            }
+            assertEquals(RouteScope.PROPERTY, request.routeScope, expectation.path)
+            assertEquals(expectation.permissionCode, request.permissionCode, expectation.path)
+        }
+    }
+
     private fun String.toSamplePath(): String {
         return PATH_VARIABLE_PATTERN.replace(this) { match ->
             val variableName = match.groupValues[1].substringBefore(":")
