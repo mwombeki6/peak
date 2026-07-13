@@ -1,5 +1,6 @@
 package com.mwombeki.peak.usermanagement.api
 
+import java.time.Instant
 import java.util.UUID
 import org.springframework.modulith.NamedInterface
 
@@ -17,9 +18,21 @@ interface TenantPropertyRoleManagementPort {
 
     fun listUserPropertyRoles(query: ListUserPropertyRolesQuery): List<PropertyRoleSummary>
 
+    fun listPropertyAdministrators(
+        query: ListPropertyAdministratorsQuery,
+    ): List<PropertyAdministratorSummary>
+
     fun assignPropertyUserRole(command: AssignPropertyUserRoleCommand): PropertyUserRoleAssignmentReceipt
 
     fun revokePropertyUserRole(command: RevokePropertyUserRoleCommand): PropertyUserRoleAssignmentReceipt
+
+    fun assignPropertyAdministrator(
+        command: AssignPropertyAdministratorCommand,
+    ): PropertyUserRoleAssignmentReceipt
+
+    fun revokePropertyAdministrator(
+        command: RevokePropertyAdministratorCommand,
+    ): PropertyUserRoleAssignmentReceipt
 }
 
 @NamedInterface("api")
@@ -79,6 +92,23 @@ data class RevokePropertyUserRoleCommand(
     val propertyRoleId: UUID,
 )
 
+data class ListPropertyAdministratorsQuery(
+    val tenantId: UUID,
+    val propertyId: UUID,
+)
+
+data class AssignPropertyAdministratorCommand(
+    val tenantId: UUID,
+    val propertyId: UUID,
+    val userId: UUID,
+)
+
+data class RevokePropertyAdministratorCommand(
+    val tenantId: UUID,
+    val propertyId: UUID,
+    val userId: UUID,
+)
+
 data class EnsurePropertyAdministratorCommand(
     val tenantId: UUID,
     val propertyId: UUID,
@@ -121,4 +151,17 @@ data class PropertyAccessBootstrapReceipt(
     val tenantUserId: UUID,
     val propertyRoleId: UUID,
     val changed: Boolean,
+)
+
+data class PropertyAdministratorSummary(
+    val tenantId: UUID,
+    val propertyId: UUID,
+    val propertyRoleId: UUID,
+    val userId: UUID,
+    val fullName: String,
+    val email: String,
+    val status: String,
+    val isActive: Boolean,
+    val lockedUntil: Instant?,
+    val hasActiveIdentity: Boolean,
 )

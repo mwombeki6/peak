@@ -19,6 +19,7 @@ Supported states are `draft`, `active`, `suspended`, `frozen`, `archived`, and `
 - Property-scoped routes require property permission through `user_property_roles`.
 - Property creation calls `usermanagement::api` to assign the creator a system `Property Administrator` property role for the new property so setup can continue by API.
 - Tenants manage property access through `/api/v1/tenants/{tenantId}/properties/{propertyId}/...` user-management APIs; property role definitions are tenant-owned templates and assignments are property-scoped.
+- Tenant governors with `tenant.properties.administrators.manage` can appoint a replacement administrator and then revoke the departed administrator. User management serializes this handover and blocks role removal, lock/disable, or final identity-link revocation if it would orphan the property.
 - Every mutating route requires `Idempotency-Key`.
 - Mutations record tenant audit events and outbox events.
 - RLS is bound inside the service transaction through `DatabaseSessionContext`.

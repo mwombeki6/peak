@@ -110,6 +110,9 @@ class TenantUserLifecycleService(
         requireActorCanManageTargetUser(command.tenantId, actorUserId, command.userId)
         val after = before.transition(command.action)
         val changed = before != after
+        if (changed && command.action.removesOperationalAccess) {
+            lockAndRequirePropertyAdministratorContinuity(command.tenantId, command.userId)
+        }
 
         if (changed) {
             jdbcTemplate.update(
@@ -196,6 +199,9 @@ class TenantUserLifecycleService(
         val before = findIdentityLinkForUpdate(command)
             ?: throw TenantUserLifecycleNotFoundException("Tenant user identity link was not found")
         val changed = before.revokedAt == null
+        if (changed && !hasAnotherActiveIdentityLink(command)) {
+            lockAndRequirePropertyAdministratorContinuity(command.tenantId, command.userId)
+        }
 
         val revokedAt = if (changed) {
             jdbcTemplate.queryForObject(
@@ -390,6 +396,113 @@ class TenantUserLifecycleService(
         ).singleOrNull()
     }
 
+    private fun hasAnotherActiveIdentityLink(
+        command: RevokeTenantUserIdentityLinkCommand,
+    ): Boolean {
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM identity_links
+                WHERE tenant_id = ?
+                  AND user_id = ?
+                  AND identity_mode = 'tenant'
+                  AND id <> ?
+                  AND revoked_at IS NULL
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            command.tenantId,
+            command.userId,
+            command.identityLinkId,
+        ) == true
+    }
+
+    private fun lockAndRequirePropertyAdministratorContinuity(
+        tenantId: UUID,
+        targetUserId: UUID,
+    ) {
+        val propertyIds = jdbcTemplate.queryForList(
+            """
+            SELECT upr.property_id
+            FROM user_property_roles upr
+            JOIN roles r
+              ON r.id = upr.role_id
+             AND r.tenant_id = upr.tenant_id
+            JOIN properties property
+              ON property.id = upr.property_id
+             AND property.tenant_id = upr.tenant_id
+            WHERE upr.tenant_id = ?
+              AND upr.user_id = ?
+              AND r.name = ?
+              AND r.is_system = true
+              AND r.is_active = true
+              AND property.deleted_at IS NULL
+            ORDER BY upr.property_id
+            """.trimIndent(),
+            UUID::class.java,
+            tenantId,
+            targetUserId,
+            PROPERTY_ADMIN_ROLE_NAME,
+        ).filterNotNull().distinct()
+
+        propertyIds.forEach { propertyId ->
+            jdbcTemplate.queryForObject(
+                """
+                SELECT id
+                FROM properties
+                WHERE tenant_id = ?
+                  AND id = ?
+                  AND deleted_at IS NULL
+                FOR UPDATE
+                """.trimIndent(),
+                UUID::class.java,
+                tenantId,
+                propertyId,
+            )
+            val anotherAdministratorExists = jdbcTemplate.queryForObject(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM user_property_roles upr
+                    JOIN roles r
+                      ON r.id = upr.role_id
+                     AND r.tenant_id = upr.tenant_id
+                    JOIN users u
+                      ON u.id = upr.user_id
+                     AND u.tenant_id = upr.tenant_id
+                    WHERE upr.tenant_id = ?
+                      AND upr.property_id = ?
+                      AND upr.user_id <> ?
+                      AND r.name = ?
+                      AND r.is_system = true
+                      AND r.is_active = true
+                      AND u.status = 'active'
+                      AND u.is_active = true
+                      AND u.deleted_at IS NULL
+                      AND (u.locked_until IS NULL OR u.locked_until <= now())
+                      AND EXISTS (
+                          SELECT 1
+                          FROM identity_links il
+                          WHERE il.tenant_id = u.tenant_id
+                            AND il.user_id = u.id
+                            AND il.identity_mode = 'tenant'
+                            AND il.revoked_at IS NULL
+                      )
+                )
+                """.trimIndent(),
+                Boolean::class.java,
+                tenantId,
+                propertyId,
+                targetUserId,
+                PROPERTY_ADMIN_ROLE_NAME,
+            ) == true
+            require(anotherAdministratorExists) {
+                "Property administrator access cannot be removed without another active administrator"
+            }
+        }
+    }
+
     private fun recordLifecycleSideEffects(
         command: TenantUserLifecycleCommand,
         before: TenantUserRow,
@@ -571,6 +684,9 @@ class TenantUserLifecycleService(
             TenantUserLifecycleAction.UNLOCK -> "tenant.user.unlocked"
         }
 
+    private val TenantUserLifecycleAction.removesOperationalAccess: Boolean
+        get() = this == TenantUserLifecycleAction.DISABLE || this == TenantUserLifecycleAction.LOCK
+
     private data class TenantUserRow(
         val tenantId: UUID,
         val userId: UUID,
@@ -591,5 +707,6 @@ class TenantUserLifecycleService(
 
     private companion object {
         private const val TENANT_ADMIN_ALL_PERMISSION = "tenant.admin.all"
+        private const val PROPERTY_ADMIN_ROLE_NAME = "Property Administrator"
     }
 }
