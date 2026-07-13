@@ -19,6 +19,6 @@ class MigrationValidationIntegrationTests @Autowired constructor(
     fun `validates the complete migration chain at the expected version`() {
         flyway.validate()
 
-        assertEquals("62", flyway.info().current().version.version)
+        assertEquals("63", flyway.info().current().version.version)
     }
 }

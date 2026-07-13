@@ -191,6 +191,122 @@ class TenantUserLifecycleServiceIntegrationTests {
     }
 
     @Test
+    fun rejectsDisablingOrLockingSoleEffectivePropertyAdministrator() {
+        listOf(
+            TenantUserLifecycleAction.DISABLE,
+            TenantUserLifecycleAction.LOCK,
+        ).forEach { action ->
+            val fixture = lifecycleFixture()
+            val propertyId = UUID.randomUUID()
+            insertLifecycleFixture(fixture)
+            insertProperty(fixture.tenantId, propertyId)
+            val propertyRoleId = insertSystemPropertyAdministratorRole(fixture.tenantId)
+            insertPropertyRoleAssignment(
+                fixture.tenantId,
+                propertyId,
+                fixture.targetUserId,
+                propertyRoleId,
+            )
+            requestContextHolder.set(
+                tenantContext(fixture, "idem-sole-property-admin-${action.databaseValue}"),
+            )
+
+            val error = assertFailsWith<IllegalArgumentException> {
+                lifecyclePort.changeTenantUserLifecycle(
+                    TenantUserLifecycleCommand(
+                        tenantId = fixture.tenantId,
+                        userId = fixture.targetUserId,
+                        action = action,
+                    ),
+                )
+            }
+
+            assertEquals(
+                "Property administrator access cannot be removed without another active administrator",
+                error.message,
+            )
+            assertEquals("active", userRow(fixture)["status"])
+            assertEquals(true, userRow(fixture)["is_active"])
+        }
+    }
+
+    @Test
+    fun rejectsRevokingSolePropertyAdministratorsLastIdentityLink() {
+        val fixture = lifecycleFixture()
+        val propertyId = UUID.randomUUID()
+        insertLifecycleFixture(fixture)
+        insertProperty(fixture.tenantId, propertyId)
+        val propertyRoleId = insertSystemPropertyAdministratorRole(fixture.tenantId)
+        insertPropertyRoleAssignment(
+            fixture.tenantId,
+            propertyId,
+            fixture.targetUserId,
+            propertyRoleId,
+        )
+        requestContextHolder.set(tenantContext(fixture, "idem-sole-property-admin-identity"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            lifecyclePort.revokeTenantUserIdentityLink(
+                RevokeTenantUserIdentityLinkCommand(
+                    tenantId = fixture.tenantId,
+                    userId = fixture.targetUserId,
+                    identityLinkId = fixture.identityLinkId,
+                ),
+            )
+        }
+
+        assertEquals(
+            "Property administrator access cannot be removed without another active administrator",
+            error.message,
+        )
+        assertNull(identityLinkRevokedAt(fixture.identityLinkId))
+        assertIs<ResolvedExternalIdentity.Tenant>(resolveIdentity(fixture))
+    }
+
+    @Test
+    fun allowsDisablingPropertyAdministratorAfterEffectiveReplacementExists() {
+        val fixture = lifecycleFixture()
+        val propertyId = UUID.randomUUID()
+        val replacementUserId = UUID.randomUUID()
+        insertLifecycleFixture(fixture)
+        insertTenantUser(
+            tenantId = fixture.tenantId,
+            userId = replacementUserId,
+            email = "replacement-$replacementUserId@example.com",
+            status = "active",
+            isActive = true,
+        )
+        insertTenantIdentityLink(fixture.tenantId, replacementUserId)
+        insertProperty(fixture.tenantId, propertyId)
+        val propertyRoleId = insertSystemPropertyAdministratorRole(fixture.tenantId)
+        insertPropertyRoleAssignment(
+            fixture.tenantId,
+            propertyId,
+            fixture.targetUserId,
+            propertyRoleId,
+        )
+        insertPropertyRoleAssignment(
+            fixture.tenantId,
+            propertyId,
+            replacementUserId,
+            propertyRoleId,
+        )
+        requestContextHolder.set(tenantContext(fixture, "idem-property-admin-replaced"))
+
+        val receipt = lifecyclePort.changeTenantUserLifecycle(
+            TenantUserLifecycleCommand(
+                tenantId = fixture.tenantId,
+                userId = fixture.targetUserId,
+                action = TenantUserLifecycleAction.DISABLE,
+            ),
+        )
+
+        assertEquals("disabled", receipt.status)
+        assertEquals(false, receipt.isActive)
+        assertEquals(true, receipt.changed)
+    }
+
+    @Test
     fun rejectsLifecycleChangeAgainstUserWithTenantPermissionActorDoesNotHold() {
         val fixture = lifecycleFixture()
         insertLifecycleFixture(fixture)
@@ -403,6 +519,33 @@ class TenantUserLifecycleServiceIntegrationTests {
         )
     }
 
+    private fun insertTenantIdentityLink(tenantId: UUID, userId: UUID) {
+        val identityLinkId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO identity_links (
+                id,
+                identity_mode,
+                provider,
+                issuer,
+                subject,
+                tenant_id,
+                user_id,
+                email
+            )
+            SELECT ?, 'tenant', 'oidc', ?, ?, tenant_id, id, email
+            FROM users
+            WHERE tenant_id = ?
+              AND id = ?
+            """.trimIndent(),
+            identityLinkId,
+            "https://issuer.example.com/realms/$tenantId",
+            "subject-$identityLinkId",
+            tenantId,
+            userId,
+        )
+    }
+
     private fun resolveIdentity(fixture: LifecycleFixture): ResolvedExternalIdentity? {
         return externalIdentityResolver.resolve(
             ExternalIdentityPrincipal(
@@ -585,6 +728,19 @@ class TenantUserLifecycleServiceIntegrationTests {
             roleId,
             tenantId,
             "$namePrefix-$roleId",
+        )
+        return roleId
+    }
+
+    private fun insertSystemPropertyAdministratorRole(tenantId: UUID): UUID {
+        val roleId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO roles (id, tenant_id, name, is_system, is_active)
+            VALUES (?, ?, 'Property Administrator', true, true)
+            """.trimIndent(),
+            roleId,
+            tenantId,
         )
         return roleId
     }

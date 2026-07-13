@@ -6,14 +6,17 @@ import com.mwombeki.peak.shared.context.RequestContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.usermanagement.api.AssignPropertyUserRoleCommand
+import com.mwombeki.peak.usermanagement.api.AssignPropertyAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.CreatePropertyRoleCommand
 import com.mwombeki.peak.usermanagement.api.DeactivatePropertyRoleCommand
 import com.mwombeki.peak.usermanagement.api.EnsurePropertyAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.GetPropertyRoleQuery
 import com.mwombeki.peak.usermanagement.api.ListPropertyRolesQuery
+import com.mwombeki.peak.usermanagement.api.ListPropertyAdministratorsQuery
 import com.mwombeki.peak.usermanagement.api.ListUserPropertyRolesQuery
 import com.mwombeki.peak.usermanagement.api.PropertyAccessBootstrapPort
 import com.mwombeki.peak.usermanagement.api.RevokePropertyUserRoleCommand
+import com.mwombeki.peak.usermanagement.api.RevokePropertyAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.TenantPropertyRoleManagementPort
 import com.mwombeki.peak.usermanagement.api.TenantUserRoleManagementNotFoundException
 import com.mwombeki.peak.usermanagement.api.UpdatePropertyRoleCommand
@@ -607,6 +610,191 @@ class TenantPropertyRoleManagementServiceIntegrationTests {
         assertEquals(0, propertyRoleCount(fixture, "Property Administrator"))
     }
 
+    @Test
+    fun tenantGovernorAssignsListsAndRevokesPropertyAdministrator() {
+        val fixture = propertyRoleFixture()
+        insertPropertyRoleFixture(fixture)
+        requestContextHolder.set(tenantContext(fixture, "idem-property-admin-bootstrap"))
+        val propertyRoleId = propertyAccessBootstrapPort.ensurePropertyAdministrator(
+            EnsurePropertyAdministratorCommand(
+                tenantId = fixture.tenantId,
+                propertyId = fixture.propertyId,
+                tenantUserId = fixture.actorUserId,
+            ),
+        ).propertyRoleId
+        ensureTenantPermission(fixture.tenantId, "tenant.properties.administrators.manage")
+        insertTenantRolePermission(
+            fixture.actorRoleId,
+            fixture.tenantId,
+            "tenant.properties.administrators.manage",
+        )
+        insertTenantRolePermission(
+            fixture.actorRoleId,
+            fixture.tenantId,
+            "tenant.properties.roles.view",
+        )
+        removeTenantRolePermission(fixture.actorRoleId, fixture.tenantId, "tenant.admin.all")
+        insertActiveIdentityLink(fixture, fixture.actorUserId)
+        insertActiveIdentityLink(fixture, fixture.targetUserId)
+
+        requestContextHolder.set(tenantContext(fixture, "idem-property-admin-assign"))
+        val assignCommand = AssignPropertyAdministratorCommand(
+            tenantId = fixture.tenantId,
+            propertyId = fixture.propertyId,
+            userId = fixture.targetUserId,
+        )
+        val assigned = propertyRoleManagementPort.assignPropertyAdministrator(assignCommand)
+        val replayedAssignment = propertyRoleManagementPort.assignPropertyAdministrator(assignCommand)
+
+        assertTrue(assigned.changed)
+        assertTrue(assigned.assigned)
+        assertTrue(replayedAssignment.replayed)
+        assertEquals(assigned.copy(replayed = true), replayedAssignment)
+        assertEquals(propertyRoleId, assigned.propertyRoleId)
+        assertEquals(1, propertyAssignmentCount(fixture, propertyRoleId))
+
+        requestContextHolder.set(tenantContext(fixture, "idem-property-admin-list"))
+        val administrators = propertyRoleManagementPort.listPropertyAdministrators(
+            ListPropertyAdministratorsQuery(fixture.tenantId, fixture.propertyId),
+        )
+        assertEquals(2, administrators.size)
+        assertTrue(administrators.all { it.hasActiveIdentity })
+
+        requestContextHolder.set(tenantContext(fixture, "idem-property-admin-revoke"))
+        val revokeCommand = RevokePropertyAdministratorCommand(
+            tenantId = fixture.tenantId,
+            propertyId = fixture.propertyId,
+            userId = fixture.targetUserId,
+        )
+        val revoked = propertyRoleManagementPort.revokePropertyAdministrator(revokeCommand)
+        val replayedRevocation = propertyRoleManagementPort.revokePropertyAdministrator(revokeCommand)
+
+        assertTrue(revoked.changed)
+        assertFalse(revoked.assigned)
+        assertTrue(replayedRevocation.replayed)
+        assertEquals(revoked.copy(replayed = true), replayedRevocation)
+        assertEquals(0, propertyAssignmentCount(fixture, propertyRoleId))
+        assertEquals(
+            1,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*)
+                FROM audit_logs
+                WHERE tenant_id = ?
+                  AND action = 'tenant.property.administrator.revoked'
+                  AND entity_id = ?
+                """.trimIndent(),
+                Int::class.java,
+                fixture.tenantId,
+                fixture.targetUserId,
+            ),
+        )
+        assertEquals(
+            1,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*)
+                FROM outbox_events
+                WHERE tenant_id = ?
+                  AND property_id = ?
+                  AND aggregate_id = ?
+                  AND event_type = 'tenant.property.administrator.revoked'
+                """.trimIndent(),
+                Int::class.java,
+                fixture.tenantId,
+                fixture.propertyId,
+                fixture.targetUserId,
+            ),
+        )
+    }
+
+    @Test
+    fun rejectsRevokingLastEffectivePropertyAdministrator() {
+        val fixture = propertyRoleFixture()
+        insertPropertyRoleFixture(fixture)
+        requestContextHolder.set(tenantContext(fixture, "idem-property-admin-last-bootstrap"))
+        val propertyRoleId = propertyAccessBootstrapPort.ensurePropertyAdministrator(
+            EnsurePropertyAdministratorCommand(
+                tenantId = fixture.tenantId,
+                propertyId = fixture.propertyId,
+                tenantUserId = fixture.actorUserId,
+            ),
+        ).propertyRoleId
+
+        requestContextHolder.set(tenantContext(fixture, "idem-property-admin-last-assign"))
+        propertyRoleManagementPort.assignPropertyAdministrator(
+            AssignPropertyAdministratorCommand(
+                tenantId = fixture.tenantId,
+                propertyId = fixture.propertyId,
+                userId = fixture.targetUserId,
+            ),
+        )
+        insertActiveIdentityLink(fixture, fixture.targetUserId)
+
+        requestContextHolder.set(tenantContext(fixture, "idem-property-admin-last-revoke"))
+        val error = assertFailsWith<IllegalArgumentException> {
+            propertyRoleManagementPort.revokePropertyAdministrator(
+                RevokePropertyAdministratorCommand(
+                    tenantId = fixture.tenantId,
+                    propertyId = fixture.propertyId,
+                    userId = fixture.targetUserId,
+                ),
+            )
+        }
+
+        assertEquals(
+            "Property administrator access cannot be removed without another active administrator",
+            error.message,
+        )
+        assertEquals(1, propertyAssignmentCount(fixture, propertyRoleId))
+    }
+
+    @Test
+    fun rejectsPropertyAdministratorAssignmentWithoutGovernancePermission() {
+        val fixture = propertyRoleFixture()
+        insertPropertyRoleFixture(fixture, grantTenantAdmin = false)
+        requestContextHolder.set(tenantContext(fixture, "idem-property-admin-permission-denied"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            propertyRoleManagementPort.assignPropertyAdministrator(
+                AssignPropertyAdministratorCommand(
+                    tenantId = fixture.tenantId,
+                    propertyId = fixture.propertyId,
+                    userId = fixture.targetUserId,
+                ),
+            )
+        }
+
+        assertEquals(
+            "Tenant user lacks property administrator management permission",
+            error.message,
+        )
+    }
+
+    @Test
+    fun rejectsReservedPropertyAdministratorNameForDynamicRole() {
+        val fixture = propertyRoleFixture()
+        insertPropertyRoleFixture(fixture)
+        requestContextHolder.set(tenantContext(fixture, "idem-property-admin-reserved-name"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            propertyRoleManagementPort.createPropertyRole(
+                CreatePropertyRoleCommand(
+                    tenantId = fixture.tenantId,
+                    propertyId = fixture.propertyId,
+                    name = " property administrator ",
+                    permissionCodes = listOf("property.view"),
+                ),
+            )
+        }
+
+        assertEquals(
+            "Property Administrator is reserved for the system property role",
+            error.message,
+        )
+        assertEquals(0, propertyRoleCount(fixture, "property administrator"))
+    }
+
     private fun targetCanAccessProperty(
         fixture: PropertyRoleFixture,
         permissionCode: String,
@@ -891,6 +1079,33 @@ class TenantPropertyRoleManagementServiceIntegrationTests {
         )
     }
 
+    private fun insertActiveIdentityLink(fixture: PropertyRoleFixture, userId: UUID) {
+        val identityLinkId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO identity_links (
+                id,
+                identity_mode,
+                provider,
+                issuer,
+                subject,
+                tenant_id,
+                user_id,
+                email
+            )
+            SELECT ?, 'tenant', 'oidc', ?, ?, tenant_id, id, email
+            FROM users
+            WHERE tenant_id = ?
+              AND id = ?
+            """.trimIndent(),
+            identityLinkId,
+            "https://issuer.example.com/realms/${fixture.tenantId}",
+            "subject-$identityLinkId",
+            fixture.tenantId,
+            userId,
+        )
+    }
+
     private fun ensureTenantPermission(tenantId: UUID, code: String) {
         jdbcTemplate.update(
             """
@@ -928,6 +1143,24 @@ class TenantPropertyRoleManagementServiceIntegrationTests {
             FROM permissions
             WHERE tenant_id = ?
               AND code = ?
+            """.trimIndent(),
+            roleId,
+            tenantId,
+            code,
+        )
+    }
+
+    private fun removeTenantRolePermission(roleId: UUID, tenantId: UUID, code: String) {
+        jdbcTemplate.update(
+            """
+            DELETE FROM tenant_role_permissions
+            WHERE tenant_role_id = ?
+              AND permission_id = (
+                  SELECT id
+                  FROM permissions
+                  WHERE tenant_id = ?
+                    AND code = ?
+              )
             """.trimIndent(),
             roleId,
             tenantId,

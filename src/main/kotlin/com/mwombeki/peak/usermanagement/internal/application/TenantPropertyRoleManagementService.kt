@@ -12,18 +12,22 @@ import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.usermanagement.api.AssignPropertyAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.AssignPropertyUserRoleCommand
 import com.mwombeki.peak.usermanagement.api.CreatePropertyRoleCommand
 import com.mwombeki.peak.usermanagement.api.DeactivatePropertyRoleCommand
 import com.mwombeki.peak.usermanagement.api.EnsurePropertyAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.GetPropertyRoleQuery
+import com.mwombeki.peak.usermanagement.api.ListPropertyAdministratorsQuery
 import com.mwombeki.peak.usermanagement.api.ListPropertyRolesQuery
 import com.mwombeki.peak.usermanagement.api.ListUserPropertyRolesQuery
 import com.mwombeki.peak.usermanagement.api.PropertyAccessBootstrapPort
 import com.mwombeki.peak.usermanagement.api.PropertyAccessBootstrapReceipt
+import com.mwombeki.peak.usermanagement.api.PropertyAdministratorSummary
 import com.mwombeki.peak.usermanagement.api.PropertyRoleMutationReceipt
 import com.mwombeki.peak.usermanagement.api.PropertyRoleSummary
 import com.mwombeki.peak.usermanagement.api.PropertyUserRoleAssignmentReceipt
+import com.mwombeki.peak.usermanagement.api.RevokePropertyAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.RevokePropertyUserRoleCommand
 import com.mwombeki.peak.usermanagement.api.TenantPropertyRoleManagementPort
 import com.mwombeki.peak.usermanagement.api.TenantUserRoleManagementConflictException
@@ -80,6 +84,7 @@ class TenantPropertyRoleManagementService(
             requestPayload = command,
         ) { idempotencyKeyId ->
             val propertyRoleId = UUID.randomUUID()
+            val roleName = command.name.normalizedPropertyRoleName()
             val permissionIds = requireDelegablePropertyPermissionIds(
                 tenantId = command.tenantId,
                 propertyId = command.propertyId,
@@ -93,7 +98,7 @@ class TenantPropertyRoleManagementService(
                     """.trimIndent(),
                     propertyRoleId,
                     command.tenantId,
-                    command.name.normalizedRequired("name"),
+                    roleName,
                 )
             } catch (ex: DuplicateKeyException) {
                 throw TenantUserRoleManagementConflictException("Property role name is already in use")
@@ -118,7 +123,7 @@ class TenantPropertyRoleManagementService(
                         "tenantId" to command.tenantId,
                         "propertyId" to command.propertyId,
                         "propertyRoleId" to propertyRoleId,
-                        "name" to command.name.normalizedRequired("name"),
+                        "name" to roleName,
                         "permissionCodes" to command.permissionCodes.map { it.normalizedCode() },
                     ),
                     idempotencyKeyId = idempotencyKeyId,
@@ -136,6 +141,7 @@ class TenantPropertyRoleManagementService(
         ) { idempotencyKeyId ->
             requireMutablePropertyRole(command.tenantId, command.propertyId, command.propertyRoleId)
             requireDelegablePropertyRole(command.tenantId, command.propertyId, command.propertyRoleId)
+            val roleName = command.name?.normalizedPropertyRoleName()
             val permissionIds = command.permissionCodes?.let {
                 requireDelegablePropertyPermissionIds(
                     tenantId = command.tenantId,
@@ -152,7 +158,7 @@ class TenantPropertyRoleManagementService(
                   AND id = ?
                   AND is_system = false
                 """.trimIndent(),
-                command.name?.normalizedRequired("name"),
+                roleName,
                 command.tenantId,
                 command.propertyRoleId,
             )
@@ -291,6 +297,68 @@ class TenantPropertyRoleManagementService(
         )
     }
 
+    override fun listPropertyAdministrators(
+        query: ListPropertyAdministratorsQuery,
+    ): List<PropertyAdministratorSummary> {
+        return requireNotNull(
+            transactionTemplate.execute {
+                bindTenantPropertyRoleViewer(query.tenantId)
+                requirePropertyBelongsToTenant(query.tenantId, query.propertyId)
+                jdbcTemplate.query(
+                    """
+                    SELECT
+                        u.tenant_id,
+                        upr.property_id,
+                        r.id AS property_role_id,
+                        u.id AS user_id,
+                        u.full_name,
+                        u.email,
+                        u.status,
+                        u.is_active,
+                        u.locked_until,
+                        EXISTS (
+                            SELECT 1
+                            FROM identity_links il
+                            WHERE il.tenant_id = u.tenant_id
+                              AND il.user_id = u.id
+                              AND il.identity_mode = 'tenant'
+                              AND il.revoked_at IS NULL
+                        ) AS has_active_identity
+                    FROM user_property_roles upr
+                    JOIN roles r
+                      ON r.id = upr.role_id
+                     AND r.tenant_id = upr.tenant_id
+                    JOIN users u
+                      ON u.id = upr.user_id
+                     AND u.tenant_id = upr.tenant_id
+                    WHERE upr.tenant_id = ?
+                      AND upr.property_id = ?
+                      AND r.name = ?
+                      AND r.is_system = true
+                    ORDER BY u.full_name, u.email, u.id
+                    """.trimIndent(),
+                    { rs, _ ->
+                        PropertyAdministratorSummary(
+                            tenantId = rs.getObject("tenant_id", UUID::class.java),
+                            propertyId = rs.getObject("property_id", UUID::class.java),
+                            propertyRoleId = rs.getObject("property_role_id", UUID::class.java),
+                            userId = rs.getObject("user_id", UUID::class.java),
+                            fullName = rs.getString("full_name"),
+                            email = rs.getString("email"),
+                            status = rs.getString("status"),
+                            isActive = rs.getBoolean("is_active"),
+                            lockedUntil = rs.getTimestamp("locked_until")?.toInstant(),
+                            hasActiveIdentity = rs.getBoolean("has_active_identity"),
+                        )
+                    },
+                    query.tenantId,
+                    query.propertyId,
+                    PROPERTY_ADMIN_ROLE_NAME,
+                )
+            },
+        )
+    }
+
     override fun assignPropertyUserRole(
         command: AssignPropertyUserRoleCommand,
     ): PropertyUserRoleAssignmentReceipt {
@@ -405,6 +473,119 @@ class TenantPropertyRoleManagementService(
                         propertyRoleId = command.propertyRoleId,
                         action = "revoked",
                         eventType = "tenant.property.user.role.revoked",
+                        idempotencyKeyId = idempotencyKeyId,
+                    )
+                }
+            }
+        }
+    }
+
+    override fun assignPropertyAdministrator(
+        command: AssignPropertyAdministratorCommand,
+    ): PropertyUserRoleAssignmentReceipt {
+        return mutatePropertyAdministratorAssignment(
+            tenantId = command.tenantId,
+            propertyId = command.propertyId,
+            userId = command.userId,
+            operationType = "tenant.property.administrator.assign",
+            requestPayload = command,
+        ) { actorUserId, idempotencyKeyId ->
+            require(
+                actorUserId != command.userId ||
+                    actorHasTenantAdminPermission(command.tenantId, actorUserId),
+            ) {
+                "Only a tenant super administrator can assign own property administrator access"
+            }
+            requireActiveTenantUser(command.tenantId, command.userId)
+            val propertyRoleId = requireSystemPropertyAdministratorRole(command.tenantId)
+            val inserted = jdbcTemplate.update(
+                """
+                INSERT INTO user_property_roles (user_id, property_id, role_id, tenant_id)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT ON CONSTRAINT user_property_roles_pkey DO NOTHING
+                """.trimIndent(),
+                command.userId,
+                command.propertyId,
+                propertyRoleId,
+                command.tenantId,
+            ) == 1
+
+            PropertyUserRoleAssignmentReceipt(
+                tenantId = command.tenantId,
+                propertyId = command.propertyId,
+                userId = command.userId,
+                propertyRoleId = propertyRoleId,
+                assigned = true,
+                changed = inserted,
+                replayed = false,
+            ).also { receipt ->
+                if (inserted) {
+                    recordPropertyAdministratorSideEffects(
+                        receipt = receipt,
+                        action = "assigned",
+                        idempotencyKeyId = idempotencyKeyId,
+                    )
+                }
+            }
+        }
+    }
+
+    override fun revokePropertyAdministrator(
+        command: RevokePropertyAdministratorCommand,
+    ): PropertyUserRoleAssignmentReceipt {
+        return mutatePropertyAdministratorAssignment(
+            tenantId = command.tenantId,
+            propertyId = command.propertyId,
+            userId = command.userId,
+            operationType = "tenant.property.administrator.revoke",
+            requestPayload = command,
+        ) { actorUserId, idempotencyKeyId ->
+            require(actorUserId != command.userId) {
+                "Tenant user cannot revoke own property administrator access"
+            }
+            requireTenantUser(command.tenantId, command.userId, activeOnly = false)
+            val propertyRoleId = requireSystemPropertyAdministratorRole(command.tenantId)
+            val assigned = propertyAdministratorAssignmentExists(
+                tenantId = command.tenantId,
+                propertyId = command.propertyId,
+                userId = command.userId,
+                propertyRoleId = propertyRoleId,
+            )
+            if (assigned) {
+                requireAnotherActivePropertyAdministrator(
+                    tenantId = command.tenantId,
+                    propertyId = command.propertyId,
+                    excludedUserId = command.userId,
+                    propertyRoleId = propertyRoleId,
+                )
+            }
+            val deleted = assigned && jdbcTemplate.update(
+                """
+                DELETE FROM user_property_roles
+                WHERE tenant_id = ?
+                  AND property_id = ?
+                  AND user_id = ?
+                  AND role_id = ?
+                """.trimIndent(),
+                command.tenantId,
+                command.propertyId,
+                command.userId,
+                propertyRoleId,
+            ) == 1
+
+            PropertyUserRoleAssignmentReceipt(
+                tenantId = command.tenantId,
+                propertyId = command.propertyId,
+                userId = command.userId,
+                propertyRoleId = propertyRoleId,
+                assigned = false,
+                changed = deleted,
+                replayed = false,
+            ).also { receipt ->
+                if (deleted) {
+                    recordPropertyAdministratorSideEffects(
+                        receipt = receipt,
+                        action = "revoked",
                         idempotencyKeyId = idempotencyKeyId,
                     )
                 }
@@ -592,6 +773,54 @@ class TenantPropertyRoleManagementService(
         )
     }
 
+    private fun mutatePropertyAdministratorAssignment(
+        tenantId: UUID,
+        propertyId: UUID,
+        userId: UUID,
+        operationType: String,
+        requestPayload: Any,
+        block: (UUID, UUID) -> PropertyUserRoleAssignmentReceipt,
+    ): PropertyUserRoleAssignmentReceipt {
+        return requireNotNull(
+            transactionTemplate.execute {
+                val actorUserId = bindTenantActorWithPermission(
+                    tenantId = tenantId,
+                    permissionCode = TENANT_PROPERTY_ADMINISTRATOR_PERMISSION,
+                    denialMessage = "Tenant user lacks property administrator management permission",
+                )
+                lockPropertyBelongsToTenant(tenantId, propertyId)
+                val reservation = idempotencyPort.reserve(
+                    IdempotencyCommand(
+                        operationType = operationType,
+                        requestPayload = requestPayload,
+                        resourceType = "user_property_roles",
+                    ),
+                )
+                when (reservation) {
+                    is IdempotencyReservation.Started -> {
+                        val receipt = block(actorUserId, reservation.recordId)
+                        idempotencyPort.markSucceeded(
+                            recordId = reservation.recordId,
+                            responseCode = 200,
+                            responseBody = receipt,
+                            resourceId = userId,
+                        )
+                        receipt
+                    }
+
+                    is IdempotencyReservation.Replay -> replayPropertyAssignment(reservation)
+                    is IdempotencyReservation.InProgress -> throw TenantUserRoleManagementInProgressException(
+                        "Property administrator command is already being processed for this idempotency key",
+                    )
+
+                    is IdempotencyReservation.Conflict -> throw TenantUserRoleManagementConflictException(
+                        "Idempotency key was already used for a different property administrator request",
+                    )
+                }
+            },
+        )
+    }
+
     private fun bindTenantAccessManager(tenantId: UUID): UUID {
         return bindTenantActorWithPermission(
             tenantId = tenantId,
@@ -651,6 +880,122 @@ class TenantPropertyRoleManagementService(
         ) == true
         if (!exists) {
             throw TenantUserRoleManagementNotFoundException("Property was not found for tenant")
+        }
+    }
+
+    private fun lockPropertyBelongsToTenant(tenantId: UUID, propertyId: UUID) {
+        val property = jdbcTemplate.query(
+            """
+            SELECT id
+            FROM properties
+            WHERE tenant_id = ?
+              AND id = ?
+              AND deleted_at IS NULL
+            FOR UPDATE
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("id", UUID::class.java) },
+            tenantId,
+            propertyId,
+        ).singleOrNull()
+        if (property == null) {
+            throw TenantUserRoleManagementNotFoundException("Property was not found for tenant")
+        }
+    }
+
+    private fun actorHasTenantAdminPermission(tenantId: UUID, actorUserId: UUID): Boolean {
+        return jdbcTemplate.queryForObject(
+            "SELECT user_has_tenant_permission(?, ?, ?)",
+            Boolean::class.java,
+            actorUserId,
+            tenantId,
+            TENANT_ADMIN_ALL_PERMISSION,
+        ) == true
+    }
+
+    private fun requireSystemPropertyAdministratorRole(tenantId: UUID): UUID {
+        return jdbcTemplate.query(
+            """
+            SELECT id
+            FROM roles
+            WHERE tenant_id = ?
+              AND name = ?
+              AND is_system = true
+              AND is_active = true
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("id", UUID::class.java) },
+            tenantId,
+            PROPERTY_ADMIN_ROLE_NAME,
+        ).singleOrNull()
+            ?: throw TenantUserRoleManagementNotFoundException(
+                "Active system Property Administrator role was not found",
+            )
+    }
+
+    private fun propertyAdministratorAssignmentExists(
+        tenantId: UUID,
+        propertyId: UUID,
+        userId: UUID,
+        propertyRoleId: UUID,
+    ): Boolean {
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM user_property_roles
+                WHERE tenant_id = ?
+                  AND property_id = ?
+                  AND user_id = ?
+                  AND role_id = ?
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            tenantId,
+            propertyId,
+            userId,
+            propertyRoleId,
+        ) == true
+    }
+
+    private fun requireAnotherActivePropertyAdministrator(
+        tenantId: UUID,
+        propertyId: UUID,
+        excludedUserId: UUID,
+        propertyRoleId: UUID,
+    ) {
+        val exists = jdbcTemplate.queryForObject(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM user_property_roles upr
+                JOIN users u
+                  ON u.id = upr.user_id
+                 AND u.tenant_id = upr.tenant_id
+                WHERE upr.tenant_id = ?
+                  AND upr.property_id = ?
+                  AND upr.role_id = ?
+                  AND upr.user_id <> ?
+                  AND u.status = 'active'
+                  AND u.is_active = true
+                  AND u.deleted_at IS NULL
+                  AND (u.locked_until IS NULL OR u.locked_until <= now())
+                  AND EXISTS (
+                      SELECT 1
+                      FROM identity_links il
+                      WHERE il.tenant_id = u.tenant_id
+                        AND il.user_id = u.id
+                        AND il.identity_mode = 'tenant'
+                        AND il.revoked_at IS NULL
+                  )
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            tenantId,
+            propertyId,
+            propertyRoleId,
+            excludedUserId,
+        ) == true
+        require(exists) {
+            "Property administrator access cannot be removed without another active administrator"
         }
     }
 
@@ -1013,28 +1358,57 @@ class TenantPropertyRoleManagementService(
 
     private fun ensureSystemPropertyAdministratorRole(tenantId: UUID): PropertyRoleMutationState {
         var changed = false
-        val roleId = jdbcTemplate.query(
+        val existingRole = jdbcTemplate.query(
             """
-            SELECT id
+            SELECT id, is_system, is_active
             FROM roles
             WHERE tenant_id = ?
               AND name = ?
             FOR UPDATE
             """.trimIndent(),
-            { rs, _ -> rs.getObject("id", UUID::class.java) },
+            { rs, _ ->
+                SystemPropertyRoleRow(
+                    propertyRoleId = rs.getObject("id", UUID::class.java),
+                    isSystem = rs.getBoolean("is_system"),
+                    isActive = rs.getBoolean("is_active"),
+                )
+            },
             tenantId,
             PROPERTY_ADMIN_ROLE_NAME,
-        ).singleOrNull() ?: UUID.randomUUID().also { id ->
-            jdbcTemplate.update(
-                """
-                INSERT INTO roles (id, tenant_id, name, is_system, is_active)
-                VALUES (?, ?, ?, true, true)
-                """.trimIndent(),
-                id,
-                tenantId,
-                PROPERTY_ADMIN_ROLE_NAME,
-            )
-            changed = true
+        ).singleOrNull()
+        val roleId = if (existingRole == null) {
+            UUID.randomUUID().also { id ->
+                jdbcTemplate.update(
+                    """
+                    INSERT INTO roles (id, tenant_id, name, is_system, is_active)
+                    VALUES (?, ?, ?, true, true)
+                    """.trimIndent(),
+                    id,
+                    tenantId,
+                    PROPERTY_ADMIN_ROLE_NAME,
+                )
+                changed = true
+            }
+        } else {
+            require(existingRole.isSystem) {
+                "Property Administrator is reserved for the system property role"
+            }
+            if (!existingRole.isActive) {
+                jdbcTemplate.update(
+                    """
+                    UPDATE roles
+                    SET is_active = true,
+                        updated_at = now()
+                    WHERE tenant_id = ?
+                      AND id = ?
+                      AND is_system = true
+                    """.trimIndent(),
+                    tenantId,
+                    existingRole.propertyRoleId,
+                )
+                changed = true
+            }
+            existingRole.propertyRoleId
         }
 
         val permissionIds = ensurePropertyPermissionIds(tenantId, PROPERTY_ADMIN_PERMISSION_CODES.toList())
@@ -1150,6 +1524,41 @@ class TenantPropertyRoleManagementService(
         )
     }
 
+    private fun recordPropertyAdministratorSideEffects(
+        receipt: PropertyUserRoleAssignmentReceipt,
+        action: String,
+        idempotencyKeyId: UUID,
+    ) {
+        val payload = mapOf(
+            "tenantId" to receipt.tenantId,
+            "propertyId" to receipt.propertyId,
+            "userId" to receipt.userId,
+            "propertyRoleId" to receipt.propertyRoleId,
+            "action" to action,
+        )
+        auditPort.recordTenantEvent(
+            TenantAuditEvent(
+                tenantId = receipt.tenantId,
+                action = "tenant.property.administrator.$action",
+                resource = AuditResource("user_property_roles", receipt.userId),
+                after = payload,
+            ),
+        )
+        outboxPort.enqueue(
+            OutboxEventCommand(
+                aggregateType = "user_property_roles",
+                aggregateId = receipt.userId,
+                tenantId = receipt.tenantId,
+                propertyId = receipt.propertyId,
+                eventType = "tenant.property.administrator.$action",
+                destination = OutboxDestination.PLATFORM,
+                payload = payload,
+                idempotencyKeyId = idempotencyKeyId,
+                priority = 4,
+            ),
+        )
+    }
+
     private fun replayPropertyRoleMutation(
         reservation: IdempotencyReservation.Replay,
     ): PropertyRoleMutationReceipt {
@@ -1206,6 +1615,14 @@ class TenantPropertyRoleManagementService(
         return normalizedRequired("code").lowercase()
     }
 
+    private fun String.normalizedPropertyRoleName(): String {
+        return normalizedRequired("name").also { roleName ->
+            require(!roleName.equals(PROPERTY_ADMIN_ROLE_NAME, ignoreCase = true)) {
+                "Property Administrator is reserved for the system property role"
+            }
+        }
+    }
+
     private data class PropertyRolePolicy(
         val isSystem: Boolean,
     )
@@ -1215,9 +1632,17 @@ class TenantPropertyRoleManagementService(
         val changed: Boolean,
     )
 
+    private data class SystemPropertyRoleRow(
+        val propertyRoleId: UUID,
+        val isSystem: Boolean,
+        val isActive: Boolean,
+    )
+
     private companion object {
         private const val TENANT_PROPERTY_ACCESS_PERMISSION = "tenant.properties.manage_access"
         private const val TENANT_PROPERTY_ROLE_VIEW_PERMISSION = "tenant.properties.roles.view"
+        private const val TENANT_PROPERTY_ADMINISTRATOR_PERMISSION =
+            "tenant.properties.administrators.manage"
         private const val TENANT_ADMIN_ALL_PERMISSION = "tenant.admin.all"
         private const val PROPERTY_CREATION_PERMISSION = "property.manage"
         private const val PROPERTY_ADMIN_ROLE_NAME = "Property Administrator"

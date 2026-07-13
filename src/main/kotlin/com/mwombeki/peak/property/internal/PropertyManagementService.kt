@@ -2333,86 +2333,6 @@ class PropertyManagementService(
         }
     }
 
-    private fun assignCreatorPropertyRole(
-        tenantId: UUID,
-        propertyId: UUID,
-        tenantUserId: UUID,
-    ) {
-        val roleId = jdbcTemplate.query(
-            """
-            SELECT id
-            FROM roles
-            WHERE tenant_id = ? AND name = ?
-            FOR UPDATE
-            """.trimIndent(),
-            { rs, _ -> rs.getObject("id", UUID::class.java) },
-            tenantId,
-            PROPERTY_ADMIN_ROLE_NAME,
-        ).singleOrNull() ?: UUID.randomUUID().also { id ->
-            jdbcTemplate.update(
-                """
-                INSERT INTO roles (id, tenant_id, name, is_system, is_active)
-                VALUES (?, ?, ?, true, true)
-                """.trimIndent(),
-                id,
-                tenantId,
-                PROPERTY_ADMIN_ROLE_NAME,
-            )
-        }
-
-        PROPERTY_ADMIN_PERMISSION_CODES.forEach { code ->
-            val permissionId = ensurePermission(tenantId, code)
-            jdbcTemplate.update(
-                """
-                INSERT INTO role_permissions (role_id, permission_id)
-                VALUES (?, ?)
-                ON CONFLICT ON CONSTRAINT role_permissions_pkey DO NOTHING
-                """.trimIndent(),
-                roleId,
-                permissionId,
-            )
-        }
-
-        jdbcTemplate.update(
-            """
-            INSERT INTO user_property_roles (user_id, property_id, role_id, tenant_id)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT ON CONSTRAINT user_property_roles_pkey DO NOTHING
-            """.trimIndent(),
-            tenantUserId,
-            propertyId,
-            roleId,
-            tenantId,
-        )
-    }
-
-    private fun ensurePermission(
-        tenantId: UUID,
-        code: String,
-    ): UUID {
-        return jdbcTemplate.query(
-            """
-            SELECT id
-            FROM permissions
-            WHERE tenant_id = ? AND code = ?
-            """.trimIndent(),
-            { rs, _ -> rs.getObject("id", UUID::class.java) },
-            tenantId,
-            code,
-        ).singleOrNull() ?: UUID.randomUUID().also { id ->
-            jdbcTemplate.update(
-                """
-                INSERT INTO permissions (id, tenant_id, code, description)
-                VALUES (?, ?, ?, ?)
-                """.trimIndent(),
-                id,
-                tenantId,
-                code,
-                "Auto-created permission $code",
-            )
-        }
-    }
-
     private fun enableTenantModule(
         tenantId: UUID,
         moduleId: String,
@@ -2888,7 +2808,6 @@ class PropertyManagementService(
         private const val PROPERTY_STATUS_SUSPENDED = "suspended"
         private const val PROPERTY_STATUS_ARCHIVED = "archived"
         private const val PROPERTY_MODULE_ID = "property"
-        private const val PROPERTY_ADMIN_ROLE_NAME = "Property Administrator"
 
         private const val BUILDINGS = "buildings"
         private const val FLOORS = "floors"
@@ -2904,14 +2823,6 @@ class PropertyManagementService(
         private val REQUIRED_PROPERTY_MODULES = setOf(PROPERTY_MODULE_ID)
 
         private val TERMINAL_PROPERTY_STATUSES = setOf(PROPERTY_STATUS_ARCHIVED, "terminated")
-
-        private val PROPERTY_ADMIN_PERMISSION_CODES = setOf(
-            "admin.all",
-            "property.view",
-            "property.manage",
-            "property.lifecycle",
-            "realtime.stream",
-        )
 
         private val REVENUE_CENTER_TYPES = setOf(
             "rooms",

@@ -1,14 +1,18 @@
 package com.mwombeki.peak.usermanagement.internal.web
 
+import com.mwombeki.peak.usermanagement.api.AssignPropertyAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.AssignPropertyUserRoleCommand
 import com.mwombeki.peak.usermanagement.api.CreatePropertyRoleCommand
 import com.mwombeki.peak.usermanagement.api.DeactivatePropertyRoleCommand
 import com.mwombeki.peak.usermanagement.api.GetPropertyRoleQuery
+import com.mwombeki.peak.usermanagement.api.ListPropertyAdministratorsQuery
 import com.mwombeki.peak.usermanagement.api.ListPropertyRolesQuery
 import com.mwombeki.peak.usermanagement.api.ListUserPropertyRolesQuery
+import com.mwombeki.peak.usermanagement.api.PropertyAdministratorSummary
 import com.mwombeki.peak.usermanagement.api.PropertyRoleMutationReceipt
 import com.mwombeki.peak.usermanagement.api.PropertyRoleSummary
 import com.mwombeki.peak.usermanagement.api.PropertyUserRoleAssignmentReceipt
+import com.mwombeki.peak.usermanagement.api.RevokePropertyAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.RevokePropertyUserRoleCommand
 import com.mwombeki.peak.usermanagement.api.TenantPropertyRoleManagementPort
 import com.mwombeki.peak.usermanagement.api.TenantUserRoleManagementConflictException
@@ -18,6 +22,7 @@ import com.mwombeki.peak.usermanagement.api.UpdatePropertyRoleCommand
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotEmpty
+import java.time.Instant
 import java.util.UUID
 import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
@@ -113,6 +118,38 @@ class TenantPropertyRoleManagementController(
         return propertyRoleManagementPort.listUserPropertyRoles(
             ListUserPropertyRolesQuery(tenantId, propertyId, userId),
         ).map { it.toHttpResponse() }
+    }
+
+    @GetMapping("/administrators")
+    fun listPropertyAdministrators(
+        @PathVariable tenantId: UUID,
+        @PathVariable propertyId: UUID,
+    ): List<PropertyAdministratorHttpResponse> {
+        return propertyRoleManagementPort.listPropertyAdministrators(
+            ListPropertyAdministratorsQuery(tenantId, propertyId),
+        ).map { it.toHttpResponse() }
+    }
+
+    @PostMapping("/administrators/{userId}/assign")
+    fun assignPropertyAdministrator(
+        @PathVariable tenantId: UUID,
+        @PathVariable propertyId: UUID,
+        @PathVariable userId: UUID,
+    ): PropertyUserRoleAssignmentHttpResponse {
+        return propertyRoleManagementPort.assignPropertyAdministrator(
+            AssignPropertyAdministratorCommand(tenantId, propertyId, userId),
+        ).toHttpResponse()
+    }
+
+    @PostMapping("/administrators/{userId}/revoke")
+    fun revokePropertyAdministrator(
+        @PathVariable tenantId: UUID,
+        @PathVariable propertyId: UUID,
+        @PathVariable userId: UUID,
+    ): PropertyUserRoleAssignmentHttpResponse {
+        return propertyRoleManagementPort.revokePropertyAdministrator(
+            RevokePropertyAdministratorCommand(tenantId, propertyId, userId),
+        ).toHttpResponse()
     }
 
     @PostMapping("/users/{userId}/roles/{propertyRoleId}/assign")
@@ -222,6 +259,21 @@ class TenantPropertyRoleManagementController(
             replayed = replayed,
         )
     }
+
+    private fun PropertyAdministratorSummary.toHttpResponse(): PropertyAdministratorHttpResponse {
+        return PropertyAdministratorHttpResponse(
+            tenantId = tenantId,
+            propertyId = propertyId,
+            propertyRoleId = propertyRoleId,
+            userId = userId,
+            fullName = fullName,
+            email = email,
+            status = status,
+            isActive = isActive,
+            lockedUntil = lockedUntil,
+            hasActiveIdentity = hasActiveIdentity,
+        )
+    }
 }
 
 data class CreatePropertyRoleHttpRequest(
@@ -264,4 +316,17 @@ data class PropertyUserRoleAssignmentHttpResponse(
     val assigned: Boolean,
     val changed: Boolean,
     val replayed: Boolean,
+)
+
+data class PropertyAdministratorHttpResponse(
+    val tenantId: UUID,
+    val propertyId: UUID,
+    val propertyRoleId: UUID,
+    val userId: UUID,
+    val fullName: String,
+    val email: String,
+    val status: String,
+    val isActive: Boolean,
+    val lockedUntil: Instant?,
+    val hasActiveIdentity: Boolean,
 )

@@ -159,7 +159,7 @@ class Phase4MigrationUpgradeIntegrationTests @Autowired constructor(
                 .dataSource(url, postgres.username, postgres.password)
                 .load()
             flyway.migrate()
-            assertEquals("62", flyway.info().current().version.version)
+            assertEquals("63", flyway.info().current().version.version)
 
             DriverManager.getConnection(url, postgres.username, postgres.password).use { c ->
                 c.prepareStatement(
