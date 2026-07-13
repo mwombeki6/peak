@@ -307,6 +307,12 @@ class TenantPropertyRoleManagementService(
             }
             requireActiveTenantUser(command.tenantId, command.userId)
             requireAssignablePropertyRole(command.tenantId, command.propertyId, command.propertyRoleId)
+            requireActorCanManageTargetUserAtProperty(
+                tenantId = command.tenantId,
+                propertyId = command.propertyId,
+                actorUserId = actorUserId,
+                targetUserId = command.userId,
+            )
 
             val inserted = jdbcTemplate.update(
                 """
@@ -361,6 +367,12 @@ class TenantPropertyRoleManagementService(
             requireTenantUser(command.tenantId, command.userId, activeOnly = false)
             requireRevocablePropertyRole(command.tenantId, command.propertyRoleId)
             requireDelegablePropertyRole(command.tenantId, command.propertyId, command.propertyRoleId)
+            requireActorCanManageTargetUserAtProperty(
+                tenantId = command.tenantId,
+                propertyId = command.propertyId,
+                actorUserId = actorUserId,
+                targetUserId = command.userId,
+            )
 
             val deleted = jdbcTemplate.update(
                 """
@@ -640,6 +652,110 @@ class TenantPropertyRoleManagementService(
         if (!exists) {
             throw TenantUserRoleManagementNotFoundException("Property was not found for tenant")
         }
+    }
+
+    private fun requireActorCanManageTargetUserAtProperty(
+        tenantId: UUID,
+        propertyId: UUID,
+        actorUserId: UUID,
+        targetUserId: UUID,
+    ) {
+        val tenantSuperAdmin = jdbcTemplate.queryForObject(
+            "SELECT user_has_tenant_permission(?, ?, ?)",
+            Boolean::class.java,
+            actorUserId,
+            tenantId,
+            TENANT_ADMIN_ALL_PERMISSION,
+        ) == true
+        if (tenantSuperAdmin) {
+            return
+        }
+
+        val missingTenantPermissions = targetTenantPermissionCodes(tenantId, targetUserId)
+            .filterNot { permissionCode ->
+                jdbcTemplate.queryForObject(
+                    "SELECT user_has_tenant_permission(?, ?, ?)",
+                    Boolean::class.java,
+                    actorUserId,
+                    tenantId,
+                    permissionCode,
+                ) == true
+            }
+        require(missingTenantPermissions.isEmpty()) {
+            "Tenant user cannot manage a user with permissions the actor does not hold"
+        }
+
+        val missingPropertyPermissions = targetPropertyPermissionCodes(tenantId, propertyId, targetUserId)
+            .filterNot { permissionCode ->
+                jdbcTemplate.queryForObject(
+                    "SELECT user_has_property_permission(?, ?, ?, ?)",
+                    Boolean::class.java,
+                    actorUserId,
+                    tenantId,
+                    propertyId,
+                    permissionCode,
+                ) == true
+            }
+        require(missingPropertyPermissions.isEmpty()) {
+            "Tenant user cannot manage a user with permissions the actor does not hold"
+        }
+    }
+
+    private fun targetTenantPermissionCodes(
+        tenantId: UUID,
+        targetUserId: UUID,
+    ): List<String> {
+        return jdbcTemplate.queryForList(
+            """
+            SELECT DISTINCT p.code
+            FROM user_tenant_roles utr
+            JOIN tenant_roles tr
+              ON tr.id = utr.tenant_role_id
+             AND tr.tenant_id = utr.tenant_id
+            JOIN tenant_role_permissions trp
+              ON trp.tenant_role_id = tr.id
+            JOIN permissions p
+              ON p.id = trp.permission_id
+             AND p.tenant_id = utr.tenant_id
+            WHERE utr.tenant_id = ?
+              AND utr.user_id = ?
+              AND tr.is_active = true
+            ORDER BY p.code
+            """.trimIndent(),
+            String::class.java,
+            tenantId,
+            targetUserId,
+        ).filterNotNull()
+    }
+
+    private fun targetPropertyPermissionCodes(
+        tenantId: UUID,
+        propertyId: UUID,
+        targetUserId: UUID,
+    ): List<String> {
+        return jdbcTemplate.queryForList(
+            """
+            SELECT DISTINCT p.code
+            FROM user_property_roles upr
+            JOIN roles r
+              ON r.id = upr.role_id
+             AND r.tenant_id = upr.tenant_id
+            JOIN role_permissions rp
+              ON rp.role_id = r.id
+            JOIN permissions p
+              ON p.id = rp.permission_id
+             AND p.tenant_id = upr.tenant_id
+            WHERE upr.tenant_id = ?
+              AND upr.property_id = ?
+              AND upr.user_id = ?
+              AND r.is_active = true
+            ORDER BY p.code
+            """.trimIndent(),
+            String::class.java,
+            tenantId,
+            propertyId,
+            targetUserId,
+        ).filterNotNull()
     }
 
     private fun requireActiveTenantUser(tenantId: UUID, userId: UUID) {
