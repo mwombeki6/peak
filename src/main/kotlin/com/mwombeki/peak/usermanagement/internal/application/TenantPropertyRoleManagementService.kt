@@ -417,14 +417,14 @@ class TenantPropertyRoleManagementService(
     ): PropertyAccessBootstrapReceipt {
         return requireNotNull(
             transactionTemplate.execute {
-                val identity = requestContextHolder.current().identity
-                require(identity is RequestIdentity.Tenant) {
-                    "Tenant user identity is required"
+                val actorUserId = bindTenantActorWithPermission(
+                    tenantId = command.tenantId,
+                    permissionCode = PROPERTY_CREATION_PERMISSION,
+                    denialMessage = "Tenant user lacks property creation permission",
+                )
+                require(actorUserId == command.tenantUserId) {
+                    "Property administrator bootstrap can only assign the property creator"
                 }
-                require(identity.tenantId == command.tenantId) {
-                    "Requested tenant does not match identity"
-                }
-                databaseSessionContext.bind(identity)
                 requirePropertyBelongsToTenant(command.tenantId, command.propertyId)
                 requireActiveTenantUser(command.tenantId, command.tenantUserId)
 
@@ -1219,6 +1219,7 @@ class TenantPropertyRoleManagementService(
         private const val TENANT_PROPERTY_ACCESS_PERMISSION = "tenant.properties.manage_access"
         private const val TENANT_PROPERTY_ROLE_VIEW_PERMISSION = "tenant.properties.roles.view"
         private const val TENANT_ADMIN_ALL_PERMISSION = "tenant.admin.all"
+        private const val PROPERTY_CREATION_PERMISSION = "property.manage"
         private const val PROPERTY_ADMIN_ROLE_NAME = "Property Administrator"
 
         private val PROPERTY_ADMIN_PERMISSION_CODES = setOf(
