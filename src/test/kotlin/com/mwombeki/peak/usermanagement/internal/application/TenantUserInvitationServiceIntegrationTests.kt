@@ -259,6 +259,45 @@ class TenantUserInvitationServiceIntegrationTests {
     }
 
     @Test
+    fun rejectsInvitationForDisabledExistingTenantUser() {
+        val fixture = tenantFixture()
+        insertTenantFixture(fixture)
+        val existingUserId = UUID.randomUUID()
+        val email = "disabled-${fixture.tenantId}@example.com"
+        jdbcTemplate.update(
+            """
+            INSERT INTO users (id, tenant_id, full_name, email, status, is_active)
+            VALUES (?, ?, ?, ?, 'disabled', false)
+            """.trimIndent(),
+            existingUserId,
+            fixture.tenantId,
+            "Disabled User $existingUserId",
+            email,
+        )
+        requestContextHolder.set(tenantContext(fixture, "idem-invite-disabled-existing"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            invitationPort.inviteTenantUser(
+                InviteTenantUserCommand(
+                    tenantId = fixture.tenantId,
+                    email = email,
+                    tenantRoleId = fixture.roleId,
+                ),
+            )
+        }
+
+        assertEquals("A tenant user already exists for this email", error.message)
+        assertEquals(
+            0,
+            jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM tenant_user_invitations WHERE tenant_id = ?",
+                Int::class.java,
+                fixture.tenantId,
+            ),
+        )
+    }
+
+    @Test
     fun rejectsInvitationIntoSystemTenantRole() {
         val fixture = tenantFixture()
         insertTenantFixture(fixture)
@@ -481,6 +520,116 @@ class TenantUserInvitationServiceIntegrationTests {
         assertEquals("tenant.user.invitation.accepted", outbox["event_type"])
         assertEquals("platform", outbox["destination"])
         assertTrue(outbox["payload"].toString().contains(accepted.userId.toString()))
+    }
+
+    @Test
+    fun rejectsAcceptanceWhenTenantUserAppearsAfterInvitationCreation() {
+        val fixture = tenantFixture()
+        insertTenantFixture(fixture)
+        requestContextHolder.set(tenantContext(fixture, "idem-accept-existing-create"))
+        val invitation = invitationPort.inviteTenantUser(
+            InviteTenantUserCommand(
+                tenantId = fixture.tenantId,
+                email = "accept-existing-${fixture.tenantId}@example.com",
+                tenantRoleId = fixture.roleId,
+            ),
+        )
+        val existingUserId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO users (id, tenant_id, full_name, email, status, is_active)
+            VALUES (?, ?, ?, ?, 'locked', true)
+            """.trimIndent(),
+            existingUserId,
+            fixture.tenantId,
+            "Locked User $existingUserId",
+            invitation.email,
+        )
+
+        requestContextHolder.set(publicContext("idem-accept-existing"))
+        val error = assertFailsWith<TenantUserInvitationAcceptanceRejectedException> {
+            invitationPort.acceptTenantUserInvitation(
+                AcceptTenantUserInvitationCommand(
+                    invitationToken = requireNotNull(invitation.invitationToken),
+                    issuer = "https://issuer.example.com/realms/peak",
+                    subject = "existing-subject-${fixture.tenantId}",
+                    email = invitation.email,
+                ),
+            )
+        }
+
+        assertEquals("Invitation acceptance was rejected", error.message)
+        val existingUser = jdbcTemplate.queryForMap(
+            "SELECT status, is_active FROM users WHERE id = ?",
+            existingUserId,
+        )
+        assertEquals("locked", existingUser["status"])
+        assertEquals(true, existingUser["is_active"])
+        assertEquals(
+            0,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*)
+                FROM identity_links
+                WHERE tenant_id = ?
+                  AND user_id = ?
+                  AND revoked_at IS NULL
+                """.trimIndent(),
+                Int::class.java,
+                fixture.tenantId,
+                existingUserId,
+            ),
+        )
+        assertEquals(
+            "pending",
+            jdbcTemplate.queryForObject(
+                "SELECT status FROM tenant_user_invitations WHERE id = ?",
+                String::class.java,
+                invitation.invitationId,
+            ),
+        )
+    }
+
+    @Test
+    fun rejectsAcceptanceWhenInvitedRoleIsNoLongerActive() {
+        val fixture = tenantFixture()
+        insertTenantFixture(fixture)
+        requestContextHolder.set(tenantContext(fixture, "idem-accept-inactive-role-create"))
+        val invitation = invitationPort.inviteTenantUser(
+            InviteTenantUserCommand(
+                tenantId = fixture.tenantId,
+                email = "inactive-role-${fixture.tenantId}@example.com",
+                tenantRoleId = fixture.roleId,
+            ),
+        )
+        jdbcTemplate.update(
+            "UPDATE tenant_roles SET is_active = false WHERE tenant_id = ? AND id = ?",
+            fixture.tenantId,
+            fixture.roleId,
+        )
+
+        requestContextHolder.set(publicContext("idem-accept-inactive-role"))
+        val error = assertFailsWith<TenantUserInvitationAcceptanceRejectedException> {
+            invitationPort.acceptTenantUserInvitation(
+                AcceptTenantUserInvitationCommand(
+                    invitationToken = requireNotNull(invitation.invitationToken),
+                    issuer = "https://issuer.example.com/realms/peak",
+                    subject = "inactive-role-subject-${fixture.tenantId}",
+                    email = invitation.email,
+                ),
+            )
+        }
+
+        assertEquals("Invitation acceptance was rejected", error.message)
+        assertEquals(
+            0,
+            jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM users WHERE tenant_id = ? AND lower(email) = ?",
+                Int::class.java,
+                fixture.tenantId,
+                invitation.email,
+            ),
+        )
     }
 
     @Test

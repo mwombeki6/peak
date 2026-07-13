@@ -447,9 +447,10 @@ class TenantPropertyRoleManagementServiceIntegrationTests {
             EnsurePropertyAdministratorCommand(
                 tenantId = fixture.tenantId,
                 propertyId = fixture.propertyId,
-                tenantUserId = fixture.targetUserId,
+                tenantUserId = fixture.actorUserId,
             ),
         ).propertyRoleId
+        insertPropertyRoleAssignment(fixture, systemRoleId, fixture.targetUserId)
 
         requestContextHolder.set(tenantContext(fixture, "idem-property-role-system-assign"))
         val assignError = assertFailsWith<IllegalArgumentException> {
@@ -561,6 +562,49 @@ class TenantPropertyRoleManagementServiceIntegrationTests {
                 receipt.propertyRoleId,
             ) == true,
         )
+    }
+
+    @Test
+    fun rejectsPropertyAdministratorBootstrapForUserOtherThanCreator() {
+        val fixture = propertyRoleFixture()
+        insertPropertyRoleFixture(fixture)
+        requestContextHolder.set(tenantContext(fixture, "idem-property-bootstrap-other-user"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            propertyAccessBootstrapPort.ensurePropertyAdministrator(
+                EnsurePropertyAdministratorCommand(
+                    tenantId = fixture.tenantId,
+                    propertyId = fixture.propertyId,
+                    tenantUserId = fixture.targetUserId,
+                ),
+            )
+        }
+
+        assertEquals(
+            "Property administrator bootstrap can only assign the property creator",
+            error.message,
+        )
+        assertEquals(0, propertyRoleCount(fixture, "Property Administrator"))
+    }
+
+    @Test
+    fun rejectsPropertyAdministratorBootstrapWithoutPropertyCreationPermission() {
+        val fixture = propertyRoleFixture()
+        insertPropertyRoleFixture(fixture, grantTenantAdmin = false)
+        requestContextHolder.set(tenantContext(fixture, "idem-property-bootstrap-no-create"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            propertyAccessBootstrapPort.ensurePropertyAdministrator(
+                EnsurePropertyAdministratorCommand(
+                    tenantId = fixture.tenantId,
+                    propertyId = fixture.propertyId,
+                    tenantUserId = fixture.actorUserId,
+                ),
+            )
+        }
+
+        assertEquals("Tenant user lacks property creation permission", error.message)
+        assertEquals(0, propertyRoleCount(fixture, "Property Administrator"))
     }
 
     private fun targetCanAccessProperty(

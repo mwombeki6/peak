@@ -80,6 +80,8 @@ Mutating tenant role routes require `Idempotency-Key`. Successful dynamic role d
 
 Tenant user lifecycle and identity-link revocation routes also require `tenant.users.manage`. The actor cannot disable, lock, reactivate, unlock, or revoke identity links for a user whose effective tenant or property permissions exceed the actor's own effective permissions, unless the actor holds `tenant.admin.all`.
 
+Tenant invitations only create new tenant users. They cannot reactivate or relink an existing active, invited, locked, or disabled account; existing accounts must use the lifecycle and identity-link administration routes. Acceptance revalidates that the invited dynamic role is still active and assignable.
+
 ## Tenant-Managed Property Access API
 
 These routes are tenant-scoped and validate that the property belongs to the tenant. Reads require `tenant.properties.roles.view`; mutations and assignments require `tenant.properties.manage_access`.
@@ -95,7 +97,7 @@ These routes are tenant-scoped and validate that the property belongs to the ten
 | `POST` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/users/{userId}/roles/{propertyRoleId}/assign` | `tenant.properties.manage_access` | Assign a property role to a tenant user for one property. |
 | `POST` | `/api/v1/tenants/{tenantId}/properties/{propertyId}/users/{userId}/roles/{propertyRoleId}/revoke` | `tenant.properties.manage_access` | Revoke a property role from a tenant user for one property. |
 
-Mutating property access routes require `Idempotency-Key`, write audit entries, and enqueue platform outbox events. Dynamic property role creation, update, deactivation, assignment, and revocation cannot delegate or manage permissions above the actor's effective tenant/property permission set. System property roles cannot be assigned, revoked, or modified through these APIs; property creation uses an internal bootstrap port to assign the creator the system Property Administrator role.
+Mutating property access routes require `Idempotency-Key`, write audit entries, and enqueue platform outbox events. Dynamic property role creation, update, deactivation, assignment, and revocation cannot delegate or manage permissions above the actor's effective tenant/property permission set. System property roles cannot be assigned, revoked, or modified through these APIs; property creation uses an internal bootstrap port to assign the creator the system Property Administrator role. The bootstrap port requires the caller's tenant identity to match the creator and independently verifies `property.manage`.
 
 ## Production Rules
 

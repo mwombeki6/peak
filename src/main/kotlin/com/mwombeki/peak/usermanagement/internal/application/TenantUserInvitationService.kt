@@ -106,7 +106,7 @@ class TenantUserInvitationService(
     ): TenantUserInvitationReceipt {
         requireActiveTenantRole(command.tenantId, command.tenantRoleId)
         requireDelegableTenantInvitationRole(command.tenantId, command.tenantRoleId, actor)
-        requireNoActiveUserWithEmail(command.tenantId, command.email)
+        requireNoExistingUserWithEmail(command.tenantId, command.email)
 
         val invitationId = UUID.randomUUID()
         val token = InvitationTokens.newToken()
@@ -446,7 +446,7 @@ class TenantUserInvitationService(
         }
     }
 
-    private fun requireNoActiveUserWithEmail(
+    private fun requireNoExistingUserWithEmail(
         tenantId: UUID,
         email: String,
     ) {
@@ -458,7 +458,6 @@ class TenantUserInvitationService(
                 WHERE tenant_id = ?
                   AND lower(email) = ?
                   AND deleted_at IS NULL
-                  AND status IN ('active', 'invited')
             )
             """.trimIndent(),
             Boolean::class.java,
