@@ -263,6 +263,121 @@ class TenantPropertyRoleManagementServiceIntegrationTests {
     }
 
     @Test
+    fun rejectsAssigningPropertyRoleToUserWithTenantPermissionActorDoesNotHold() {
+        val fixture = propertyRoleFixture()
+        insertPropertyRoleFixture(fixture, grantTenantAdmin = false)
+        val actorViewerRoleId = insertPropertyRole(
+            fixture = fixture,
+            name = "Actor Assign Viewer ${fixture.propertyId}",
+            permissionCodes = listOf("property.view"),
+        )
+        insertPropertyRoleAssignment(fixture, actorViewerRoleId, fixture.actorUserId)
+        val roleId = insertPropertyRole(
+            fixture = fixture,
+            name = "Target Assign Viewer ${fixture.propertyId}",
+            permissionCodes = listOf("property.view"),
+        )
+        insertTargetTenantRole(fixture, "tenant.properties.roles.view")
+        requestContextHolder.set(tenantContext(fixture, "idem-property-role-target-tenant-assign"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            propertyRoleManagementPort.assignPropertyUserRole(
+                AssignPropertyUserRoleCommand(
+                    tenantId = fixture.tenantId,
+                    propertyId = fixture.propertyId,
+                    userId = fixture.targetUserId,
+                    propertyRoleId = roleId,
+                ),
+            )
+        }
+
+        assertEquals(
+            "Tenant user cannot manage a user with permissions the actor does not hold",
+            error.message,
+        )
+        assertEquals(0, propertyAssignmentCount(fixture, roleId))
+    }
+
+    @Test
+    fun rejectsRevokingPropertyRoleFromUserWithTenantPermissionActorDoesNotHold() {
+        val fixture = propertyRoleFixture()
+        insertPropertyRoleFixture(fixture, grantTenantAdmin = false)
+        val actorViewerRoleId = insertPropertyRole(
+            fixture = fixture,
+            name = "Actor Revoke Viewer ${fixture.propertyId}",
+            permissionCodes = listOf("property.view"),
+        )
+        insertPropertyRoleAssignment(fixture, actorViewerRoleId, fixture.actorUserId)
+        val roleId = insertPropertyRole(
+            fixture = fixture,
+            name = "Target Revoke Viewer ${fixture.propertyId}",
+            permissionCodes = listOf("property.view"),
+        )
+        insertPropertyRoleAssignment(fixture, roleId, fixture.targetUserId)
+        insertTargetTenantRole(fixture, "tenant.properties.roles.view")
+        requestContextHolder.set(tenantContext(fixture, "idem-property-role-target-tenant-revoke"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            propertyRoleManagementPort.revokePropertyUserRole(
+                RevokePropertyUserRoleCommand(
+                    tenantId = fixture.tenantId,
+                    propertyId = fixture.propertyId,
+                    userId = fixture.targetUserId,
+                    propertyRoleId = roleId,
+                ),
+            )
+        }
+
+        assertEquals(
+            "Tenant user cannot manage a user with permissions the actor does not hold",
+            error.message,
+        )
+        assertEquals(1, propertyAssignmentCount(fixture, roleId))
+    }
+
+    @Test
+    fun rejectsAssigningPropertyRoleToUserWithSamePropertyPermissionActorDoesNotHold() {
+        val fixture = propertyRoleFixture()
+        insertPropertyRoleFixture(fixture, grantTenantAdmin = false)
+        val actorViewerRoleId = insertPropertyRole(
+            fixture = fixture,
+            name = "Actor Property Viewer ${fixture.propertyId}",
+            permissionCodes = listOf("property.view"),
+        )
+        insertPropertyRoleAssignment(fixture, actorViewerRoleId, fixture.actorUserId)
+        val targetManagerRoleId = insertPropertyRole(
+            fixture = fixture,
+            name = "Target Existing Manager ${fixture.propertyId}",
+            permissionCodes = listOf("property.manage"),
+        )
+        insertPropertyRoleAssignment(fixture, targetManagerRoleId, fixture.targetUserId)
+        val roleId = insertPropertyRole(
+            fixture = fixture,
+            name = "Target New Viewer ${fixture.propertyId}",
+            permissionCodes = listOf("property.view"),
+        )
+        requestContextHolder.set(tenantContext(fixture, "idem-property-role-target-property-assign"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            propertyRoleManagementPort.assignPropertyUserRole(
+                AssignPropertyUserRoleCommand(
+                    tenantId = fixture.tenantId,
+                    propertyId = fixture.propertyId,
+                    userId = fixture.targetUserId,
+                    propertyRoleId = roleId,
+                ),
+            )
+        }
+
+        assertEquals(
+            "Tenant user cannot manage a user with permissions the actor does not hold",
+            error.message,
+        )
+        assertEquals(0, propertyAssignmentCount(fixture, roleId))
+        assertEquals(1, propertyAssignmentCount(fixture, targetManagerRoleId))
+    }
+
+    @Test
     fun rejectsUpdatingPropertyRoleWithCurrentPermissionActorDoesNotHold() {
         val fixture = propertyRoleFixture()
         insertPropertyRoleFixture(fixture, grantTenantAdmin = false)
@@ -565,6 +680,25 @@ class TenantPropertyRoleManagementServiceIntegrationTests {
             propertyRoleId,
             fixture.tenantId,
         )
+    }
+
+    private fun insertTargetTenantRole(
+        fixture: PropertyRoleFixture,
+        permissionCode: String,
+    ): UUID {
+        val roleId = UUID.randomUUID()
+        insertTenantRole(fixture.tenantId, roleId)
+        insertTenantRolePermission(roleId, fixture.tenantId, permissionCode)
+        jdbcTemplate.update(
+            """
+            INSERT INTO user_tenant_roles (user_id, tenant_id, tenant_role_id)
+            VALUES (?, ?, ?)
+            """.trimIndent(),
+            fixture.targetUserId,
+            fixture.tenantId,
+            roleId,
+        )
+        return roleId
     }
 
     private fun propertyAssignmentCount(
