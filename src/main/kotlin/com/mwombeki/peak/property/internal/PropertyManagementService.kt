@@ -477,7 +477,7 @@ class PropertyManagementService(
             ensureUpdated(rows, "Property record not found or access denied.")
             val status = propertyStatus(identity.tenantId, propertyId)
             PropertyMutationReceipt(propertyId, status, changed = true, replayed = false)
-                .also { receipt ->
+                .also {
                     recordPropertySideEffects(
                         tenantId = identity.tenantId,
                         propertyId = propertyId,
@@ -1610,7 +1610,7 @@ class PropertyManagementService(
                 resourceId = taxRateId,
                 changed = true,
                 replayed = false,
-            ).also { receipt ->
+            ).also {
                 recordPropertySideEffects(
                     tenantId = identity.tenantId,
                     propertyId = null,
@@ -1858,7 +1858,7 @@ class PropertyManagementService(
                 enabled = enabled,
                 changed = changed,
                 replayed = false,
-            ).also { receipt ->
+            ).also {
                 if (changed) {
                     recordPropertySideEffects(
                         tenantId = identity.tenantId,

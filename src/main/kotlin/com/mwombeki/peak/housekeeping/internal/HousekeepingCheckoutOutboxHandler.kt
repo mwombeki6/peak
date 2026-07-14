@@ -28,7 +28,7 @@ class HousekeepingCheckoutOutboxHandler(
         val propertyId = requireNotNull(event.propertyId)
         val stayId = requireNotNull(event.aggregateId)
         val roomId = UUID.fromString(
-            objectMapper.readTree(event.payload).get("roomId").asText(),
+            objectMapper.readTree(event.payload).path("roomId").asString(),
         )
         transactionTemplate.executeWithoutResult {
             val identity = RequestIdentity.Public(

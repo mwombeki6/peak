@@ -182,7 +182,7 @@ class PlatformAdministrationService(
             }
 
             PlatformUserMutationReceipt(id, status, changed = true, replayed = false)
-                .also { receipt ->
+                .also {
                     recordPlatformSideEffects(
                         action = "platform.users.created",
                         resourceType = "platform_users",
@@ -376,7 +376,7 @@ class PlatformAdministrationService(
             replacePlatformRolePermissions(id, permissionIds)
 
             PlatformRoleMutationReceipt(id, isActive = true, changed = true, replayed = false)
-                .also { receipt ->
+                .also {
                     recordPlatformSideEffects(
                         action = "platform.roles.created",
                         resourceType = "platform_roles",
@@ -787,7 +787,7 @@ class PlatformAdministrationService(
                     revokedAt = null,
                     changed = true,
                     replayed = false,
-                ).also { receipt ->
+                ).also {
                     recordPlatformSideEffects(
                         action = "platform.users.identity.linked",
                         resourceType = "identity_links",
@@ -1065,10 +1065,6 @@ class PlatformAdministrationService(
     }
 
     private fun currentPlatformActorId(): UUID {
-        return requirePlatformIdentity()
-    }
-
-    private fun requirePlatformIdentity(): UUID {
         return when (val identity = requestContextHolder.current().identity) {
             is RequestIdentity.Platform -> identity.platformUserId
             is RequestIdentity.Support -> identity.platformUserId

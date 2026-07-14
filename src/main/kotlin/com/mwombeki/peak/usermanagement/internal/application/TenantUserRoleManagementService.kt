@@ -253,7 +253,7 @@ class TenantUserRoleManagementService(
                 isActive = true,
                 changed = true,
                 replayed = false,
-            ).also { receipt ->
+            ).also {
                 recordRoleDefinitionSideEffects(
                     tenantId = command.tenantId,
                     tenantRoleId = roleId,

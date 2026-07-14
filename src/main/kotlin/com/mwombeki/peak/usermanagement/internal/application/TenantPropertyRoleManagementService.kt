@@ -113,7 +113,7 @@ class TenantPropertyRoleManagementService(
                 isActive = true,
                 changed = true,
                 replayed = false,
-            ).also { receipt ->
+            ).also {
                 recordPropertyRoleSideEffects(
                     tenantId = command.tenantId,
                     propertyId = command.propertyId,
@@ -403,7 +403,7 @@ class TenantPropertyRoleManagementService(
                 assigned = true,
                 changed = inserted,
                 replayed = false,
-            ).also { receipt ->
+            ).also {
                 if (inserted) {
                     recordPropertyAssignmentSideEffects(
                         tenantId = command.tenantId,
@@ -465,7 +465,7 @@ class TenantPropertyRoleManagementService(
                 assigned = false,
                 changed = deleted,
                 replayed = false,
-            ).also { receipt ->
+            ).also {
                 if (deleted) {
                     recordPropertyAssignmentSideEffects(
                         tenantId = command.tenantId,

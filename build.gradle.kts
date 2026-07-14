@@ -162,8 +162,10 @@ dependencyManagement {
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_25)
+        allWarningsAsErrors.set(true)
 
         freeCompilerArgs.addAll(
+            "-Wextra",
             "-Xjsr305=strict",
             "-Xannotation-default-target=param-property"
         )
