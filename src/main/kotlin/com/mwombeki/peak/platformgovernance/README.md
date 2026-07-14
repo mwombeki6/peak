@@ -7,11 +7,11 @@ Platform governance owns platform-operator actions against tenant accounts. It d
 - `POST /api/v1/platform/tenants/{id}/approve`
 - `POST /api/v1/platform/tenants/{id}/suspend`
 
-These routes are covered by the canonical `module_access_matrix` pattern `/api/platform/tenants*` after API version normalization.
+These routes have exact `module_access_matrix` contracts with a named `tenantId` after API version normalization. The broader tenant-management fallback does not decide their authorization.
 
 ## Security
 
-Route authorization is enforced by the shared request context plus the user-management route guard. Platform governance requires a platform or support identity with the `platform.tenants.manage` permission.
+Route authorization is enforced by the shared request context plus the user-management route guard. Platform governance requires `platform.tenants.manage`. A support identity additionally needs the exact active, approved break-glass session for the target tenant; it cannot use global platform routes or a different session belonging to the same operator.
 
 The service binds `DatabaseSessionContext` before reading or writing RLS-protected tables.
 

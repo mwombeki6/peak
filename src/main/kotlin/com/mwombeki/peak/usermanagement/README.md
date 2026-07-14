@@ -28,6 +28,8 @@ User management owns authorization, external identity resolution, platform admin
 - Public property routes are resolved through `resolve_public_property_scope`; public headers are not trusted.
 - Staff and platform guards bind database session context before permission checks; public module guards stay unbound.
 - Route guard rules are cached briefly and refreshed from `module_access_matrix`.
+- Support identities are never treated as unrestricted platform identities. They may use only tenant-targeted platform routes whose `tenantId`, exact support-session id, permission, approval state, and active time window all match `platform_break_glass_access`.
+- Equally specific route rows must resolve to one authorization contract. Conflicting permissions, scopes, modules, or guard modes fail startup validation and fail closed at request time.
 
 ## Platform Administration API
 
@@ -130,3 +132,4 @@ Administrator assignment is the single controlled exception for a system-role as
 10. Keep platform OIDC identity links in `identity_links`; do not add provider-specific identity tables.
 11. Never return invitation bearer tokens from production administration APIs;
     deliver the encrypted token only through the invitation outbox handler.
+12. Keep one effective permission contract per HTTP method and route pattern; migrate grants before retiring a legacy permission row.

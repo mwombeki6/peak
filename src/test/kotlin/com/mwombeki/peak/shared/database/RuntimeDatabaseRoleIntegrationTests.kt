@@ -186,6 +186,46 @@ class RuntimeDatabaseRoleIntegrationTests {
     }
 
     @Test
+    fun onlyPlatformRuntimeCanEvaluateExactSupportSessionGrant() {
+        val platformFixture = insertPlatformFixture()
+        val tenantFixture = insertTenantFixture(status = "active")
+        val supportSessionId = insertActiveSupportGrant(
+            platformUserId = platformFixture.platformUserId,
+            tenantId = tenantFixture.tenantId,
+            actionCode = "platform.tenants.manage",
+        )
+
+        val allowed = inTransaction {
+            setRole(PLATFORM_ROLE)
+            bindPlatform(platformFixture.platformUserId)
+            jdbcTemplate.queryForObject(
+                "SELECT can_support_session_access_tenant(?, ?, ?, ?)",
+                Boolean::class.java,
+                platformFixture.platformUserId,
+                supportSessionId,
+                tenantFixture.tenantId,
+                "platform.tenants.manage",
+            )
+        }
+        assertEquals(true, allowed)
+
+        assertFailsWith<DataAccessException> {
+            inTransaction {
+                setRole(API_ROLE)
+                bindPlatform(platformFixture.platformUserId)
+                jdbcTemplate.queryForObject(
+                    "SELECT can_support_session_access_tenant(?, ?, ?, ?)",
+                    Boolean::class.java,
+                    platformFixture.platformUserId,
+                    supportSessionId,
+                    tenantFixture.tenantId,
+                    "platform.tenants.manage",
+                )
+            }
+        }
+    }
+
+    @Test
     fun platformRoleCanPersistAdministrationReliabilitySideEffects() {
         val platformFixture = insertPlatformFixture()
         val idempotencyId = UUID.randomUUID()
@@ -572,6 +612,42 @@ class RuntimeDatabaseRoleIntegrationTests {
         )
 
         return PlatformFixture(platformUserId)
+    }
+
+    private fun insertActiveSupportGrant(
+        platformUserId: UUID,
+        tenantId: UUID,
+        actionCode: String,
+    ): UUID {
+        val supportSessionId = UUID.randomUUID()
+        val approver = insertPlatformFixture()
+        jdbcTemplate.update(
+            """
+            INSERT INTO platform_break_glass_access (
+                id,
+                platform_user_id,
+                tenant_id,
+                action_code,
+                reason,
+                status,
+                approved_by,
+                approved_at,
+                activated_at,
+                starts_at,
+                expires_at
+            ) VALUES (
+                ?, ?, ?, ?, 'Runtime role support grant', 'active', ?,
+                now(), now(), now() - interval '1 minute',
+                now() + interval '1 hour'
+            )
+            """.trimIndent(),
+            supportSessionId,
+            platformUserId,
+            tenantId,
+            actionCode,
+            approver.platformUserId,
+        )
+        return supportSessionId
     }
 
     private fun insertBookingSession(

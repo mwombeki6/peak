@@ -23,6 +23,34 @@ class RouteMatrixStartupValidator(
         }
 
         val rules = routeAccessRuleRepository.findEnabledRules()
+        val ambiguous = rules
+            .groupBy { rule ->
+                RouteKey(rule.httpMethod.uppercase(), rule.apiPattern)
+            }
+            .mapNotNull { (key, matchingRules) ->
+                val contracts = matchingRules
+                    .map { rule ->
+                        AccessContract(
+                            moduleId = rule.moduleId,
+                            permissionCode = rule.permissionCode,
+                            routeScope = rule.routeScope.name,
+                            guardMode = rule.guardMode.name,
+                        )
+                    }
+                    .distinct()
+                if (contracts.size > 1) key to contracts else null
+            }
+            .sortedWith(
+                compareBy<Pair<RouteKey, List<AccessContract>>> { it.first.apiPattern }
+                    .thenBy { it.first.httpMethod },
+            )
+        check(ambiguous.isEmpty()) {
+            "Ambiguous module_access_matrix contracts: " +
+                ambiguous.joinToString(", ") { (key, contracts) ->
+                    "${key.httpMethod} ${key.apiPattern} -> ${contracts.joinToString(" | ")}"
+                }
+        }
+
         val missing = handlerMappings
             .flatMap { mapping ->
                 mapping.handlerMethods.keys.flatMap { info ->
@@ -112,4 +140,16 @@ class RouteMatrixStartupValidator(
     private companion object {
         val API_VERSION_PATTERN = Regex("^/api/v\\d+(/.*)$")
     }
+
+    private data class RouteKey(
+        val httpMethod: String,
+        val apiPattern: String,
+    )
+
+    private data class AccessContract(
+        val moduleId: String,
+        val permissionCode: String?,
+        val routeScope: String,
+        val guardMode: String,
+    )
 }

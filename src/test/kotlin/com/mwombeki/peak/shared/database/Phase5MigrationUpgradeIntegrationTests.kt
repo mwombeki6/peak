@@ -44,6 +44,7 @@ class Phase5MigrationUpgradeIntegrationTests @Autowired constructor(
             val chargeId = UUID.randomUUID()
             val legacyPropertyAdminRoleId = UUID.randomUUID()
             val legacyTenantAdminRoleId = UUID.randomUUID()
+            val legacyReportPermissionId = UUID.randomUUID()
             val legacyPlatformRootRoleId = UUID.randomUUID()
             val fullPlatformAuthorityRoleId = UUID.randomUUID()
             DriverManager.getConnection(
@@ -134,6 +135,37 @@ class Phase5MigrationUpgradeIntegrationTests @Autowired constructor(
                     )
                     sql.execute(
                         """
+                        INSERT INTO permissions (
+                            id, tenant_id, code, description
+                        ) VALUES (
+                            '$legacyReportPermissionId', '$tenantId',
+                            'reports.manual_generate',
+                            'Legacy manual report generation'
+                        )
+                        """.trimIndent(),
+                    )
+                    sql.execute(
+                        """
+                        INSERT INTO tenant_role_permissions (
+                            tenant_role_id, permission_id
+                        )
+                        SELECT '$legacyTenantAdminRoleId', id
+                        FROM permissions
+                        WHERE tenant_id = '$tenantId'
+                          AND code = 'reports.manual_generate'
+                        """.trimIndent(),
+                    )
+                    sql.execute(
+                        """
+                        INSERT INTO role_permissions (role_id, permission_id)
+                        SELECT '$legacyPropertyAdminRoleId', id
+                        FROM permissions
+                        WHERE tenant_id = '$tenantId'
+                          AND code = 'reports.manual_generate'
+                        """.trimIndent(),
+                    )
+                    sql.execute(
+                        """
                         INSERT INTO platform_roles (
                             id, name, code, is_system, is_active
                         ) VALUES (
@@ -172,7 +204,7 @@ class Phase5MigrationUpgradeIntegrationTests @Autowired constructor(
                 .dataSource(url, postgres.username, postgres.password)
                 .load()
             flyway.migrate()
-            assertEquals("65", flyway.info().current().version.version)
+            assertEquals("66", flyway.info().current().version.version)
 
             DriverManager.getConnection(
                 url,
@@ -247,6 +279,94 @@ class Phase5MigrationUpgradeIntegrationTests @Autowired constructor(
                 ).use { rows ->
                     rows.next()
                     assertEquals(3, rows.getInt(1))
+                }
+                connection.prepareStatement(
+                    """
+                    SELECT count(*)
+                    FROM tenant_role_permissions grant_row
+                    JOIN permissions permission
+                      ON permission.id = grant_row.permission_id
+                    WHERE grant_row.tenant_role_id = ?
+                      AND permission.code = 'reports.generate'
+                    """.trimIndent(),
+                ).use {
+                    it.setObject(1, legacyTenantAdminRoleId)
+                    it.executeQuery().use { rows ->
+                        rows.next()
+                        assertEquals(1, rows.getInt(1))
+                    }
+                }
+                connection.prepareStatement(
+                    """
+                    SELECT count(*)
+                    FROM role_permissions grant_row
+                    JOIN permissions permission
+                      ON permission.id = grant_row.permission_id
+                    WHERE grant_row.role_id = ?
+                      AND permission.code = 'reports.generate'
+                    """.trimIndent(),
+                ).use {
+                    it.setObject(1, legacyPropertyAdminRoleId)
+                    it.executeQuery().use { rows ->
+                        rows.next()
+                        assertEquals(1, rows.getInt(1))
+                    }
+                }
+                connection.createStatement().executeQuery(
+                    """
+                    SELECT count(*)
+                    FROM module_access_matrix
+                    WHERE http_method = 'POST'
+                      AND api_pattern = '/api/properties/:propertyId/reports/:reportCode/runs'
+                      AND is_enabled_by_default = true
+                      AND permission_code = 'reports.generate'
+                    """.trimIndent(),
+                ).use { rows ->
+                    rows.next()
+                    assertEquals(1, rows.getInt(1))
+                }
+                connection.createStatement().executeQuery(
+                    """
+                    SELECT count(*)
+                    FROM module_access_matrix
+                    WHERE is_enabled_by_default = true
+                      AND screen_key IN (
+                          'reports.manual_generate.tenant',
+                          'reports.manual_generate.property',
+                          'reports.subscriptions.tenant.manage',
+                          'reports.subscriptions.property.manage',
+                          'reports.delivery.retry'
+                      )
+                    """.trimIndent(),
+                ).use { rows ->
+                    rows.next()
+                    assertEquals(0, rows.getInt(1))
+                }
+                connection.createStatement().executeQuery(
+                    """
+                    SELECT count(*)
+                    FROM module_access_matrix
+                    WHERE screen_key IN (
+                        'platform.tenants.approve',
+                        'platform.tenants.suspend'
+                    )
+                      AND is_enabled_by_default = true
+                      AND api_pattern LIKE '/api/platform/tenants/:tenantId/%'
+                    """.trimIndent(),
+                ).use { rows ->
+                    rows.next()
+                    assertEquals(2, rows.getInt(1))
+                }
+                connection.createStatement().executeQuery(
+                    """
+                    SELECT count(*)
+                    FROM pg_proc
+                    WHERE proname = 'can_support_session_access_tenant'
+                      AND pronargs = 4
+                    """.trimIndent(),
+                ).use { rows ->
+                    rows.next()
+                    assertEquals(1, rows.getInt(1))
                 }
                 connection.createStatement().executeQuery(
                     """

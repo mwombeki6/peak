@@ -4,7 +4,8 @@
         allowedDependencies = {
                 "audit::api",
                 "reliability::api",
-                "shared::context"
+                "shared::context",
+                "usermanagement::api"
         }
 )
 package com.mwombeki.peak.tenantmanagement;

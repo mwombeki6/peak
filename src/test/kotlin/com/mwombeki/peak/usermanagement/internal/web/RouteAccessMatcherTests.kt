@@ -6,6 +6,7 @@ import java.util.UUID
 import com.mwombeki.peak.shared.context.RequestIdentity
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 
 class RouteAccessMatcherTests {
@@ -136,6 +137,69 @@ class RouteAccessMatcherTests {
         assertEquals(RouteScope.TENANT, request.routeScope)
         assertEquals(tenantId, request.tenantId)
         assertEquals(propertyId, request.propertyId)
+    }
+
+    @Test
+    fun rejectsEquallySpecificRoutesWithDifferentAuthorizationContracts() {
+        val tenantId = UUID.fromString("11111111-1111-1111-1111-111111111111")
+        val userId = UUID.fromString("22222222-2222-2222-2222-222222222222")
+        val propertyId = UUID.fromString("33333333-3333-3333-3333-333333333333")
+
+        val error = assertFailsWith<RouteAccessConfigurationException> {
+            matcher.match(
+                httpMethod = "POST",
+                requestPath = "/api/v1/properties/$propertyId/reports/daily/runs",
+                identity = RequestIdentity.Tenant(tenantId, userId),
+                rules = listOf(
+                    RouteAccessRule(
+                        moduleId = "reports",
+                        httpMethod = "POST",
+                        apiPattern = "/api/properties/:propertyId/reports/:reportCode/runs",
+                        permissionCode = "reports.generate",
+                        routeScope = RouteScope.PROPERTY,
+                        guardMode = GuardMode.STAFF_PERMISSION,
+                    ),
+                    RouteAccessRule(
+                        moduleId = "reports",
+                        httpMethod = "POST",
+                        apiPattern = "/api/properties/:propertyId/reports/:reportCode/runs",
+                        permissionCode = "reports.manual_generate",
+                        routeScope = RouteScope.PROPERTY,
+                        guardMode = GuardMode.STAFF_PERMISSION,
+                    ),
+                ),
+            )
+        }
+
+        assertEquals(
+            "Ambiguous route access contracts for POST /api/properties/$propertyId/reports/daily/runs",
+            error.message,
+        )
+    }
+
+    @Test
+    fun permitsDuplicateMetadataRowsWhenTheirAuthorizationContractIsIdentical() {
+        val tenantId = UUID.fromString("11111111-1111-1111-1111-111111111111")
+        val userId = UUID.fromString("22222222-2222-2222-2222-222222222222")
+        val propertyId = UUID.fromString("33333333-3333-3333-3333-333333333333")
+        val rule = RouteAccessRule(
+            moduleId = "reports",
+            httpMethod = "GET",
+            apiPattern = "/api/properties/:propertyId/report-subscriptions*",
+            permissionCode = "reports.subscriptions.view",
+            routeScope = RouteScope.PROPERTY,
+            guardMode = GuardMode.STAFF_PERMISSION,
+        )
+
+        val request = matcher.match(
+            httpMethod = "GET",
+            requestPath = "/api/v1/properties/$propertyId/report-subscriptions",
+            identity = RequestIdentity.Tenant(tenantId, userId),
+            rules = listOf(rule, rule),
+        )
+
+        requireNotNull(request)
+        assertEquals("reports.subscriptions.view", request.permissionCode)
     }
 
     @Test

@@ -14,7 +14,7 @@ These routes require a platform identity and the corresponding platform tenant p
 | `POST` | `/api/v1/platform/tenants/{id}/administrators` | `platform.users.manage` | Provision an initial or recovery tenant administrator and OIDC identity. |
 | `POST` | `/api/v1/platform/tenants/{id}/profile/verify` | `platform.tenants.verify` | Mark a reviewed business profile as verified. |
 
-The platform routes are covered by `module_access_matrix` after API version normalization. Tenant detail reads have an exact `GET` route contract so platform read-only users do not need tenant lifecycle mutation permission.
+The platform routes are covered by `module_access_matrix` after API version normalization. Tenant detail reads have an exact `GET` route contract so platform read-only users do not need tenant lifecycle mutation permission. A support identity must present the exact active, approved break-glass session for the same tenant and route permission; a platform identity is not subject to support-session scope.
 
 Tenant registration and administrator provisioning are separate idempotent operations. Provisioning creates or reuses an active tenant user, ensures the immutable `tenant_admin` role and complete permission grant, assigns the role, enables the `tenant_admin` module, and binds the DB-backed OIDC link atomically. The same platform operation is the supervised recovery path when every existing tenant administrator has lost access.
 
@@ -43,7 +43,7 @@ Tenant readiness is computed from real state. A tenant is ready only when:
 
 ## Security
 
-The controllers rely on the request-context and route-guard pipeline. Platform services require a platform or support identity. Tenant administration services require a tenant identity whose tenant id matches the route, then bind `DatabaseSessionContext` before RLS-protected database access.
+The controllers rely on the request-context and route-guard pipeline. Platform services require a platform identity or an exact tenant-scoped support session authorized through the User Management API. Tenant administration services require a tenant identity whose tenant id matches the route, then bind `DatabaseSessionContext` before RLS-protected database access.
 
 Tenant module changes are idempotent, audited, and outbox-backed. Module ids are validated against active `module_catalog` rows, and disabled or mismatched tenant identities are rejected before mutation.
 

@@ -376,6 +376,145 @@ class JdbcAuthorizationPortIntegrationTests {
     }
 
     @Test
+    fun deniesSupportIdentityOnGlobalPlatformRoute() {
+        val fixture = platformFixture()
+        val tenantId = UUID.randomUUID()
+        val planId = UUID.randomUUID()
+        val supportSessionId = UUID.randomUUID()
+        insertPlatformFixture(fixture)
+        insertPlan(planId)
+        insertTenant(tenantId, planId)
+        insertActiveSupportGrant(
+            platformUserId = fixture.platformUserId,
+            tenantId = tenantId,
+            actionCode = "platform.tenants.manage",
+            supportSessionId = supportSessionId,
+        )
+
+        val decision = requireNotNull(
+            transactionTemplate.execute {
+                requestContextHolder.set(
+                    requestContext(
+                        RequestIdentity.Support(
+                            platformUserId = fixture.platformUserId,
+                            tenantId = tenantId,
+                            supportSessionId = supportSessionId,
+                            correlationId = "corr-auth-support-global-denied",
+                        ),
+                    ),
+                )
+
+                authorizationPort.authorize(
+                    RouteAuthorizationRequest(
+                        moduleId = "platform_admin",
+                        guardMode = GuardMode.PLATFORM_PERMISSION,
+                        routeScope = RouteScope.PLATFORM,
+                        permissionCode = "platform.tenants.manage",
+                    ),
+                )
+            },
+        )
+
+        assertFalse(decision.allowed)
+        assertEquals(
+            "Support identity requires a tenant-targeted platform route",
+            decision.reason,
+        )
+    }
+
+    @Test
+    fun deniesSupportIdentityWhenClaimedSessionIsNotTheApprovedGrant() {
+        val fixture = platformFixture()
+        val tenantId = UUID.randomUUID()
+        val planId = UUID.randomUUID()
+        val approvedSessionId = UUID.randomUUID()
+        insertPlatformFixture(fixture)
+        insertPlan(planId)
+        insertTenant(tenantId, planId)
+        insertActiveSupportGrant(
+            platformUserId = fixture.platformUserId,
+            tenantId = tenantId,
+            actionCode = "platform.tenants.manage",
+            supportSessionId = approvedSessionId,
+        )
+
+        val decision = requireNotNull(
+            transactionTemplate.execute {
+                requestContextHolder.set(
+                    requestContext(
+                        RequestIdentity.Support(
+                            platformUserId = fixture.platformUserId,
+                            tenantId = tenantId,
+                            supportSessionId = UUID.randomUUID(),
+                            correlationId = "corr-auth-support-session-denied",
+                        ),
+                    ),
+                )
+
+                authorizationPort.authorize(
+                    RouteAuthorizationRequest(
+                        moduleId = "platform_admin",
+                        guardMode = GuardMode.PLATFORM_PERMISSION,
+                        routeScope = RouteScope.PLATFORM,
+                        permissionCode = "platform.tenants.manage",
+                        tenantId = tenantId,
+                    ),
+                )
+            },
+        )
+
+        assertFalse(decision.allowed)
+        assertEquals(
+            "Active approved support break-glass access is required for tenant operation",
+            decision.reason,
+        )
+    }
+
+    @Test
+    fun allowsSupportIdentityOnlyForItsExactActiveSessionTenantAndPermission() {
+        val fixture = platformFixture()
+        val tenantId = UUID.randomUUID()
+        val planId = UUID.randomUUID()
+        val supportSessionId = UUID.randomUUID()
+        insertPlatformFixture(fixture)
+        insertPlan(planId)
+        insertTenant(tenantId, planId)
+        insertActiveSupportGrant(
+            platformUserId = fixture.platformUserId,
+            tenantId = tenantId,
+            actionCode = "platform.tenants.manage",
+            supportSessionId = supportSessionId,
+        )
+
+        val decision = requireNotNull(
+            transactionTemplate.execute {
+                requestContextHolder.set(
+                    requestContext(
+                        RequestIdentity.Support(
+                            platformUserId = fixture.platformUserId,
+                            tenantId = tenantId,
+                            supportSessionId = supportSessionId,
+                            correlationId = "corr-auth-support-allowed",
+                        ),
+                    ),
+                )
+
+                authorizationPort.authorize(
+                    RouteAuthorizationRequest(
+                        moduleId = "platform_admin",
+                        guardMode = GuardMode.PLATFORM_PERMISSION,
+                        routeScope = RouteScope.PLATFORM,
+                        permissionCode = "platform.tenants.manage",
+                        tenantId = tenantId,
+                    ),
+                )
+            },
+        )
+
+        assertTrue(decision.allowed)
+    }
+
+    @Test
     fun deniesTenantIdentityOnPlatformGuard() {
         val fixture = tenantFixture("tenant.profile.manage")
 
@@ -755,6 +894,42 @@ class JdbcAuthorizationPortIntegrationTests {
             id,
             "Platform User $id",
             "platform-auth-$id@example.com",
+        )
+    }
+
+    private fun insertActiveSupportGrant(
+        platformUserId: UUID,
+        tenantId: UUID,
+        actionCode: String,
+        supportSessionId: UUID,
+    ) {
+        val approverId = UUID.randomUUID()
+        insertPlatformUser(approverId)
+        jdbcTemplate.update(
+            """
+            INSERT INTO platform_break_glass_access (
+                id,
+                platform_user_id,
+                tenant_id,
+                action_code,
+                reason,
+                status,
+                approved_by,
+                approved_at,
+                activated_at,
+                starts_at,
+                expires_at
+            ) VALUES (
+                ?, ?, ?, ?, 'Authorization integration test', 'active',
+                ?, now(), now(), now() - interval '1 minute',
+                now() + interval '1 hour'
+            )
+            """.trimIndent(),
+            supportSessionId,
+            platformUserId,
+            tenantId,
+            actionCode,
+            approverId,
         )
     }
 
