@@ -54,9 +54,7 @@ class RouteMatrixStartupValidator(
         val missing = handlerMappings
             .flatMap { mapping ->
                 mapping.handlerMethods.keys.flatMap { info ->
-                    val paths = info.pathPatternsCondition?.patternValues
-                        ?: info.patternsCondition?.patterns
-                        ?: emptySet()
+                    val paths = info.patternValues
                     val methods = info.methodsCondition.methods
                         .takeIf { it.isNotEmpty() }
                         ?: RequestMethod.entries.toSet()
