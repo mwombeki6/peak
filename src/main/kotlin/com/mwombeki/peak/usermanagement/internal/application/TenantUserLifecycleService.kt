@@ -69,6 +69,7 @@ class TenantUserLifecycleService(
             "Tenant user cannot change own lifecycle state"
         }
         databaseSessionContext.bind(requestContextHolder.current().identity)
+        lockTenantForAdministratorContinuity(command.tenantId)
 
         val reservation = idempotencyPort.reserve(
             IdempotencyCommand(
@@ -111,6 +112,7 @@ class TenantUserLifecycleService(
         val after = before.transition(command.action)
         val changed = before != after
         if (changed && command.action.removesOperationalAccess) {
+            requireTenantAdministratorContinuity(command.tenantId, command.userId)
             lockAndRequirePropertyAdministratorContinuity(command.tenantId, command.userId)
         }
 
@@ -156,6 +158,7 @@ class TenantUserLifecycleService(
             "Tenant user cannot revoke own identity link"
         }
         databaseSessionContext.bind(requestContextHolder.current().identity)
+        lockTenantForAdministratorContinuity(command.tenantId)
 
         val reservation = idempotencyPort.reserve(
             IdempotencyCommand(
@@ -200,6 +203,7 @@ class TenantUserLifecycleService(
             ?: throw TenantUserLifecycleNotFoundException("Tenant user identity link was not found")
         val changed = before.revokedAt == null
         if (changed && !hasAnotherActiveIdentityLink(command)) {
+            requireTenantAdministratorContinuity(command.tenantId, command.userId)
             lockAndRequirePropertyAdministratorContinuity(command.tenantId, command.userId)
         }
 
@@ -416,6 +420,81 @@ class TenantUserLifecycleService(
             command.userId,
             command.identityLinkId,
         ) == true
+    }
+
+    private fun lockTenantForAdministratorContinuity(tenantId: UUID) {
+        val tenant = jdbcTemplate.query(
+            """
+            SELECT id
+            FROM tenants
+            WHERE id = ?
+              AND deleted_at IS NULL
+            FOR UPDATE
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("id", UUID::class.java) },
+            tenantId,
+        ).singleOrNull()
+        if (tenant == null) {
+            throw TenantUserLifecycleNotFoundException("Tenant was not found")
+        }
+    }
+
+    private fun requireTenantAdministratorContinuity(
+        tenantId: UUID,
+        targetUserId: UUID,
+    ) {
+        val tenantRoleId = jdbcTemplate.query(
+            """
+            SELECT tr.id
+            FROM user_tenant_roles utr
+            JOIN tenant_roles tr
+              ON tr.id = utr.tenant_role_id
+             AND tr.tenant_id = utr.tenant_id
+            WHERE utr.tenant_id = ?
+              AND utr.user_id = ?
+              AND tr.code = ?
+              AND tr.is_system = true
+              AND tr.is_active = true
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("id", UUID::class.java) },
+            tenantId,
+            targetUserId,
+            TENANT_ADMIN_ROLE_CODE,
+        ).singleOrNull() ?: return
+
+        val anotherAdministratorExists = jdbcTemplate.queryForObject(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM user_tenant_roles utr
+                JOIN users u
+                  ON u.id = utr.user_id
+                 AND u.tenant_id = utr.tenant_id
+                WHERE utr.tenant_id = ?
+                  AND utr.tenant_role_id = ?
+                  AND utr.user_id <> ?
+                  AND u.status = 'active'
+                  AND u.is_active = true
+                  AND u.deleted_at IS NULL
+                  AND (u.locked_until IS NULL OR u.locked_until <= now())
+                  AND EXISTS (
+                      SELECT 1
+                      FROM identity_links il
+                      WHERE il.tenant_id = u.tenant_id
+                        AND il.user_id = u.id
+                        AND il.identity_mode = 'tenant'
+                        AND il.revoked_at IS NULL
+                  )
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            tenantId,
+            tenantRoleId,
+            targetUserId,
+        ) == true
+        require(anotherAdministratorExists) {
+            "Tenant administrator access cannot be removed without another active administrator"
+        }
     }
 
     private fun lockAndRequirePropertyAdministratorContinuity(
@@ -707,6 +786,7 @@ class TenantUserLifecycleService(
 
     private companion object {
         private const val TENANT_ADMIN_ALL_PERMISSION = "tenant.admin.all"
+        private const val TENANT_ADMIN_ROLE_CODE = "tenant_admin"
         private const val PROPERTY_ADMIN_ROLE_NAME = "Property Administrator"
     }
 }

@@ -449,7 +449,7 @@ class PlatformAdministrationControllerIntegrationTests {
     }
 
     @Test
-    fun provisionsFirstTenantAdministratorAndVerifiesProfileWithoutManualTenantSql() {
+    fun provisionsInitialAndRecoveryTenantAdministratorsWithoutManualTenantSql() {
         val actorId = insertPlatformActorWithPermissions(
             "platform.security.manage",
             "platform.tenants.manage",
@@ -491,6 +491,51 @@ class PlatformAdministrationControllerIntegrationTests {
             .andExpect(status().isCreated)
             .andExpect(jsonPath("$.tenantUserId").value(tenantUserId.toString()))
             .andExpect(jsonPath("$.replayed").value(true))
+
+        val recoverySubject = "tenant-recovery-admin-${UUID.randomUUID()}"
+        val recoveryResult = mockMvc.perform(
+            post("/api/v1/platform/tenants/$tenantId/administrators")
+                .platform(
+                    actorId,
+                    "corr-tenant-admin-recovery",
+                    "idem-tenant-admin-recovery",
+                )
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "fullName": "Recovery Tenant Administrator",
+                      "email": "recovery-admin-$tenantId@example.com",
+                      "issuer": "https://keycloak.example.com/realms/peak",
+                      "subject": "$recoverySubject"
+                    }
+                    """.trimIndent(),
+                ),
+        )
+            .andExpect(status().isCreated)
+            .andExpect(jsonPath("$.tenantId").value(tenantId.toString()))
+            .andExpect(jsonPath("$.changed").value(true))
+            .andExpect(jsonPath("$.replayed").value(false))
+            .andReturn()
+        val recoveryTenantUserId = UUID.fromString(
+            JsonPath.read(recoveryResult.response.contentAsString, "$.tenantUserId"),
+        )
+        check(recoveryTenantUserId != tenantUserId)
+        val tenantAdministratorCount = jdbcTemplate.queryForObject(
+            """
+            SELECT count(*)
+            FROM user_tenant_roles utr
+            JOIN tenant_roles tr
+              ON tr.id = utr.tenant_role_id
+             AND tr.tenant_id = utr.tenant_id
+            WHERE utr.tenant_id = ?
+              AND tr.code = 'tenant_admin'
+              AND tr.is_system = true
+            """.trimIndent(),
+            Int::class.java,
+            tenantId,
+        )
+        check(tenantAdministratorCount == 2)
 
         val provisionedPermissionCount = jdbcTemplate.queryForObject(
             """

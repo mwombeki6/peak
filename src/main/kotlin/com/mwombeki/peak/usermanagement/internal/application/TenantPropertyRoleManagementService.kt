@@ -606,6 +606,7 @@ class TenantPropertyRoleManagementService(
                 require(actorUserId == command.tenantUserId) {
                     "Property administrator bootstrap can only assign the property creator"
                 }
+                lockTenantForAdministratorContinuity(command.tenantId)
                 requirePropertyBelongsToTenant(command.tenantId, command.propertyId)
                 requireActiveTenantUser(command.tenantId, command.tenantUserId)
 
@@ -788,6 +789,7 @@ class TenantPropertyRoleManagementService(
                     permissionCode = TENANT_PROPERTY_ADMINISTRATOR_PERMISSION,
                     denialMessage = "Tenant user lacks property administrator management permission",
                 )
+                lockTenantForAdministratorContinuity(tenantId)
                 lockPropertyBelongsToTenant(tenantId, propertyId)
                 val reservation = idempotencyPort.reserve(
                     IdempotencyCommand(
@@ -899,6 +901,23 @@ class TenantPropertyRoleManagementService(
         ).singleOrNull()
         if (property == null) {
             throw TenantUserRoleManagementNotFoundException("Property was not found for tenant")
+        }
+    }
+
+    private fun lockTenantForAdministratorContinuity(tenantId: UUID) {
+        val tenant = jdbcTemplate.query(
+            """
+            SELECT id
+            FROM tenants
+            WHERE id = ?
+              AND deleted_at IS NULL
+            FOR UPDATE
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("id", UUID::class.java) },
+            tenantId,
+        ).singleOrNull()
+        if (tenant == null) {
+            throw TenantUserRoleManagementNotFoundException("Tenant was not found")
         }
     }
 

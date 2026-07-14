@@ -1,5 +1,6 @@
 package com.mwombeki.peak.usermanagement.api
 
+import java.time.Instant
 import java.util.UUID
 
 data class ListTenantRolesQuery(
@@ -13,6 +14,10 @@ data class ListTenantPermissionsQuery(
 data class GetTenantRoleQuery(
     val tenantId: UUID,
     val tenantRoleId: UUID,
+)
+
+data class ListTenantAdministratorsQuery(
+    val tenantId: UUID,
 )
 
 data class CreateTenantRoleCommand(
@@ -48,6 +53,16 @@ data class RevokeTenantUserRoleCommand(
     val tenantRoleId: UUID,
 )
 
+data class AssignTenantAdministratorCommand(
+    val tenantId: UUID,
+    val userId: UUID,
+)
+
+data class RevokeTenantAdministratorCommand(
+    val tenantId: UUID,
+    val userId: UUID,
+)
+
 data class TenantRoleSummary(
     val tenantRoleId: UUID,
     val tenantId: UUID,
@@ -64,6 +79,18 @@ data class TenantPermissionSummary(
     val tenantId: UUID,
     val code: String,
     val description: String?,
+)
+
+data class TenantAdministratorSummary(
+    val tenantId: UUID,
+    val tenantRoleId: UUID,
+    val userId: UUID,
+    val fullName: String,
+    val email: String,
+    val status: String,
+    val isActive: Boolean,
+    val lockedUntil: Instant?,
+    val hasActiveIdentity: Boolean,
 )
 
 data class TenantUserRoleAssignmentReceipt(

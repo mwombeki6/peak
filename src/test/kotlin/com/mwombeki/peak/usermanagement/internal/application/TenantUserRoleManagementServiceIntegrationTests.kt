@@ -4,10 +4,14 @@ import com.mwombeki.peak.TestcontainersConfiguration
 import com.mwombeki.peak.shared.context.RequestContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.usermanagement.api.AssignTenantAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.AssignTenantUserRoleCommand
+import com.mwombeki.peak.usermanagement.api.CreateTenantRoleCommand
 import com.mwombeki.peak.usermanagement.api.DeactivateTenantRoleCommand
+import com.mwombeki.peak.usermanagement.api.ListTenantAdministratorsQuery
 import com.mwombeki.peak.usermanagement.api.ListTenantPermissionsQuery
 import com.mwombeki.peak.usermanagement.api.ListTenantRolesQuery
+import com.mwombeki.peak.usermanagement.api.RevokeTenantAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.RevokeTenantUserRoleCommand
 import com.mwombeki.peak.usermanagement.api.TenantUserRoleManagementNotFoundException
 import com.mwombeki.peak.usermanagement.api.TenantUserRoleManagementPort
@@ -432,6 +436,200 @@ class TenantUserRoleManagementServiceIntegrationTests {
         assertEquals(1, roleAssignmentCount(fixture))
     }
 
+    @Test
+    fun tenantSuperAdministratorAssignsListsAndRevokesTenantAdministrator() {
+        val fixture = roleManagementFixture()
+        insertRoleManagementFixture(fixture)
+        val tenantAdminRoleId = insertSystemTenantAdministratorRole(
+            fixture = fixture,
+            assignedUserId = fixture.actorUserId,
+        )
+        insertActiveIdentityLink(fixture.tenantId, fixture.actorUserId)
+        insertActiveIdentityLink(fixture.tenantId, fixture.targetUserId)
+
+        requestContextHolder.set(tenantContext(fixture, "idem-tenant-admin-assign"))
+        val assignCommand = AssignTenantAdministratorCommand(
+            tenantId = fixture.tenantId,
+            userId = fixture.targetUserId,
+        )
+        val assigned = roleManagementPort.assignTenantAdministrator(assignCommand)
+        val replayedAssignment = roleManagementPort.assignTenantAdministrator(assignCommand)
+
+        assertTrue(assigned.changed)
+        assertTrue(assigned.assigned)
+        assertEquals(tenantAdminRoleId, assigned.tenantRoleId)
+        assertTrue(replayedAssignment.replayed)
+        assertEquals(assigned.copy(replayed = true), replayedAssignment)
+        assertEquals(
+            1,
+            tenantRoleAssignmentCount(
+                fixture.tenantId,
+                fixture.targetUserId,
+                tenantAdminRoleId,
+            ),
+        )
+
+        requestContextHolder.set(
+            tenantContext(
+                fixture = fixture,
+                idempotencyKey = null,
+                httpMethod = "GET",
+                requestPath = "/api/v1/tenants/${fixture.tenantId}/administrators",
+            ),
+        )
+        val administrators = roleManagementPort.listTenantAdministrators(
+            ListTenantAdministratorsQuery(fixture.tenantId),
+        )
+        assertEquals(2, administrators.size)
+        assertTrue(administrators.all { it.hasActiveIdentity })
+
+        requestContextHolder.set(tenantContext(fixture, "idem-tenant-admin-revoke"))
+        val revokeCommand = RevokeTenantAdministratorCommand(
+            tenantId = fixture.tenantId,
+            userId = fixture.targetUserId,
+        )
+        val revoked = roleManagementPort.revokeTenantAdministrator(revokeCommand)
+        val replayedRevocation = roleManagementPort.revokeTenantAdministrator(revokeCommand)
+
+        assertTrue(revoked.changed)
+        assertFalse(revoked.assigned)
+        assertTrue(replayedRevocation.replayed)
+        assertEquals(revoked.copy(replayed = true), replayedRevocation)
+        assertEquals(
+            0,
+            tenantRoleAssignmentCount(
+                fixture.tenantId,
+                fixture.targetUserId,
+                tenantAdminRoleId,
+            ),
+        )
+        assertEquals(
+            1,
+            auditCount(fixture, "tenant.administrator.revoked", fixture.targetUserId),
+        )
+        assertEquals(
+            1,
+            outboxCount(fixture, "tenant.administrator.revoked", fixture.targetUserId),
+        )
+    }
+
+    @Test
+    fun delegatedTenantGovernorCanAppointAnotherTenantAdministrator() {
+        val fixture = roleManagementFixture()
+        insertRoleManagementFixture(fixture)
+        val tenantAdminRoleId = insertSystemTenantAdministratorRole(fixture)
+        grantActorTenantPermission(fixture, "tenant.administrators.manage")
+        requestContextHolder.set(tenantContext(fixture, "idem-delegated-tenant-admin-assign"))
+
+        val receipt = roleManagementPort.assignTenantAdministrator(
+            AssignTenantAdministratorCommand(
+                tenantId = fixture.tenantId,
+                userId = fixture.targetUserId,
+            ),
+        )
+
+        assertTrue(receipt.changed)
+        assertTrue(receipt.assigned)
+        assertEquals(tenantAdminRoleId, receipt.tenantRoleId)
+    }
+
+    @Test
+    fun rejectsRevokingLastEffectiveTenantAdministrator() {
+        val fixture = roleManagementFixture()
+        insertRoleManagementFixture(fixture)
+        val tenantAdminRoleId = insertSystemTenantAdministratorRole(
+            fixture = fixture,
+            assignedUserId = fixture.targetUserId,
+        )
+        grantActorTenantPermission(fixture, "tenant.administrators.manage")
+        insertActiveIdentityLink(fixture.tenantId, fixture.targetUserId)
+        requestContextHolder.set(tenantContext(fixture, "idem-last-tenant-admin-revoke"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            roleManagementPort.revokeTenantAdministrator(
+                RevokeTenantAdministratorCommand(
+                    tenantId = fixture.tenantId,
+                    userId = fixture.targetUserId,
+                ),
+            )
+        }
+
+        assertEquals(
+            "Tenant administrator access cannot be removed without another active administrator",
+            error.message,
+        )
+        assertEquals(
+            1,
+            tenantRoleAssignmentCount(
+                fixture.tenantId,
+                fixture.targetUserId,
+                tenantAdminRoleId,
+            ),
+        )
+    }
+
+    @Test
+    fun rejectsTenantAdministratorAssignmentWithoutGovernancePermission() {
+        val fixture = roleManagementFixture()
+        insertRoleManagementFixture(fixture)
+        insertSystemTenantAdministratorRole(fixture)
+        requestContextHolder.set(tenantContext(fixture, "idem-tenant-admin-permission-denied"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            roleManagementPort.assignTenantAdministrator(
+                AssignTenantAdministratorCommand(
+                    tenantId = fixture.tenantId,
+                    userId = fixture.targetUserId,
+                ),
+            )
+        }
+
+        assertEquals(
+            "Tenant user lacks tenant administrator management permission",
+            error.message,
+        )
+    }
+
+    @Test
+    fun rejectsReservedTenantAdministratorCodeAndNameForDynamicRoles() {
+        val fixture = roleManagementFixture()
+        insertRoleManagementFixture(fixture)
+
+        requestContextHolder.set(tenantContext(fixture, "idem-reserved-tenant-admin-code"))
+        val codeError = assertFailsWith<IllegalArgumentException> {
+            roleManagementPort.createTenantRole(
+                CreateTenantRoleCommand(
+                    tenantId = fixture.tenantId,
+                    code = " TENANT_ADMIN ",
+                    name = "Different Name",
+                    description = null,
+                    permissionCodes = listOf("reports.view"),
+                ),
+            )
+        }
+        assertEquals(
+            "tenant_admin is reserved for the system Tenant Administrator role",
+            codeError.message,
+        )
+
+        requestContextHolder.set(tenantContext(fixture, "idem-reserved-tenant-admin-name"))
+        val nameError = assertFailsWith<IllegalArgumentException> {
+            roleManagementPort.createTenantRole(
+                CreateTenantRoleCommand(
+                    tenantId = fixture.tenantId,
+                    code = "different-code",
+                    name = " tenant administrator ",
+                    description = null,
+                    permissionCodes = listOf("reports.view"),
+                ),
+            )
+        }
+        assertEquals(
+            "Tenant Administrator is reserved for the system tenant role",
+            nameError.message,
+        )
+    }
+
     private fun roleManagementFixture(): RoleManagementFixture {
         val actorRoleId = UUID.randomUUID()
         val targetRoleId = UUID.randomUUID()
@@ -523,6 +721,121 @@ class TenantUserRoleManagementServiceIntegrationTests {
             tenantId,
             "User $userId",
             email,
+        )
+    }
+
+    private fun insertSystemTenantAdministratorRole(
+        fixture: RoleManagementFixture,
+        assignedUserId: UUID? = null,
+    ): UUID {
+        val tenantRoleId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_roles (
+                id,
+                tenant_id,
+                name,
+                code,
+                description,
+                is_system,
+                is_active
+            )
+            VALUES (
+                ?, ?, 'Tenant Administrator', 'tenant_admin',
+                'Immutable tenant administrator role provisioned by the platform',
+                true, true
+            )
+            """.trimIndent(),
+            tenantRoleId,
+            fixture.tenantId,
+        )
+        listOf(
+            "tenant.admin.all",
+            "tenant.administrators.manage",
+            "tenant.roles.view",
+        ).forEach { code ->
+            val permissionId = ensureTenantPermission(fixture.tenantId, code)
+            jdbcTemplate.update(
+                """
+                INSERT INTO tenant_role_permissions (tenant_role_id, permission_id)
+                VALUES (?, ?)
+                ON CONFLICT ON CONSTRAINT tenant_role_permissions_pkey DO NOTHING
+                """.trimIndent(),
+                tenantRoleId,
+                permissionId,
+            )
+        }
+        if (assignedUserId != null) {
+            jdbcTemplate.update(
+                """
+                INSERT INTO user_tenant_roles (user_id, tenant_id, tenant_role_id)
+                VALUES (?, ?, ?)
+                """.trimIndent(),
+                assignedUserId,
+                fixture.tenantId,
+                tenantRoleId,
+            )
+        }
+        return tenantRoleId
+    }
+
+    private fun grantActorTenantPermission(fixture: RoleManagementFixture, code: String) {
+        val permissionId = ensureTenantPermission(fixture.tenantId, code)
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_role_permissions (tenant_role_id, permission_id)
+            VALUES (?, ?)
+            ON CONFLICT ON CONSTRAINT tenant_role_permissions_pkey DO NOTHING
+            """.trimIndent(),
+            fixture.actorRoleId,
+            permissionId,
+        )
+    }
+
+    private fun ensureTenantPermission(tenantId: UUID, code: String): UUID {
+        return requireNotNull(
+            jdbcTemplate.queryForObject(
+                """
+                INSERT INTO permissions (id, tenant_id, code, description)
+                SELECT gen_random_uuid(), ?, pc.code, pc.description
+                FROM permission_catalog pc
+                WHERE pc.code = ?
+                ON CONFLICT (tenant_id, code) DO UPDATE SET
+                    description = EXCLUDED.description,
+                    updated_at = now()
+                RETURNING id
+                """.trimIndent(),
+                UUID::class.java,
+                tenantId,
+                code,
+            ),
+        )
+    }
+
+    private fun insertActiveIdentityLink(tenantId: UUID, userId: UUID) {
+        val identityLinkId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO identity_links (
+                id,
+                identity_mode,
+                provider,
+                issuer,
+                subject,
+                tenant_id,
+                user_id,
+                email
+            )
+            SELECT ?, 'tenant', 'oidc', ?, ?, tenant_id, id, email
+            FROM users
+            WHERE tenant_id = ?
+              AND id = ?
+            """.trimIndent(),
+            identityLinkId,
+            "https://issuer.example.com/realms/$tenantId",
+            "subject-$identityLinkId",
+            tenantId,
+            userId,
         )
     }
 
@@ -748,6 +1061,28 @@ class TenantUserRoleManagementServiceIntegrationTests {
                 fixture.tenantId,
                 fixture.targetUserId,
                 fixture.targetRoleId,
+            ),
+        )
+    }
+
+    private fun tenantRoleAssignmentCount(
+        tenantId: UUID,
+        userId: UUID,
+        tenantRoleId: UUID,
+    ): Int {
+        return requireNotNull(
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*)
+                FROM user_tenant_roles
+                WHERE tenant_id = ?
+                  AND user_id = ?
+                  AND tenant_role_id = ?
+                """.trimIndent(),
+                Int::class.java,
+                tenantId,
+                userId,
+                tenantRoleId,
             ),
         )
     }
