@@ -409,11 +409,11 @@ class TenantUserLifecycleServiceIntegrationTests {
         val fixture = lifecycleFixture()
         insertLifecycleFixture(fixture)
         ensureTenantPermission(fixture.tenantId, "tenant.users.manage")
-        ensureTenantPermission(fixture.tenantId, "reports.view")
+        ensureTenantPermission(fixture.tenantId, "tenant.roles.view")
         val actorRoleId = insertTenantRole(fixture.tenantId, "actor-lifecycle")
         val targetRoleId = insertTenantRole(fixture.tenantId, "target-reporting")
         insertTenantRolePermission(actorRoleId, fixture.tenantId, "tenant.users.manage")
-        insertTenantRolePermission(targetRoleId, fixture.tenantId, "reports.view")
+        insertTenantRolePermission(targetRoleId, fixture.tenantId, "tenant.roles.view")
         insertTenantRoleAssignment(fixture.tenantId, fixture.actorUserId, actorRoleId)
         insertTenantRoleAssignment(fixture.tenantId, fixture.targetUserId, targetRoleId)
         requestContextHolder.set(tenantContext(fixture, "idem-lifecycle-hierarchy-denied"))
@@ -440,11 +440,15 @@ class TenantUserLifecycleServiceIntegrationTests {
         val fixture = lifecycleFixture()
         insertLifecycleFixture(fixture)
         ensureTenantPermission(fixture.tenantId, "tenant.admin.all")
-        ensureTenantPermission(fixture.tenantId, "reports.view")
-        val actorRoleId = insertTenantRole(fixture.tenantId, "actor-tenant-admin")
+        ensureTenantPermission(fixture.tenantId, "tenant.roles.view")
+        val actorRoleId = insertTenantRole(
+            fixture.tenantId,
+            "actor-tenant-admin",
+            isSystem = true,
+        )
         val targetRoleId = insertTenantRole(fixture.tenantId, "target-reporting")
         insertTenantRolePermission(actorRoleId, fixture.tenantId, "tenant.admin.all")
-        insertTenantRolePermission(targetRoleId, fixture.tenantId, "reports.view")
+        insertTenantRolePermission(targetRoleId, fixture.tenantId, "tenant.roles.view")
         insertTenantRoleAssignment(fixture.tenantId, fixture.actorUserId, actorRoleId)
         insertTenantRoleAssignment(fixture.tenantId, fixture.targetUserId, targetRoleId)
         requestContextHolder.set(tenantContext(fixture, "idem-lifecycle-hierarchy-admin"))
@@ -594,6 +598,10 @@ class TenantUserLifecycleServiceIntegrationTests {
             fixture.targetUserId,
             fixture.email,
         )
+        ensureTenantPermission(fixture.tenantId, "tenant.users.manage")
+        val actorRoleId = insertTenantRole(fixture.tenantId, "actor-user-manager")
+        insertTenantRolePermission(actorRoleId, fixture.tenantId, "tenant.users.manage")
+        insertTenantRoleAssignment(fixture.tenantId, fixture.actorUserId, actorRoleId)
     }
 
     private fun insertTenantUser(
@@ -759,17 +767,22 @@ class TenantUserLifecycleServiceIntegrationTests {
         )
     }
 
-    private fun insertTenantRole(tenantId: UUID, codePrefix: String): UUID {
+    private fun insertTenantRole(
+        tenantId: UUID,
+        codePrefix: String,
+        isSystem: Boolean = false,
+    ): UUID {
         val roleId = UUID.randomUUID()
         jdbcTemplate.update(
             """
-            INSERT INTO tenant_roles (id, tenant_id, name, code)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO tenant_roles (id, tenant_id, name, code, is_system)
+            VALUES (?, ?, ?, ?, ?)
             """.trimIndent(),
             roleId,
             tenantId,
             "Tenant Role $roleId",
             "$codePrefix-$roleId",
+            isSystem,
         )
         return roleId
     }
@@ -803,7 +816,11 @@ class TenantUserLifecycleServiceIntegrationTests {
 
     private fun grantActorTenantAdminAll(fixture: LifecycleFixture) {
         ensureTenantPermission(fixture.tenantId, "tenant.admin.all")
-        val roleId = insertTenantRole(fixture.tenantId, "actor-tenant-admin")
+        val roleId = insertTenantRole(
+            fixture.tenantId,
+            "actor-tenant-admin",
+            isSystem = true,
+        )
         insertTenantRolePermission(roleId, fixture.tenantId, "tenant.admin.all")
         insertTenantRoleAssignment(fixture.tenantId, fixture.actorUserId, roleId)
     }

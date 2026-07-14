@@ -11,11 +11,10 @@ import com.mwombeki.peak.reliability.api.IdempotencyReservation
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
-import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
-import com.mwombeki.peak.usermanagement.api.SupportTenantAccessPort
-import com.mwombeki.peak.usermanagement.api.SupportTenantAccessRequest
+import com.mwombeki.peak.usermanagement.api.PlatformAccessPort
+import com.mwombeki.peak.usermanagement.api.PlatformAccessRequest
 import java.util.UUID
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
@@ -26,11 +25,10 @@ import tools.jackson.databind.ObjectMapper
 class TenantGovernanceService(
     private val jdbcTemplate: JdbcTemplate,
     private val requestContextHolder: RequestContextHolder,
-    private val databaseSessionContext: DatabaseSessionContext,
     private val idempotencyPort: IdempotencyPort,
     private val auditPort: AuditPort,
     private val outboxPort: OutboxPort,
-    private val supportTenantAccessPort: SupportTenantAccessPort,
+    private val platformAccessPort: PlatformAccessPort,
     private val objectMapper: ObjectMapper,
 ) : TenantGovernancePort {
 
@@ -40,10 +38,10 @@ class TenantGovernanceService(
         operatorId: UUID,
         reason: String,
     ): GovernanceActionResponse {
-        bindPlatformContext(operatorId)
-        requireSupportBreakGlassAccess(
+        requirePlatformAccess(
             tenantId = tenantId,
-            actionCode = "platform.tenants.manage",
+            operatorId = operatorId,
+            permissionCode = "platform.tenants.manage",
             operation = "platform.tenants.approve",
         )
         return idempotentTransition(
@@ -71,10 +69,10 @@ class TenantGovernanceService(
         operatorId: UUID,
         reason: String,
     ): GovernanceActionResponse {
-        bindPlatformContext(operatorId)
-        requireSupportBreakGlassAccess(
+        requirePlatformAccess(
             tenantId = tenantId,
-            actionCode = "platform.tenants.manage",
+            operatorId = operatorId,
+            permissionCode = "platform.tenants.manage",
             operation = "platform.tenants.suspend",
         )
         return idempotentTransition(
@@ -253,28 +251,25 @@ class TenantGovernanceService(
         ).firstOrNull()
     }
 
-    private fun bindPlatformContext(expectedOperatorId: UUID) {
+    private fun requirePlatformAccess(
+        tenantId: UUID,
+        operatorId: UUID,
+        permissionCode: String,
+        operation: String,
+    ) {
         val identity = requestContextHolder.current().identity
         val platformUserId = when (identity) {
             is RequestIdentity.Platform -> identity.platformUserId
             is RequestIdentity.Support -> identity.platformUserId
             else -> throw IllegalStateException("Platform identity is required")
         }
-        require(platformUserId == expectedOperatorId) {
+        require(platformUserId == operatorId) {
             "Governance operator must match the active request identity"
         }
-        databaseSessionContext.bind(identity)
-    }
-
-    private fun requireSupportBreakGlassAccess(
-        tenantId: UUID,
-        actionCode: String,
-        operation: String,
-    ) {
-        supportTenantAccessPort.requireAuthorized(
-            SupportTenantAccessRequest(
+        platformAccessPort.requireAuthorized(
+            PlatformAccessRequest(
                 tenantId = tenantId,
-                permissionCode = actionCode,
+                permissionCode = permissionCode,
                 operation = operation,
             ),
         )

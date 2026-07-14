@@ -9,9 +9,6 @@ import com.mwombeki.peak.reliability.api.IdempotencyReservation
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
-import com.mwombeki.peak.shared.context.DatabaseSessionContext
-import com.mwombeki.peak.shared.context.RequestContextHolder
-import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.usermanagement.api.RevokeTenantUserIdentityLinkCommand
 import com.mwombeki.peak.usermanagement.api.TenantUserIdentityLinkRevocationReceipt
 import com.mwombeki.peak.usermanagement.api.TenantUserLifecycleAction
@@ -21,6 +18,8 @@ import com.mwombeki.peak.usermanagement.api.TenantUserLifecycleInProgressExcepti
 import com.mwombeki.peak.usermanagement.api.TenantUserLifecycleNotFoundException
 import com.mwombeki.peak.usermanagement.api.TenantUserLifecyclePort
 import com.mwombeki.peak.usermanagement.api.TenantUserLifecycleReceipt
+import com.mwombeki.peak.usermanagement.api.TenantPermissionAccessPort
+import com.mwombeki.peak.usermanagement.api.TenantPermissionAccessRequest
 import java.sql.ResultSet
 import java.sql.Timestamp
 import java.time.Instant
@@ -33,8 +32,7 @@ import tools.jackson.databind.ObjectMapper
 @Component
 class TenantUserLifecycleService(
     private val jdbcTemplate: JdbcTemplate,
-    private val requestContextHolder: RequestContextHolder,
-    private val databaseSessionContext: DatabaseSessionContext,
+    private val tenantPermissionAccessPort: TenantPermissionAccessPort,
     private val idempotencyPort: IdempotencyPort,
     private val auditPort: AuditPort,
     private val outboxPort: OutboxPort,
@@ -64,11 +62,10 @@ class TenantUserLifecycleService(
     private fun changeLifecycleInsideTransaction(
         command: TenantUserLifecycleCommand,
     ): TenantUserLifecycleReceipt {
-        val actorUserId = requireTenantActor(command.tenantId)
+        val actorUserId = requireTenantUserManagement(command.tenantId)
         require(actorUserId != command.userId) {
             "Tenant user cannot change own lifecycle state"
         }
-        databaseSessionContext.bind(requestContextHolder.current().identity)
         lockTenantForAdministratorContinuity(command.tenantId)
 
         val reservation = idempotencyPort.reserve(
@@ -153,11 +150,10 @@ class TenantUserLifecycleService(
     private fun revokeIdentityLinkInsideTransaction(
         command: RevokeTenantUserIdentityLinkCommand,
     ): TenantUserIdentityLinkRevocationReceipt {
-        val actorUserId = requireTenantActor(command.tenantId)
+        val actorUserId = requireTenantUserManagement(command.tenantId)
         require(actorUserId != command.userId) {
             "Tenant user cannot revoke own identity link"
         }
-        databaseSessionContext.bind(requestContextHolder.current().identity)
         lockTenantForAdministratorContinuity(command.tenantId)
 
         val reservation = idempotencyPort.reserve(
@@ -245,15 +241,10 @@ class TenantUserLifecycleService(
         return receipt
     }
 
-    private fun requireTenantActor(tenantId: UUID): UUID {
-        val identity = requestContextHolder.current().identity
-        require(identity is RequestIdentity.Tenant) {
-            "Tenant user identity is required"
-        }
-        require(identity.tenantId == tenantId) {
-            "Requested tenant does not match identity"
-        }
-        return identity.tenantUserId
+    private fun requireTenantUserManagement(tenantId: UUID): UUID {
+        return tenantPermissionAccessPort.requireAuthorized(
+            TenantPermissionAccessRequest(tenantId, TENANT_USER_MANAGE_PERMISSION),
+        )
     }
 
     private fun requireActorCanManageTargetUser(
@@ -785,6 +776,7 @@ class TenantUserLifecycleService(
     )
 
     private companion object {
+        private const val TENANT_USER_MANAGE_PERMISSION = "tenant.users.manage"
         private const val TENANT_ADMIN_ALL_PERMISSION = "tenant.admin.all"
         private const val TENANT_ADMIN_ROLE_CODE = "tenant_admin"
         private const val PROPERTY_ADMIN_ROLE_NAME = "Property Administrator"

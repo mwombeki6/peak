@@ -16,7 +16,7 @@ User management owns authorization, external identity resolution, platform admin
 - Normal Keycloak/OIDC tokens resolve through `identity_links` by issuer and subject; direct `peak_identity_mode` claims are disabled unless a trusted runtime explicitly enables them.
 - Platform permissions are checked through platform roles and tenant access helpers.
 - Tenant permissions are checked through tenant roles, role permissions, and active tenant user state.
-- Tenant-created roles are dynamic but tenant-scoped; a tenant route cannot assign a role from another tenant.
+- Tenant-created roles are dynamic but tenant-scoped; their catalog permissions must have `tenant` or `both` scope, and a tenant route cannot assign a role from another tenant.
 - Tenant administrator succession uses the dedicated `tenant.administrators.manage` capability; the platform provisioning endpoint remains the supervised recovery path when no tenant administrator can sign in.
 - Tenant admins manage ordinary property access with `tenant.properties.manage_access`; actual property operations still require a property-scoped role assignment.
 - The tenant owns its properties and governs administrator continuity with the narrower, auditable `tenant.properties.administrators.manage` capability.
@@ -25,8 +25,9 @@ User management owns authorization, external identity resolution, platform admin
   does not already hold. Mutating an existing role or user also requires the
   actor to hold the target's current effective permission set.
 - System tenant roles are immutable through tenant self-service. Assignment, revocation, and invitation flows must reject `tenant_roles.is_system=true`.
+- Administrator wildcards are reserved database invariants: `platform.admin.all`, `tenant.admin.all`, and `admin.all` may be granted only to their corresponding system roles. Dynamic roles cannot inherit or preserve them.
 - Public property routes are resolved through `resolve_public_property_scope`; public headers are not trusted.
-- Staff and platform guards bind database session context before permission checks; public module guards stay unbound.
+- Staff and platform guards bind database session context before permission checks; public module guards stay unbound. Named administration APIs repeat their required platform or tenant capability check so in-process callers cannot bypass the HTTP guard.
 - Route guard rules are cached briefly and refreshed from `module_access_matrix`.
 - Support identities are never treated as unrestricted platform identities. They may use only tenant-targeted platform routes whose `tenantId`, exact support-session id, permission, approval state, and active time window all match `platform_break_glass_access`.
 - Equally specific route rows must resolve to one authorization contract. Conflicting permissions, scopes, modules, or guard modes fail startup validation and fail closed at request time.
@@ -123,7 +124,7 @@ Administrator assignment is the single controlled exception for a system-role as
 1. Keep JWT validation enabled in production and require issuer plus audience.
 2. Keep trusted direct JWT identity claims disabled in production; use database-backed OIDC identity links.
 3. Require verified OIDC email before accepting invitation flows that bind an email.
-4. Do not place permission decisions in controllers; use the authorization port or route guard.
+4. Do not place permission decisions in controllers; use the authorization port or route guard, and enforce the same base capability inside named administration APIs.
 5. Prefer database-backed role and permission data for business permissions, with code constants only for stable permission names.
 6. Deny unregistered API routes by default in production.
 7. Keep platform RLS policies scoped to platform runtime roles instead of granting platform helpers to tenant API roles.

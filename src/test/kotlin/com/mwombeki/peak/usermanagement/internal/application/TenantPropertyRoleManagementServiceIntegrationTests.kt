@@ -207,6 +207,29 @@ class TenantPropertyRoleManagementServiceIntegrationTests {
     }
 
     @Test
+    fun rejectsReservedAdministratorWildcardForDynamicPropertyRole() {
+        val fixture = propertyRoleFixture()
+        insertPropertyRoleFixture(fixture)
+        requestContextHolder.set(tenantContext(fixture, "idem-property-reserved-wildcard"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            propertyRoleManagementPort.createPropertyRole(
+                CreatePropertyRoleCommand(
+                    tenantId = fixture.tenantId,
+                    propertyId = fixture.propertyId,
+                    name = "Dynamic Property Root ${fixture.propertyId}",
+                    permissionCodes = listOf("admin.all"),
+                ),
+            )
+        }
+
+        assertEquals(
+            "admin.all is reserved for the system Property Administrator role",
+            error.message,
+        )
+    }
+
+    @Test
     fun rejectsAssigningPropertyRoleWithPermissionActorDoesNotHold() {
         val fixture = propertyRoleFixture()
         insertPropertyRoleFixture(fixture, grantTenantAdmin = false)
@@ -844,7 +867,11 @@ class TenantPropertyRoleManagementServiceIntegrationTests {
         ensureTenantPermission(fixture.tenantId, "property.roles.manage")
         ensureTenantPermission(fixture.tenantId, "realtime.stream")
         ensureTenantPermission(fixture.tenantId, "admin.all")
-        insertTenantRole(fixture.tenantId, fixture.actorRoleId)
+        insertTenantRole(
+            fixture.tenantId,
+            fixture.actorRoleId,
+            isSystem = grantTenantAdmin,
+        )
         if (grantManageAccess) {
             insertTenantRolePermission(fixture.actorRoleId, fixture.tenantId, "tenant.properties.manage_access")
         }
@@ -1122,16 +1149,21 @@ class TenantPropertyRoleManagementServiceIntegrationTests {
         )
     }
 
-    private fun insertTenantRole(tenantId: UUID, roleId: UUID) {
+    private fun insertTenantRole(
+        tenantId: UUID,
+        roleId: UUID,
+        isSystem: Boolean = false,
+    ) {
         jdbcTemplate.update(
             """
-            INSERT INTO tenant_roles (id, tenant_id, name, code)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO tenant_roles (id, tenant_id, name, code, is_system)
+            VALUES (?, ?, ?, ?, ?)
             """.trimIndent(),
             roleId,
             tenantId,
             "Property Access Manager $roleId",
             "property-access-manager-$roleId",
+            isSystem,
         )
     }
 

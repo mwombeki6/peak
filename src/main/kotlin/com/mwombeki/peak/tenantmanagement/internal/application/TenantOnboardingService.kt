@@ -9,7 +9,6 @@ import com.mwombeki.peak.reliability.api.IdempotencyReservation
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
-import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.tenantmanagement.api.Tenant
@@ -20,8 +19,8 @@ import com.mwombeki.peak.tenantmanagement.api.TenantResponse
 import com.mwombeki.peak.tenantmanagement.api.TenantStatus
 import com.mwombeki.peak.tenantmanagement.internal.TenantProfileRepository
 import com.mwombeki.peak.tenantmanagement.internal.TenantRepository
-import com.mwombeki.peak.usermanagement.api.SupportTenantAccessPort
-import com.mwombeki.peak.usermanagement.api.SupportTenantAccessRequest
+import com.mwombeki.peak.usermanagement.api.PlatformAccessPort
+import com.mwombeki.peak.usermanagement.api.PlatformAccessRequest
 import java.time.Instant
 import java.util.UUID
 import org.springframework.jdbc.core.JdbcTemplate
@@ -34,18 +33,22 @@ class TenantOnboardingService(
     private val tenantRepository: TenantRepository,
     private val tenantProfileRepository: TenantProfileRepository,
     private val requestContextHolder: RequestContextHolder,
-    private val databaseSessionContext: DatabaseSessionContext,
     private val idempotencyPort: IdempotencyPort,
     private val auditPort: AuditPort,
     private val outboxPort: OutboxPort,
-    private val supportTenantAccessPort: SupportTenantAccessPort,
+    private val platformAccessPort: PlatformAccessPort,
     private val objectMapper: ObjectMapper,
     private val jdbcTemplate: JdbcTemplate,
 ) : TenantOnboardingPort {
 
     @Transactional
     override fun registerNewTenant(request: TenantRegisterRequest): TenantResponse {
-        val operatorId = bindPlatformContext()
+        requirePlatformAccess(
+            tenantId = null,
+            permissionCode = "platform.tenants.manage",
+            operation = "platform.tenants.register",
+        )
+        val operatorId = currentPlatformActorId()
         val slug = request.slug.trim().lowercase()
 
         return idempotentMutation(
@@ -117,10 +120,9 @@ class TenantOnboardingService(
 
     @Transactional(readOnly = true)
     override fun getTenantById(id: UUID): TenantResponse? {
-        bindPlatformContext()
-        requireSupportBreakGlassAccess(
+        requirePlatformAccess(
             tenantId = id,
-            actionCode = "platform.tenants.view",
+            permissionCode = "platform.tenants.view",
             operation = "platform.tenants.view",
         )
         val tenant = tenantRepository.findById(id) ?: return null
@@ -201,26 +203,23 @@ class TenantOnboardingService(
         )
     }
 
-    private fun bindPlatformContext(): UUID {
-        val identity = requestContextHolder.current().identity
-        val platformUserId = when (identity) {
+    private fun currentPlatformActorId(): UUID {
+        return when (val identity = requestContextHolder.current().identity) {
             is RequestIdentity.Platform -> identity.platformUserId
             is RequestIdentity.Support -> identity.platformUserId
             else -> throw IllegalStateException("Platform identity is required")
         }
-        databaseSessionContext.bind(identity)
-        return platformUserId
     }
 
-    private fun requireSupportBreakGlassAccess(
-        tenantId: UUID,
-        actionCode: String,
+    private fun requirePlatformAccess(
+        tenantId: UUID?,
+        permissionCode: String,
         operation: String,
     ) {
-        supportTenantAccessPort.requireAuthorized(
-            SupportTenantAccessRequest(
+        platformAccessPort.requireAuthorized(
+            PlatformAccessRequest(
                 tenantId = tenantId,
-                permissionCode = actionCode,
+                permissionCode = permissionCode,
                 operation = operation,
             ),
         )

@@ -1523,14 +1523,30 @@ class Phase3StayLifecycleIntegrationTests {
                 "Permission $permissionCode",
             )
             jdbcTemplate.update(
-                "INSERT INTO tenant_role_permissions (tenant_role_id, permission_id) VALUES (?, ?)",
+                """
+                INSERT INTO tenant_role_permissions (tenant_role_id, permission_id)
+                SELECT ?, ?
+                FROM permission_catalog
+                WHERE code = ?
+                  AND is_tenant_permission = true
+                  AND access_scope IN ('tenant', 'both')
+                """.trimIndent(),
                 fixture.tenantRoleId,
                 permissionId,
+                permissionCode,
             )
             jdbcTemplate.update(
-                "INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)",
+                """
+                INSERT INTO role_permissions (role_id, permission_id)
+                SELECT ?, ?
+                FROM permission_catalog
+                WHERE code = ?
+                  AND is_tenant_permission = true
+                  AND access_scope IN ('property', 'both')
+                """.trimIndent(),
                 fixture.propertyRoleId,
                 permissionId,
+                permissionCode,
             )
         }
         jdbcTemplate.update(

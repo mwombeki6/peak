@@ -11,9 +11,9 @@ These routes have exact `module_access_matrix` contracts with a named `tenantId`
 
 ## Security
 
-Route authorization is enforced by the shared request context plus the user-management route guard. Platform governance requires `platform.tenants.manage`. A support identity additionally needs the exact active, approved break-glass session for the target tenant; it cannot use global platform routes or a different session belonging to the same operator.
+Route authorization is enforced by the shared request context plus the user-management route guard. The named governance API independently requires `platform.tenants.manage` through the User Management API. A support identity additionally needs the exact active, approved break-glass session for the target tenant; it cannot use global platform routes or a different session belonging to the same operator.
 
-The service binds `DatabaseSessionContext` before reading or writing RLS-protected tables.
+The shared platform access port binds `DatabaseSessionContext` before the service reads or writes RLS-protected tables.
 
 ## Database Tables
 

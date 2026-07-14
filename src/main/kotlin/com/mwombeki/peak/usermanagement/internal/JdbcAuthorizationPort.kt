@@ -8,8 +8,8 @@ import com.mwombeki.peak.usermanagement.api.AuthorizationPort
 import com.mwombeki.peak.usermanagement.api.GuardMode
 import com.mwombeki.peak.usermanagement.api.RouteAuthorizationRequest
 import com.mwombeki.peak.usermanagement.api.RouteScope
-import com.mwombeki.peak.usermanagement.api.SupportTenantAccessPort
-import com.mwombeki.peak.usermanagement.api.SupportTenantAccessRequest
+import com.mwombeki.peak.usermanagement.api.PlatformAccessPort
+import com.mwombeki.peak.usermanagement.api.PlatformAccessRequest
 import java.util.UUID
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
@@ -20,7 +20,7 @@ class JdbcAuthorizationPort(
     private val jdbcTemplate: JdbcTemplate,
     private val requestContextHolder: RequestContextHolder,
     private val databaseSessionContext: DatabaseSessionContext,
-    private val supportTenantAccessPort: SupportTenantAccessPort,
+    private val platformAccessPort: PlatformAccessPort,
 ) : AuthorizationPort {
     override fun authorize(request: RouteAuthorizationRequest): AuthorizationDecision {
         require(TransactionSynchronizationManager.isActualTransactionActive()) {
@@ -36,8 +36,7 @@ class JdbcAuthorizationPort(
             }
             GuardMode.MODULE_ONLY -> authorizePublicModule(identity, request)
             GuardMode.PLATFORM_PERMISSION -> {
-                databaseSessionContext.bind(identity)
-                authorizePlatformPermission(identity, request)
+                authorizePlatformPermission(request)
             }
             GuardMode.PUBLIC_TOKEN -> authorizePublicToken(identity, request)
         }
@@ -138,7 +137,6 @@ class JdbcAuthorizationPort(
     }
 
     private fun authorizePlatformPermission(
-        identity: RequestIdentity,
         request: RouteAuthorizationRequest,
     ): AuthorizationDecision {
         if (request.routeScope != RouteScope.PLATFORM) {
@@ -148,32 +146,14 @@ class JdbcAuthorizationPort(
             return AuthorizationDecision.denied("Platform guard requires permission")
         }
 
-        if (identity is RequestIdentity.Support) {
-            return supportTenantAccessPort.authorize(
-                SupportTenantAccessRequest(
-                    tenantId = request.tenantId,
-                    permissionCode = request.permissionCode,
-                    operation = "route.${request.moduleId}.${request.permissionCode}",
-                    auditSuccess = false,
-                ),
-            )
-        }
-        if (identity !is RequestIdentity.Platform) {
-            return AuthorizationDecision.denied("Platform identity is required")
-        }
-
-        val allowed = jdbcTemplate.queryForObject(
-            "SELECT platform_user_has_permission(?, ?)",
-            Boolean::class.java,
-            identity.platformUserId,
-            request.permissionCode,
-        ) == true
-
-        return if (allowed) {
-            AuthorizationDecision.allowed()
-        } else {
-            AuthorizationDecision.denied("Platform user lacks required permission")
-        }
+        return platformAccessPort.authorize(
+            PlatformAccessRequest(
+                tenantId = request.tenantId,
+                permissionCode = request.permissionCode,
+                operation = "route.${request.moduleId}.${request.permissionCode}",
+                auditSuccess = false,
+            ),
+        )
     }
 
     private fun authorizePublicToken(

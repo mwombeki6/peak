@@ -161,9 +161,9 @@ class TenantUserRoleManagementServiceIntegrationTests {
 
         assertEquals(fixture.targetRoleCode, targetRole.code)
         assertEquals(fixture.targetRoleName, targetRole.name)
-        assertEquals(listOf("reports.view"), targetRole.permissionCodes)
+        assertEquals(listOf("tenant.roles.view"), targetRole.permissionCodes)
         assertEquals(
-            listOf("reports.view", "tenant.users.manage"),
+            listOf("tenant.roles.view", "tenant.users.manage"),
             permissions.map { it.code },
         )
     }
@@ -603,7 +603,7 @@ class TenantUserRoleManagementServiceIntegrationTests {
                     code = " TENANT_ADMIN ",
                     name = "Different Name",
                     description = null,
-                    permissionCodes = listOf("reports.view"),
+                    permissionCodes = listOf("tenant.roles.view"),
                 ),
             )
         }
@@ -620,7 +620,7 @@ class TenantUserRoleManagementServiceIntegrationTests {
                     code = "different-code",
                     name = " tenant administrator ",
                     description = null,
-                    permissionCodes = listOf("reports.view"),
+                    permissionCodes = listOf("tenant.roles.view"),
                 ),
             )
         }
@@ -628,6 +628,63 @@ class TenantUserRoleManagementServiceIntegrationTests {
             "Tenant Administrator is reserved for the system tenant role",
             nameError.message,
         )
+    }
+
+    @Test
+    fun rejectsReservedWildcardAndPropertyOnlyPermissionForDynamicTenantRoles() {
+        val fixture = roleManagementFixture()
+        insertRoleManagementFixture(fixture)
+        ensureTenantPermission(fixture.tenantId, "tenant.admin.all")
+        ensureTenantPermission(fixture.tenantId, "reports.view")
+
+        requestContextHolder.set(tenantContext(fixture, "idem-reserved-tenant-wildcard"))
+        val wildcardError = assertFailsWith<IllegalArgumentException> {
+            roleManagementPort.createTenantRole(
+                CreateTenantRoleCommand(
+                    tenantId = fixture.tenantId,
+                    code = "dynamic-root",
+                    name = "Dynamic Root",
+                    description = null,
+                    permissionCodes = listOf("tenant.admin.all"),
+                ),
+            )
+        }
+        assertEquals(
+            "tenant.admin.all is reserved for the system Tenant Administrator role",
+            wildcardError.message,
+        )
+
+        insertSystemTenantAdministratorRole(fixture, fixture.actorUserId)
+        requestContextHolder.set(tenantContext(fixture, "idem-property-only-tenant-role"))
+        val scopeError = assertFailsWith<IllegalArgumentException> {
+            roleManagementPort.createTenantRole(
+                CreateTenantRoleCommand(
+                    tenantId = fixture.tenantId,
+                    code = "invalid-property-scope",
+                    name = "Invalid Property Scope",
+                    description = null,
+                    permissionCodes = listOf("reports.view"),
+                ),
+            )
+        }
+        assertEquals(
+            "Dynamic tenant roles may contain only tenant-scoped permissions",
+            scopeError.message,
+        )
+    }
+
+    @Test
+    fun namedRoleApiRequiresViewPermissionWithoutHttpGuard() {
+        val fixture = roleManagementFixture()
+        insertRoleManagementFixture(fixture)
+        removeActorReportsPermission(fixture)
+        requestContextHolder.set(tenantContext(fixture, null))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            roleManagementPort.listTenantRoles(ListTenantRolesQuery(fixture.tenantId))
+        }
+
+        assertEquals("Tenant user lacks required permission", error.message)
     }
 
     private fun roleManagementFixture(): RoleManagementFixture {
@@ -690,8 +747,8 @@ class TenantUserRoleManagementServiceIntegrationTests {
         insertPermission(
             tenantId = fixture.tenantId,
             permissionId = fixture.reportsPermissionId,
-            code = "reports.view",
-            description = "View reports",
+            code = "tenant.roles.view",
+            description = "View tenant roles",
         )
         insertRolePermission(fixture.actorRoleId, fixture.managePermissionId)
         insertRolePermission(fixture.actorRoleId, fixture.reportsPermissionId)
@@ -931,8 +988,8 @@ class TenantUserRoleManagementServiceIntegrationTests {
         insertPermission(
             tenantId = fixture.tenantId,
             permissionId = elevatedPermissionId,
-            code = "tenant.roles.view",
-            description = "View tenant roles",
+            code = "tenant.profile.view",
+            description = "View tenant profile",
         )
         insertTenantRole(
             tenantId = fixture.tenantId,

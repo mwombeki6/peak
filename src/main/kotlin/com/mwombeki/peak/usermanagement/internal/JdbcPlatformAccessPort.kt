@@ -8,35 +8,53 @@ import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.usermanagement.api.AuthorizationDecision
-import com.mwombeki.peak.usermanagement.api.SupportTenantAccessPort
-import com.mwombeki.peak.usermanagement.api.SupportTenantAccessRequest
+import com.mwombeki.peak.usermanagement.api.PlatformAccessPort
+import com.mwombeki.peak.usermanagement.api.PlatformAccessRequest
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
 
 @Component
-class JdbcSupportTenantAccessPort(
+class JdbcPlatformAccessPort(
     private val requestContextHolder: RequestContextHolder,
     private val databaseSessionContext: DatabaseSessionContext,
     private val jdbcTemplate: JdbcTemplate,
     private val auditPort: AuditPort,
-) : SupportTenantAccessPort {
-    override fun authorize(request: SupportTenantAccessRequest): AuthorizationDecision {
+) : PlatformAccessPort {
+    override fun authorize(request: PlatformAccessRequest): AuthorizationDecision {
         return when (val identity = requestContextHolder.current().identity) {
-            is RequestIdentity.Platform -> AuthorizationDecision.allowed()
+            is RequestIdentity.Platform -> authorizePlatform(identity, request)
             is RequestIdentity.Support -> authorizeSupport(identity, request)
             else -> AuthorizationDecision.denied("Platform identity is required")
         }
     }
 
+    private fun authorizePlatform(
+        identity: RequestIdentity.Platform,
+        request: PlatformAccessRequest,
+    ): AuthorizationDecision {
+        databaseSessionContext.bind(identity)
+        val allowed = jdbcTemplate.queryForObject(
+            "SELECT platform_user_has_permission(?, ?)",
+            Boolean::class.java,
+            identity.platformUserId,
+            request.permissionCode,
+        ) == true
+        return if (allowed) {
+            AuthorizationDecision.allowed()
+        } else {
+            AuthorizationDecision.denied("Platform user lacks required permission")
+        }
+    }
+
     private fun authorizeSupport(
         identity: RequestIdentity.Support,
-        request: SupportTenantAccessRequest,
+        request: PlatformAccessRequest,
     ): AuthorizationDecision {
         databaseSessionContext.bind(identity)
 
         val decision = when {
             request.tenantId == null -> AuthorizationDecision.denied(
-                "Support identity requires a tenant-targeted platform route",
+                "Support identity requires a tenant-targeted platform operation",
             )
             request.tenantId != identity.tenantId -> AuthorizationDecision.denied(
                 "Support session tenant does not match target tenant",
@@ -78,7 +96,7 @@ class JdbcSupportTenantAccessPort(
 
     private fun hasActiveSessionGrant(
         identity: RequestIdentity.Support,
-        request: SupportTenantAccessRequest,
+        request: PlatformAccessRequest,
     ): Boolean {
         return jdbcTemplate.queryForObject(
             "SELECT can_support_session_access_tenant(?, ?, ?, ?)",
