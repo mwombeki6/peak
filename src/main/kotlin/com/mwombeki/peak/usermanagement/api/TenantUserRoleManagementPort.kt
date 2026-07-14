@@ -7,6 +7,10 @@ interface TenantUserRoleManagementPort {
 
     fun listTenantPermissions(query: ListTenantPermissionsQuery): List<TenantPermissionSummary>
 
+    fun listTenantAdministrators(
+        query: ListTenantAdministratorsQuery,
+    ): List<TenantAdministratorSummary>
+
     fun createTenantRole(command: CreateTenantRoleCommand): TenantRoleMutationReceipt
 
     fun updateTenantRole(command: UpdateTenantRoleCommand): TenantRoleMutationReceipt
@@ -16,4 +20,12 @@ interface TenantUserRoleManagementPort {
     fun assignTenantUserRole(command: AssignTenantUserRoleCommand): TenantUserRoleAssignmentReceipt
 
     fun revokeTenantUserRole(command: RevokeTenantUserRoleCommand): TenantUserRoleAssignmentReceipt
+
+    fun assignTenantAdministrator(
+        command: AssignTenantAdministratorCommand,
+    ): TenantUserRoleAssignmentReceipt
+
+    fun revokeTenantAdministrator(
+        command: RevokeTenantAdministratorCommand,
+    ): TenantUserRoleAssignmentReceipt
 }

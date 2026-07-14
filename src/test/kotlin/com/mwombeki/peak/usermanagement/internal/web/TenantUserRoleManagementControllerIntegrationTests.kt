@@ -90,6 +90,73 @@ class TenantUserRoleManagementControllerIntegrationTests {
     }
 
     @Test
+    fun assignsAndListsTenantAdministratorThroughSecuredRoutes() {
+        val fixture = roleManagementFixture()
+        insertAuthorizedFixture(fixture)
+        val administratorPermissionId = UUID.randomUUID()
+        val tenantAdministratorRoleId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO permissions (id, tenant_id, code, description)
+            VALUES (?, ?, 'tenant.administrators.manage', 'Manage tenant administrators')
+            """.trimIndent(),
+            administratorPermissionId,
+            fixture.tenantId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_role_permissions (tenant_role_id, permission_id)
+            VALUES (?, ?)
+            """.trimIndent(),
+            fixture.actorRoleId,
+            administratorPermissionId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_roles (
+                id, tenant_id, name, code, is_system, is_active
+            )
+            VALUES (
+                ?, ?, 'Tenant Administrator', 'tenant_admin', true, true
+            )
+            """.trimIndent(),
+            tenantAdministratorRoleId,
+            fixture.tenantId,
+        )
+
+        mockMvc.perform(
+            post(
+                "/api/v1/tenants/${fixture.tenantId}/administrators/" +
+                        "${fixture.targetUserId}/assign",
+            )
+                .secure(true)
+                .header(PeakRequestHeaders.CORRELATION_ID, "corr-web-tenant-admin-assign")
+                .header(PeakRequestHeaders.IDEMPOTENCY_KEY, "idem-web-tenant-admin-assign")
+                .header(PeakRequestHeaders.TENANT_ID, fixture.tenantId.toString())
+                .header(PeakRequestHeaders.TENANT_USER_ID, fixture.actorUserId.toString()),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.tenantId").value(fixture.tenantId.toString()))
+            .andExpect(jsonPath("$.userId").value(fixture.targetUserId.toString()))
+            .andExpect(jsonPath("$.tenantRoleId").value(tenantAdministratorRoleId.toString()))
+            .andExpect(jsonPath("$.assigned").value(true))
+            .andExpect(jsonPath("$.changed").value(true))
+
+        mockMvc.perform(
+            get("/api/v1/tenants/${fixture.tenantId}/administrators")
+                .secure(true)
+                .header(PeakRequestHeaders.CORRELATION_ID, "corr-web-tenant-admin-list")
+                .header(PeakRequestHeaders.TENANT_ID, fixture.tenantId.toString())
+                .header(PeakRequestHeaders.TENANT_USER_ID, fixture.actorUserId.toString()),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$[0].tenantId").value(fixture.tenantId.toString()))
+            .andExpect(jsonPath("$[0].userId").value(fixture.targetUserId.toString()))
+            .andExpect(jsonPath("$[0].tenantRoleId").value(tenantAdministratorRoleId.toString()))
+            .andExpect(jsonPath("$[0].hasActiveIdentity").value(false))
+    }
+
+    @Test
     fun createsUpdatesAndDeactivatesDynamicTenantRoleThroughSecuredRoutes() {
         val fixture = roleManagementFixture()
         insertAuthorizedFixture(fixture)

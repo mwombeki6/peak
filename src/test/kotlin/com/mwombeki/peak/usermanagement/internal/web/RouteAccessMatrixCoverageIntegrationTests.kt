@@ -302,6 +302,24 @@ class RouteAccessMatrixCoverageIntegrationTests {
             ),
             ScopedRouteExpectation(
                 method = "GET",
+                path = "/api/v1/tenants/$tenantId/administrators",
+                permissionCode = "tenant.roles.view",
+                routeScope = RouteScope.TENANT,
+            ),
+            ScopedRouteExpectation(
+                method = "POST",
+                path = "/api/v1/tenants/$tenantId/administrators/$userId/assign",
+                permissionCode = "tenant.administrators.manage",
+                routeScope = RouteScope.TENANT,
+            ),
+            ScopedRouteExpectation(
+                method = "POST",
+                path = "/api/v1/tenants/$tenantId/administrators/$userId/revoke",
+                permissionCode = "tenant.administrators.manage",
+                routeScope = RouteScope.TENANT,
+            ),
+            ScopedRouteExpectation(
+                method = "GET",
                 path = "/api/v1/tenants/$tenantId/properties/$propertyId/roles",
                 permissionCode = "tenant.properties.roles.view",
                 routeScope = RouteScope.TENANT,

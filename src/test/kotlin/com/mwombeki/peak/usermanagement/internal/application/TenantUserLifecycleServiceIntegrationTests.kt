@@ -307,6 +307,104 @@ class TenantUserLifecycleServiceIntegrationTests {
     }
 
     @Test
+    fun rejectsDisablingOrLockingSoleEffectiveTenantAdministrator() {
+        listOf(
+            TenantUserLifecycleAction.DISABLE,
+            TenantUserLifecycleAction.LOCK,
+        ).forEach { action ->
+            val fixture = lifecycleFixture()
+            insertLifecycleFixture(fixture)
+            grantActorTenantAdminAll(fixture)
+            insertSystemTenantAdministratorRole(
+                fixture.tenantId,
+                listOf(fixture.targetUserId),
+            )
+            requestContextHolder.set(
+                tenantContext(fixture, "idem-sole-tenant-admin-${action.databaseValue}"),
+            )
+
+            val error = assertFailsWith<IllegalArgumentException> {
+                lifecyclePort.changeTenantUserLifecycle(
+                    TenantUserLifecycleCommand(
+                        tenantId = fixture.tenantId,
+                        userId = fixture.targetUserId,
+                        action = action,
+                    ),
+                )
+            }
+
+            assertEquals(
+                "Tenant administrator access cannot be removed without another active administrator",
+                error.message,
+            )
+            assertEquals("active", userRow(fixture)["status"])
+            assertEquals(true, userRow(fixture)["is_active"])
+        }
+    }
+
+    @Test
+    fun rejectsRevokingSoleTenantAdministratorsLastIdentityLink() {
+        val fixture = lifecycleFixture()
+        insertLifecycleFixture(fixture)
+        grantActorTenantAdminAll(fixture)
+        insertSystemTenantAdministratorRole(
+            fixture.tenantId,
+            listOf(fixture.targetUserId),
+        )
+        requestContextHolder.set(tenantContext(fixture, "idem-sole-tenant-admin-identity"))
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            lifecyclePort.revokeTenantUserIdentityLink(
+                RevokeTenantUserIdentityLinkCommand(
+                    tenantId = fixture.tenantId,
+                    userId = fixture.targetUserId,
+                    identityLinkId = fixture.identityLinkId,
+                ),
+            )
+        }
+
+        assertEquals(
+            "Tenant administrator access cannot be removed without another active administrator",
+            error.message,
+        )
+        assertNull(identityLinkRevokedAt(fixture.identityLinkId))
+        assertIs<ResolvedExternalIdentity.Tenant>(resolveIdentity(fixture))
+    }
+
+    @Test
+    fun allowsDisablingTenantAdministratorAfterEffectiveReplacementExists() {
+        val fixture = lifecycleFixture()
+        val replacementUserId = UUID.randomUUID()
+        insertLifecycleFixture(fixture)
+        grantActorTenantAdminAll(fixture)
+        insertTenantUser(
+            tenantId = fixture.tenantId,
+            userId = replacementUserId,
+            email = "tenant-admin-replacement-$replacementUserId@example.com",
+            status = "active",
+            isActive = true,
+        )
+        insertTenantIdentityLink(fixture.tenantId, replacementUserId)
+        insertSystemTenantAdministratorRole(
+            fixture.tenantId,
+            listOf(fixture.targetUserId, replacementUserId),
+        )
+        requestContextHolder.set(tenantContext(fixture, "idem-tenant-admin-replaced"))
+
+        val receipt = lifecyclePort.changeTenantUserLifecycle(
+            TenantUserLifecycleCommand(
+                tenantId = fixture.tenantId,
+                userId = fixture.targetUserId,
+                action = TenantUserLifecycleAction.DISABLE,
+            ),
+        )
+
+        assertEquals("disabled", receipt.status)
+        assertEquals(false, receipt.isActive)
+        assertEquals(true, receipt.changed)
+    }
+
+    @Test
     fun rejectsLifecycleChangeAgainstUserWithTenantPermissionActorDoesNotHold() {
         val fixture = lifecycleFixture()
         insertLifecycleFixture(fixture)
@@ -701,6 +799,46 @@ class TenantUserLifecycleServiceIntegrationTests {
             tenantId,
             roleId,
         )
+    }
+
+    private fun grantActorTenantAdminAll(fixture: LifecycleFixture) {
+        ensureTenantPermission(fixture.tenantId, "tenant.admin.all")
+        val roleId = insertTenantRole(fixture.tenantId, "actor-tenant-admin")
+        insertTenantRolePermission(roleId, fixture.tenantId, "tenant.admin.all")
+        insertTenantRoleAssignment(fixture.tenantId, fixture.actorUserId, roleId)
+    }
+
+    private fun insertSystemTenantAdministratorRole(
+        tenantId: UUID,
+        userIds: List<UUID>,
+    ): UUID {
+        ensureTenantPermission(tenantId, "tenant.admin.all")
+        val tenantRoleId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_roles (
+                id,
+                tenant_id,
+                name,
+                code,
+                description,
+                is_system,
+                is_active
+            )
+            VALUES (
+                ?, ?, 'Tenant Administrator', 'tenant_admin',
+                'Immutable tenant administrator role provisioned by the platform',
+                true, true
+            )
+            """.trimIndent(),
+            tenantRoleId,
+            tenantId,
+        )
+        insertTenantRolePermission(tenantRoleId, tenantId, "tenant.admin.all")
+        userIds.forEach { userId ->
+            insertTenantRoleAssignment(tenantId, userId, tenantRoleId)
+        }
+        return tenantRoleId
     }
 
     private fun insertProperty(tenantId: UUID, propertyId: UUID) {

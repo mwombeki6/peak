@@ -11,12 +11,12 @@ These routes require a platform identity and the corresponding platform tenant p
 | `POST` | `/api/v1/platform/tenants` | `platform.tenants.manage` | Register a tenant and canonical business profile. |
 | `GET` | `/api/v1/platform/tenants/{id}` | `platform.tenants.view` | View tenant account and profile state. |
 | `PATCH` | `/api/v1/platform/tenants/{id}/status` | `platform.tenants.manage` | Change tenant lifecycle status. |
-| `POST` | `/api/v1/platform/tenants/{id}/administrators` | `platform.users.manage` | Provision the first tenant administrator and OIDC identity. |
+| `POST` | `/api/v1/platform/tenants/{id}/administrators` | `platform.users.manage` | Provision an initial or recovery tenant administrator and OIDC identity. |
 | `POST` | `/api/v1/platform/tenants/{id}/profile/verify` | `platform.tenants.verify` | Mark a reviewed business profile as verified. |
 
 The platform routes are covered by `module_access_matrix` after API version normalization. Tenant detail reads have an exact `GET` route contract so platform read-only users do not need tenant lifecycle mutation permission.
 
-Tenant registration and administrator provisioning are separate idempotent operations. Provisioning creates the active tenant user, immutable `tenant_admin` role, complete tenant permission grant, role assignment, `tenant_admin` module enablement, and DB-backed OIDC link atomically.
+Tenant registration and administrator provisioning are separate idempotent operations. Provisioning creates or reuses an active tenant user, ensures the immutable `tenant_admin` role and complete permission grant, assigns the role, enables the `tenant_admin` module, and binds the DB-backed OIDC link atomically. The same platform operation is the supervised recovery path when every existing tenant administrator has lost access.
 
 ## Tenant Administration API
 

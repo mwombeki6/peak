@@ -1,12 +1,16 @@
 package com.mwombeki.peak.usermanagement.internal.web
 
+import com.mwombeki.peak.usermanagement.api.AssignTenantAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.AssignTenantUserRoleCommand
 import com.mwombeki.peak.usermanagement.api.CreateTenantRoleCommand
 import com.mwombeki.peak.usermanagement.api.DeactivateTenantRoleCommand
 import com.mwombeki.peak.usermanagement.api.GetTenantRoleQuery
+import com.mwombeki.peak.usermanagement.api.ListTenantAdministratorsQuery
 import com.mwombeki.peak.usermanagement.api.ListTenantPermissionsQuery
 import com.mwombeki.peak.usermanagement.api.ListTenantRolesQuery
+import com.mwombeki.peak.usermanagement.api.RevokeTenantAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.RevokeTenantUserRoleCommand
+import com.mwombeki.peak.usermanagement.api.TenantAdministratorSummary
 import com.mwombeki.peak.usermanagement.api.TenantPermissionSummary
 import com.mwombeki.peak.usermanagement.api.TenantRoleMutationReceipt
 import com.mwombeki.peak.usermanagement.api.TenantRoleSummary
@@ -19,6 +23,7 @@ import com.mwombeki.peak.usermanagement.api.UpdateTenantRoleCommand
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotEmpty
+import java.time.Instant
 import java.util.UUID
 import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
@@ -65,6 +70,35 @@ class TenantUserRoleManagementController(
         return roleManagementPort.listTenantPermissions(
             ListTenantPermissionsQuery(tenantId),
         ).map { it.toHttpResponse() }
+    }
+
+    @GetMapping("/tenants/{tenantId}/administrators")
+    fun listTenantAdministrators(
+        @PathVariable tenantId: UUID,
+    ): List<TenantAdministratorHttpResponse> {
+        return roleManagementPort.listTenantAdministrators(
+            ListTenantAdministratorsQuery(tenantId),
+        ).map { it.toHttpResponse() }
+    }
+
+    @PostMapping("/tenants/{tenantId}/administrators/{userId}/assign")
+    fun assignTenantAdministrator(
+        @PathVariable tenantId: UUID,
+        @PathVariable userId: UUID,
+    ): TenantUserRoleAssignmentHttpResponse {
+        return roleManagementPort.assignTenantAdministrator(
+            AssignTenantAdministratorCommand(tenantId, userId),
+        ).toHttpResponse()
+    }
+
+    @PostMapping("/tenants/{tenantId}/administrators/{userId}/revoke")
+    fun revokeTenantAdministrator(
+        @PathVariable tenantId: UUID,
+        @PathVariable userId: UUID,
+    ): TenantUserRoleAssignmentHttpResponse {
+        return roleManagementPort.revokeTenantAdministrator(
+            RevokeTenantAdministratorCommand(tenantId, userId),
+        ).toHttpResponse()
     }
 
     @PostMapping("/tenants/{tenantId}/roles")
@@ -210,6 +244,20 @@ class TenantUserRoleManagementController(
         )
     }
 
+    private fun TenantAdministratorSummary.toHttpResponse(): TenantAdministratorHttpResponse {
+        return TenantAdministratorHttpResponse(
+            tenantId = tenantId,
+            tenantRoleId = tenantRoleId,
+            userId = userId,
+            fullName = fullName,
+            email = email,
+            status = status,
+            isActive = isActive,
+            lockedUntil = lockedUntil,
+            hasActiveIdentity = hasActiveIdentity,
+        )
+    }
+
     private fun TenantUserRoleAssignmentReceipt.toHttpResponse():
             TenantUserRoleAssignmentHttpResponse {
         return TenantUserRoleAssignmentHttpResponse(
@@ -266,6 +314,18 @@ data class TenantPermissionHttpResponse(
     val tenantId: UUID,
     val code: String,
     val description: String?,
+)
+
+data class TenantAdministratorHttpResponse(
+    val tenantId: UUID,
+    val tenantRoleId: UUID,
+    val userId: UUID,
+    val fullName: String,
+    val email: String,
+    val status: String,
+    val isActive: Boolean,
+    val lockedUntil: Instant?,
+    val hasActiveIdentity: Boolean,
 )
 
 data class TenantUserRoleAssignmentHttpResponse(

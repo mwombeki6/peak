@@ -12,13 +12,17 @@ import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.usermanagement.api.AssignTenantAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.AssignTenantUserRoleCommand
 import com.mwombeki.peak.usermanagement.api.CreateTenantRoleCommand
 import com.mwombeki.peak.usermanagement.api.DeactivateTenantRoleCommand
 import com.mwombeki.peak.usermanagement.api.GetTenantRoleQuery
+import com.mwombeki.peak.usermanagement.api.ListTenantAdministratorsQuery
 import com.mwombeki.peak.usermanagement.api.ListTenantPermissionsQuery
 import com.mwombeki.peak.usermanagement.api.ListTenantRolesQuery
+import com.mwombeki.peak.usermanagement.api.RevokeTenantAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.RevokeTenantUserRoleCommand
+import com.mwombeki.peak.usermanagement.api.TenantAdministratorSummary
 import com.mwombeki.peak.usermanagement.api.TenantPermissionSummary
 import com.mwombeki.peak.usermanagement.api.TenantRoleMutationReceipt
 import com.mwombeki.peak.usermanagement.api.TenantRoleSummary
@@ -144,6 +148,67 @@ class TenantUserRoleManagementService(
         )
     }
 
+    override fun listTenantAdministrators(
+        query: ListTenantAdministratorsQuery,
+    ): List<TenantAdministratorSummary> {
+        return requireNotNull(
+            transactionTemplate.execute {
+                bindTenantActorWithPermission(
+                    tenantId = query.tenantId,
+                    permissionCode = TENANT_ROLE_VIEW_PERMISSION,
+                    denialMessage = "Tenant user lacks tenant role view permission",
+                )
+                jdbcTemplate.query(
+                    """
+                    SELECT
+                        u.tenant_id,
+                        tr.id AS tenant_role_id,
+                        u.id AS user_id,
+                        COALESCE(u.full_name, '') AS full_name,
+                        u.email,
+                        COALESCE(u.status, '') AS status,
+                        u.is_active,
+                        u.locked_until,
+                        EXISTS (
+                            SELECT 1
+                            FROM identity_links il
+                            WHERE il.tenant_id = u.tenant_id
+                              AND il.user_id = u.id
+                              AND il.identity_mode = 'tenant'
+                              AND il.revoked_at IS NULL
+                        ) AS has_active_identity
+                    FROM user_tenant_roles utr
+                    JOIN tenant_roles tr
+                      ON tr.id = utr.tenant_role_id
+                     AND tr.tenant_id = utr.tenant_id
+                    JOIN users u
+                      ON u.id = utr.user_id
+                     AND u.tenant_id = utr.tenant_id
+                    WHERE utr.tenant_id = ?
+                      AND tr.code = ?
+                      AND tr.is_system = true
+                    ORDER BY u.full_name, u.email, u.id
+                    """.trimIndent(),
+                    { rs, _ ->
+                        TenantAdministratorSummary(
+                            tenantId = rs.getObject("tenant_id", UUID::class.java),
+                            tenantRoleId = rs.getObject("tenant_role_id", UUID::class.java),
+                            userId = rs.getObject("user_id", UUID::class.java),
+                            fullName = rs.getString("full_name"),
+                            email = rs.getString("email"),
+                            status = rs.getString("status"),
+                            isActive = rs.getBoolean("is_active"),
+                            lockedUntil = rs.getTimestamp("locked_until")?.toInstant(),
+                            hasActiveIdentity = rs.getBoolean("has_active_identity"),
+                        )
+                    },
+                    query.tenantId,
+                    TENANT_ADMIN_ROLE_CODE,
+                )
+            },
+        )
+    }
+
     override fun createTenantRole(command: CreateTenantRoleCommand): TenantRoleMutationReceipt {
         return mutateTenantRole(
             tenantId = command.tenantId,
@@ -151,6 +216,8 @@ class TenantUserRoleManagementService(
             requestPayload = command,
         ) { idempotencyKeyId ->
             val roleId = UUID.randomUUID()
+            val roleCode = command.code.normalizedTenantRoleCode()
+            val roleName = command.name.normalizedTenantRoleName()
             requireDelegableTenantPermissions(command.tenantId, command.permissionCodes)
             val permissionIds = requireTenantPermissions(command.tenantId, command.permissionCodes)
             try {
@@ -169,8 +236,8 @@ class TenantUserRoleManagementService(
                     """.trimIndent(),
                     roleId,
                     command.tenantId,
-                    command.code.normalizedCode(),
-                    command.name.normalizedRequired("name"),
+                    roleCode,
+                    roleName,
                     command.description?.trim()?.takeIf { it.isNotEmpty() },
                 )
             } catch (ex: DuplicateKeyException) {
@@ -193,7 +260,7 @@ class TenantUserRoleManagementService(
                     payload = mapOf(
                         "tenantId" to command.tenantId,
                         "tenantRoleId" to roleId,
-                        "code" to command.code.normalizedCode(),
+                        "code" to roleCode,
                         "permissionCodes" to command.permissionCodes.map { it.normalizedCode() },
                     ),
                     idempotencyKeyId = idempotencyKeyId,
@@ -210,6 +277,7 @@ class TenantUserRoleManagementService(
         ) { idempotencyKeyId ->
             requireMutableTenantRole(command.tenantId, command.tenantRoleId)
             requireDelegableTenantRole(command.tenantId, command.tenantRoleId)
+            val roleName = command.name?.normalizedTenantRoleName()
             val permissionIds = command.permissionCodes
                 ?.also { requireDelegableTenantPermissions(command.tenantId, it) }
                 ?.let { requireTenantPermissions(command.tenantId, it) }
@@ -223,7 +291,7 @@ class TenantUserRoleManagementService(
                   AND id = ?
                   AND is_system = false
                 """.trimIndent(),
-                command.name?.normalizedRequired("name"),
+                roleName,
                 command.description?.trim()?.takeIf { it.isNotEmpty() },
                 command.tenantId,
                 command.tenantRoleId,
@@ -332,6 +400,163 @@ class TenantUserRoleManagementService(
         return requireNotNull(
             transactionTemplate.execute {
                 revokeInsideTransaction(command)
+            },
+        )
+    }
+
+    override fun assignTenantAdministrator(
+        command: AssignTenantAdministratorCommand,
+    ): TenantUserRoleAssignmentReceipt {
+        return mutateTenantAdministratorAssignment(
+            tenantId = command.tenantId,
+            userId = command.userId,
+            operationType = "tenant.administrator.assign",
+            requestPayload = command,
+        ) { actorUserId, idempotencyKeyId ->
+            require(
+                actorUserId != command.userId ||
+                    actorHasTenantAdminPermission(command.tenantId, actorUserId),
+            ) {
+                "Only a tenant super administrator can assign own tenant administrator access"
+            }
+            requireActiveTenantUser(command.tenantId, command.userId)
+            val tenantRoleId = requireSystemTenantAdministratorRole(command.tenantId)
+            val inserted = jdbcTemplate.update(
+                """
+                INSERT INTO user_tenant_roles (
+                    user_id,
+                    tenant_id,
+                    tenant_role_id,
+                    assigned_by
+                )
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT ON CONSTRAINT user_tenant_roles_pkey DO NOTHING
+                """.trimIndent(),
+                command.userId,
+                command.tenantId,
+                tenantRoleId,
+                actorUserId,
+            ) == 1
+
+            TenantUserRoleAssignmentReceipt(
+                tenantId = command.tenantId,
+                userId = command.userId,
+                tenantRoleId = tenantRoleId,
+                assigned = true,
+                changed = inserted,
+                replayed = false,
+            ).also { receipt ->
+                if (inserted) {
+                    recordTenantAdministratorSideEffects(
+                        receipt = receipt,
+                        action = "assigned",
+                        idempotencyKeyId = idempotencyKeyId,
+                    )
+                }
+            }
+        }
+    }
+
+    override fun revokeTenantAdministrator(
+        command: RevokeTenantAdministratorCommand,
+    ): TenantUserRoleAssignmentReceipt {
+        return mutateTenantAdministratorAssignment(
+            tenantId = command.tenantId,
+            userId = command.userId,
+            operationType = "tenant.administrator.revoke",
+            requestPayload = command,
+        ) { actorUserId, idempotencyKeyId ->
+            require(actorUserId != command.userId) {
+                "Tenant user cannot revoke own tenant administrator access"
+            }
+            requireTenantUser(command.tenantId, command.userId)
+            val tenantRoleId = requireSystemTenantAdministratorRole(command.tenantId)
+            val assigned = tenantAdministratorAssignmentExists(
+                tenantId = command.tenantId,
+                userId = command.userId,
+                tenantRoleId = tenantRoleId,
+            )
+            if (assigned) {
+                requireAnotherActiveTenantAdministrator(
+                    tenantId = command.tenantId,
+                    excludedUserId = command.userId,
+                    tenantRoleId = tenantRoleId,
+                )
+            }
+            val deleted = assigned && jdbcTemplate.update(
+                """
+                DELETE FROM user_tenant_roles
+                WHERE tenant_id = ?
+                  AND user_id = ?
+                  AND tenant_role_id = ?
+                """.trimIndent(),
+                command.tenantId,
+                command.userId,
+                tenantRoleId,
+            ) == 1
+
+            TenantUserRoleAssignmentReceipt(
+                tenantId = command.tenantId,
+                userId = command.userId,
+                tenantRoleId = tenantRoleId,
+                assigned = false,
+                changed = deleted,
+                replayed = false,
+            ).also { receipt ->
+                if (deleted) {
+                    recordTenantAdministratorSideEffects(
+                        receipt = receipt,
+                        action = "revoked",
+                        idempotencyKeyId = idempotencyKeyId,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun mutateTenantAdministratorAssignment(
+        tenantId: UUID,
+        userId: UUID,
+        operationType: String,
+        requestPayload: Any,
+        block: (UUID, UUID) -> TenantUserRoleAssignmentReceipt,
+    ): TenantUserRoleAssignmentReceipt {
+        return requireNotNull(
+            transactionTemplate.execute {
+                val actorUserId = bindTenantActorWithPermission(
+                    tenantId = tenantId,
+                    permissionCode = TENANT_ADMINISTRATOR_MANAGE_PERMISSION,
+                    denialMessage = "Tenant user lacks tenant administrator management permission",
+                )
+                lockTenantForAdministratorContinuity(tenantId)
+                val reservation = idempotencyPort.reserve(
+                    IdempotencyCommand(
+                        operationType = operationType,
+                        requestPayload = requestPayload,
+                        resourceType = "user_tenant_roles",
+                    ),
+                )
+                when (reservation) {
+                    is IdempotencyReservation.Started -> {
+                        val receipt = block(actorUserId, reservation.recordId)
+                        idempotencyPort.markSucceeded(
+                            recordId = reservation.recordId,
+                            responseCode = 200,
+                            responseBody = receipt,
+                            resourceId = userId,
+                        )
+                        receipt
+                    }
+
+                    is IdempotencyReservation.Replay -> replayAssignment(reservation)
+                    is IdempotencyReservation.InProgress -> throw TenantUserRoleManagementInProgressException(
+                        "Tenant administrator command is already being processed for this idempotency key",
+                    )
+
+                    is IdempotencyReservation.Conflict -> throw TenantUserRoleManagementConflictException(
+                        "Idempotency key was already used for a different tenant administrator request",
+                    )
+                }
             },
         )
     }
@@ -536,6 +761,135 @@ class TenantUserRoleManagementService(
             "Requested tenant does not match identity"
         }
         return identity.tenantUserId
+    }
+
+    private fun bindTenantActorWithPermission(
+        tenantId: UUID,
+        permissionCode: String,
+        denialMessage: String,
+    ): UUID {
+        val actorUserId = requireTenantActor(tenantId)
+        databaseSessionContext.bind(requestContextHolder.current().identity)
+        val allowed = jdbcTemplate.queryForObject(
+            "SELECT user_has_tenant_permission(?, ?, ?)",
+            Boolean::class.java,
+            actorUserId,
+            tenantId,
+            permissionCode,
+        ) == true
+        require(allowed) {
+            denialMessage
+        }
+        return actorUserId
+    }
+
+    private fun lockTenantForAdministratorContinuity(tenantId: UUID) {
+        val lockedTenantId = jdbcTemplate.query(
+            """
+            SELECT id
+            FROM tenants
+            WHERE id = ?
+              AND deleted_at IS NULL
+            FOR UPDATE
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("id", UUID::class.java) },
+            tenantId,
+        ).singleOrNull()
+        if (lockedTenantId == null) {
+            throw TenantUserRoleManagementNotFoundException("Tenant was not found")
+        }
+    }
+
+    private fun actorHasTenantAdminPermission(tenantId: UUID, actorUserId: UUID): Boolean {
+        return jdbcTemplate.queryForObject(
+            "SELECT user_has_tenant_permission(?, ?, ?)",
+            Boolean::class.java,
+            actorUserId,
+            tenantId,
+            TENANT_ADMIN_ALL_PERMISSION,
+        ) == true
+    }
+
+    private fun requireSystemTenantAdministratorRole(tenantId: UUID): UUID {
+        return jdbcTemplate.query(
+            """
+            SELECT id
+            FROM tenant_roles
+            WHERE tenant_id = ?
+              AND code = ?
+              AND is_system = true
+              AND is_active = true
+            FOR UPDATE
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("id", UUID::class.java) },
+            tenantId,
+            TENANT_ADMIN_ROLE_CODE,
+        ).singleOrNull()
+            ?: throw TenantUserRoleManagementNotFoundException(
+                "Active system Tenant Administrator role was not found",
+            )
+    }
+
+    private fun tenantAdministratorAssignmentExists(
+        tenantId: UUID,
+        userId: UUID,
+        tenantRoleId: UUID,
+    ): Boolean {
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM user_tenant_roles
+                WHERE tenant_id = ?
+                  AND user_id = ?
+                  AND tenant_role_id = ?
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            tenantId,
+            userId,
+            tenantRoleId,
+        ) == true
+    }
+
+    private fun requireAnotherActiveTenantAdministrator(
+        tenantId: UUID,
+        excludedUserId: UUID,
+        tenantRoleId: UUID,
+    ) {
+        val exists = jdbcTemplate.queryForObject(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM user_tenant_roles utr
+                JOIN users u
+                  ON u.id = utr.user_id
+                 AND u.tenant_id = utr.tenant_id
+                WHERE utr.tenant_id = ?
+                  AND utr.tenant_role_id = ?
+                  AND utr.user_id <> ?
+                  AND u.status = 'active'
+                  AND u.is_active = true
+                  AND u.deleted_at IS NULL
+                  AND (u.locked_until IS NULL OR u.locked_until <= now())
+                  AND EXISTS (
+                      SELECT 1
+                      FROM identity_links il
+                      WHERE il.tenant_id = u.tenant_id
+                        AND il.user_id = u.id
+                        AND il.identity_mode = 'tenant'
+                        AND il.revoked_at IS NULL
+                  )
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            tenantId,
+            tenantRoleId,
+            excludedUserId,
+        ) == true
+        require(exists) {
+            "Tenant administrator access cannot be removed without another active administrator"
+        }
     }
 
     private fun requireActorCanManageTargetUser(
@@ -759,6 +1113,39 @@ class TenantUserRoleManagementService(
                 ),
                 idempotencyKeyId = idempotencyKeyId,
                 priority = 3,
+            ),
+        )
+    }
+
+    private fun recordTenantAdministratorSideEffects(
+        receipt: TenantUserRoleAssignmentReceipt,
+        action: String,
+        idempotencyKeyId: UUID,
+    ) {
+        val payload = mapOf(
+            "tenantId" to receipt.tenantId,
+            "userId" to receipt.userId,
+            "tenantRoleId" to receipt.tenantRoleId,
+            "action" to action,
+        )
+        auditPort.recordTenantEvent(
+            TenantAuditEvent(
+                tenantId = receipt.tenantId,
+                action = "tenant.administrator.$action",
+                resource = AuditResource("user_tenant_roles", receipt.userId),
+                after = payload,
+            ),
+        )
+        outboxPort.enqueue(
+            OutboxEventCommand(
+                aggregateType = "user_tenant_roles",
+                aggregateId = receipt.userId,
+                tenantId = receipt.tenantId,
+                eventType = "tenant.administrator.$action",
+                destination = OutboxDestination.PLATFORM,
+                payload = payload,
+                idempotencyKeyId = idempotencyKeyId,
+                priority = 4,
             ),
         )
     }
@@ -1047,6 +1434,22 @@ class TenantUserRoleManagementService(
         return normalizedRequired("code").lowercase()
     }
 
+    private fun String.normalizedTenantRoleCode(): String {
+        return normalizedCode().also { roleCode ->
+            require(roleCode != TENANT_ADMIN_ROLE_CODE) {
+                "tenant_admin is reserved for the system Tenant Administrator role"
+            }
+        }
+    }
+
+    private fun String.normalizedTenantRoleName(): String {
+        return normalizedRequired("name").also { roleName ->
+            require(!roleName.equals(TENANT_ADMIN_ROLE_NAME, ignoreCase = true)) {
+                "Tenant Administrator is reserved for the system tenant role"
+            }
+        }
+    }
+
     private data class RoleChangeCommand(
         val tenantId: UUID,
         val userId: UUID,
@@ -1066,5 +1469,9 @@ class TenantUserRoleManagementService(
 
     private companion object {
         const val TENANT_ADMIN_ALL_PERMISSION = "tenant.admin.all"
+        private const val TENANT_ADMINISTRATOR_MANAGE_PERMISSION = "tenant.administrators.manage"
+        private const val TENANT_ROLE_VIEW_PERMISSION = "tenant.roles.view"
+        private const val TENANT_ADMIN_ROLE_CODE = "tenant_admin"
+        private const val TENANT_ADMIN_ROLE_NAME = "Tenant Administrator"
     }
 }

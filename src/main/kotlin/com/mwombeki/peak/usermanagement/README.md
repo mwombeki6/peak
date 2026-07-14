@@ -8,7 +8,7 @@ User management owns authorization, external identity resolution, platform admin
 - Enforce route authorization using `module_access_matrix`.
 - Authorize static permissions through canonical role-permission tables.
 - Manage platform users, platform roles, platform role assignments, platform permissions, and platform OIDC identity links through audited APIs.
-- Support tenant invitations, identity links, dynamic tenant role CRUD, role assignment, role revocation, lock, unlock, disable, reactivate, and identity revocation.
+- Support tenant invitations, identity links, dynamic tenant role CRUD, administrator succession, role assignment, role revocation, lock, unlock, disable, reactivate, and identity revocation.
 
 ## Access Control Model
 
@@ -17,6 +17,7 @@ User management owns authorization, external identity resolution, platform admin
 - Platform permissions are checked through platform roles and tenant access helpers.
 - Tenant permissions are checked through tenant roles, role permissions, and active tenant user state.
 - Tenant-created roles are dynamic but tenant-scoped; a tenant route cannot assign a role from another tenant.
+- Tenant administrator succession uses the dedicated `tenant.administrators.manage` capability; the platform provisioning endpoint remains the supervised recovery path when no tenant administrator can sign in.
 - Tenant admins manage ordinary property access with `tenant.properties.manage_access`; actual property operations still require a property-scoped role assignment.
 - The tenant owns its properties and governs administrator continuity with the narrower, auditable `tenant.properties.administrators.manage` capability.
 - Property roles are tenant-owned role templates in `roles`; `user_property_roles` scopes an assignment to one property.
@@ -51,7 +52,7 @@ All routes below are platform-scoped and are covered by `module_access_matrix`. 
 | `PUT` | `/api/v1/platform/roles/{platformRoleId}` | Update a dynamic platform role and its permissions. |
 | `DELETE` | `/api/v1/platform/roles/{platformRoleId}` | Deactivate a dynamic platform role. |
 | `GET` | `/api/v1/platform/permissions` | List immutable platform permissions. |
-| `POST` | `/api/v1/platform/tenants/{tenantId}/administrators` | Provision the tenant's first administrator, immutable system role, permissions, and OIDC link. |
+| `POST` | `/api/v1/platform/tenants/{tenantId}/administrators` | Provision an initial or recovery administrator, immutable system role, permissions, and OIDC link. |
 | `POST` | `/api/v1/platform/tenants/{tenantId}/profile/verify` | Verify the tenant business profile after platform review. |
 
 Mutating platform administration routes require `Idempotency-Key`. Successful changes write a `platform_audit_logs` record and enqueue a platform outbox event. System platform roles cannot be modified, and an operator cannot lock, disable, assign roles to, revoke roles from, link identities for, or revoke identity links from themselves. Dynamic platform role creation, update, deactivation, assignment, and revocation cannot manage permissions above the actor's effective platform permission set. Platform user profile, lifecycle, role assignment, role revocation, identity-link creation, and identity-link revocation also require the actor to hold the target user's current effective platform permissions; `platform.admin.all` satisfies this hierarchy check.
@@ -76,10 +77,15 @@ Tenant role routes are tenant-scoped and covered by `module_access_matrix`. Read
 | `GET` | `/api/v1/tenants/{tenantId}/permissions` | `tenant.roles.view` | List tenant permission codes available for tenant roles. |
 | `POST` | `/api/v1/tenants/{tenantId}/users/{userId}/roles/{tenantRoleId}/assign` | `tenant.users.manage` | Assign a dynamic tenant role to a tenant user. |
 | `POST` | `/api/v1/tenants/{tenantId}/users/{userId}/roles/{tenantRoleId}/revoke` | `tenant.users.manage` | Revoke a dynamic tenant role from a tenant user. |
+| `GET` | `/api/v1/tenants/{tenantId}/administrators` | `tenant.roles.view` | List system tenant administrators and their effective account/identity state. |
+| `POST` | `/api/v1/tenants/{tenantId}/administrators/{userId}/assign` | `tenant.administrators.manage` | Appoint an active tenant user as a tenant administrator. |
+| `POST` | `/api/v1/tenants/{tenantId}/administrators/{userId}/revoke` | `tenant.administrators.manage` | Revoke an administrator only after another effective administrator exists. |
 
-Mutating tenant role routes require `Idempotency-Key`. Successful dynamic role definition changes write `audit_logs` entries and enqueue platform outbox events. Tenant system roles are read-only through tenant self-service, a tenant user cannot change their own role assignments, and delegated permissions cannot exceed the actor's effective permission set. Updating, deactivating, assigning, or revoking a role also requires the actor to hold the role's current permission set.
+Mutating tenant role routes require `Idempotency-Key`. Successful dynamic role definition changes write `audit_logs` entries and enqueue platform outbox events. Tenant system role definitions remain read-only through ordinary tenant role APIs, a tenant user cannot change their own ordinary role assignments, and delegated permissions cannot exceed the actor's effective permission set. Updating, deactivating, assigning, or revoking a role also requires the actor to hold the role's current permission set.
 
-Tenant user lifecycle and identity-link revocation routes also require `tenant.users.manage`. The actor cannot disable, lock, reactivate, unlock, or revoke identity links for a user whose effective tenant or property permissions exceed the actor's own effective permissions, unless the actor holds `tenant.admin.all`. Disabling or locking a property administrator, or revoking that user's final active tenant identity link, is rejected when it would leave any property without another active administrator who can sign in.
+Tenant administrator assignment is the single controlled exception for a system tenant-role assignment. It has dedicated routes and permission checks, serializes succession on the tenant, prevents self-revocation, allows self-assignment only to an existing `tenant.admin.all` holder, and never permits removal of the last effective administrator. A replacement is effective only when the user is active, unlocked, undeleted, and has an unrevoked tenant OIDC identity link.
+
+Tenant user lifecycle and identity-link revocation routes also require `tenant.users.manage`. The actor cannot disable, lock, reactivate, unlock, or revoke identity links for a user whose effective tenant or property permissions exceed the actor's own effective permissions, unless the actor holds `tenant.admin.all`. Disabling or locking a tenant/property administrator, or revoking that user's final active tenant identity link, is rejected when it would leave the tenant or any property without another active administrator who can sign in.
 
 Tenant invitations only create new tenant users. They cannot reactivate or relink an existing active, invited, locked, or disabled account; existing accounts must use the lifecycle and identity-link administration routes. Acceptance revalidates that the invited dynamic role is still active and assignable.
 

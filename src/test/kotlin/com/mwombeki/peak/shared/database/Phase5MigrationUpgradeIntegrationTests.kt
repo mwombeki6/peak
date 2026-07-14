@@ -43,6 +43,7 @@ class Phase5MigrationUpgradeIntegrationTests @Autowired constructor(
             val folioId = UUID.randomUUID()
             val chargeId = UUID.randomUUID()
             val legacyPropertyAdminRoleId = UUID.randomUUID()
+            val legacyTenantAdminRoleId = UUID.randomUUID()
             DriverManager.getConnection(
                 url,
                 postgres.username,
@@ -109,22 +110,34 @@ class Phase5MigrationUpgradeIntegrationTests @Autowired constructor(
                 postgres.username,
                 postgres.password,
             ).use { connection ->
-                connection.createStatement().execute(
-                    """
-                    INSERT INTO roles (id, tenant_id, name, is_system, is_active)
-                    VALUES (
-                        '$legacyPropertyAdminRoleId', '$tenantId',
-                        'Property Administrator', false, true
+                connection.createStatement().use { sql ->
+                    sql.execute(
+                        """
+                        INSERT INTO roles (id, tenant_id, name, is_system, is_active)
+                        VALUES (
+                            '$legacyPropertyAdminRoleId', '$tenantId',
+                            'Property Administrator', false, true
+                        )
+                        """.trimIndent(),
                     )
-                    """.trimIndent(),
-                )
+                    sql.execute(
+                        """
+                        INSERT INTO tenant_roles (
+                            id, tenant_id, name, code, is_system, is_active
+                        ) VALUES (
+                            '$legacyTenantAdminRoleId', '$tenantId',
+                            'Tenant Administrator', 'tenant_admin', false, true
+                        )
+                        """.trimIndent(),
+                    )
+                }
             }
 
             val flyway = Flyway.configure()
                 .dataSource(url, postgres.username, postgres.password)
                 .load()
             flyway.migrate()
-            assertEquals("63", flyway.info().current().version.version)
+            assertEquals("64", flyway.info().current().version.version)
 
             DriverManager.getConnection(
                 url,
@@ -151,6 +164,20 @@ class Phase5MigrationUpgradeIntegrationTests @Autowired constructor(
                             "backfilled_v50",
                             rows.getString("business_date_provenance"),
                         )
+                    }
+                }
+                connection.prepareStatement(
+                    """
+                    SELECT count(*)
+                    FROM permissions
+                    WHERE tenant_id = ?
+                      AND code = 'tenant.administrators.manage'
+                    """.trimIndent(),
+                ).use {
+                    it.setObject(1, tenantId)
+                    it.executeQuery().use { rows ->
+                        rows.next()
+                        assertEquals(1, rows.getInt(1))
                     }
                 }
                 connection.createStatement().executeQuery(
@@ -186,6 +213,16 @@ class Phase5MigrationUpgradeIntegrationTests @Autowired constructor(
                     rows.next()
                     assertEquals(3, rows.getInt(1))
                 }
+                connection.createStatement().executeQuery(
+                    """
+                    SELECT count(*)
+                    FROM module_access_matrix
+                    WHERE screen_key LIKE 'tenant.administrators.%'
+                    """.trimIndent(),
+                ).use { rows ->
+                    rows.next()
+                    assertEquals(3, rows.getInt(1))
+                }
                 connection.prepareStatement(
                     """
                     SELECT name, is_system
@@ -199,6 +236,27 @@ class Phase5MigrationUpgradeIntegrationTests @Autowired constructor(
                         assertEquals(
                             "Property Administrator (Legacy $legacyPropertyAdminRoleId)",
                             rows.getString("name"),
+                        )
+                        assertEquals(false, rows.getBoolean("is_system"))
+                    }
+                }
+                connection.prepareStatement(
+                    """
+                    SELECT name, code, is_system
+                    FROM tenant_roles
+                    WHERE id = ?
+                    """.trimIndent(),
+                ).use {
+                    it.setObject(1, legacyTenantAdminRoleId)
+                    it.executeQuery().use { rows ->
+                        assertTrue(rows.next())
+                        assertEquals(
+                            "Tenant Administrator (Legacy $legacyTenantAdminRoleId)",
+                            rows.getString("name"),
+                        )
+                        assertEquals(
+                            "tenant_admin_legacy_${legacyTenantAdminRoleId.toString().replace("-", "")}",
+                            rows.getString("code"),
                         )
                         assertEquals(false, rows.getBoolean("is_system"))
                     }
