@@ -1,5 +1,6 @@
 package com.mwombeki.peak.usermanagement.internal.web
 
+import com.mwombeki.peak.usermanagement.api.AssignPlatformAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.AssignPlatformUserRoleCommand
 import com.mwombeki.peak.usermanagement.api.CreatePlatformRoleCommand
 import com.mwombeki.peak.usermanagement.api.CreatePlatformUserCommand
@@ -9,6 +10,7 @@ import com.mwombeki.peak.usermanagement.api.PlatformAdministrationConflictExcept
 import com.mwombeki.peak.usermanagement.api.PlatformAdministrationInProgressException
 import com.mwombeki.peak.usermanagement.api.PlatformAdministrationNotFoundException
 import com.mwombeki.peak.usermanagement.api.PlatformAdministrationPort
+import com.mwombeki.peak.usermanagement.api.PlatformAdministratorSummary
 import com.mwombeki.peak.usermanagement.api.PlatformIdentityLinkReceipt
 import com.mwombeki.peak.usermanagement.api.PlatformPermissionSummary
 import com.mwombeki.peak.usermanagement.api.PlatformRoleMutationReceipt
@@ -19,6 +21,7 @@ import com.mwombeki.peak.usermanagement.api.PlatformUserMutationReceipt
 import com.mwombeki.peak.usermanagement.api.PlatformUserRoleMutationReceipt
 import com.mwombeki.peak.usermanagement.api.PlatformUserSummary
 import com.mwombeki.peak.usermanagement.api.ProvisionTenantAdministratorCommand
+import com.mwombeki.peak.usermanagement.api.RevokePlatformAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.RevokePlatformOidcIdentityCommand
 import com.mwombeki.peak.usermanagement.api.RevokePlatformUserRoleCommand
 import com.mwombeki.peak.usermanagement.api.TenantAdministratorProvisioningReceipt
@@ -64,6 +67,30 @@ class PlatformAdministrationController(
         val user = platformAdministrationPort.getPlatformUser(platformUserId)
             ?: return ResponseEntity.notFound().build()
         return ResponseEntity.ok(user.toHttpResponse())
+    }
+
+    @GetMapping("/administrators")
+    fun listPlatformAdministrators(): List<PlatformAdministratorHttpResponse> {
+        return platformAdministrationPort.listPlatformAdministrators()
+            .map { it.toHttpResponse() }
+    }
+
+    @PostMapping("/administrators/{platformUserId}/assign")
+    fun assignPlatformAdministrator(
+        @PathVariable platformUserId: UUID,
+    ): PlatformUserRoleMutationHttpResponse {
+        return platformAdministrationPort.assignPlatformAdministrator(
+            AssignPlatformAdministratorCommand(platformUserId),
+        ).toHttpResponse()
+    }
+
+    @PostMapping("/administrators/{platformUserId}/revoke")
+    fun revokePlatformAdministrator(
+        @PathVariable platformUserId: UUID,
+    ): PlatformUserRoleMutationHttpResponse {
+        return platformAdministrationPort.revokePlatformAdministrator(
+            RevokePlatformAdministratorCommand(platformUserId),
+        ).toHttpResponse()
     }
 
     @PostMapping("/users")
@@ -322,6 +349,19 @@ class PlatformAdministrationController(
         )
     }
 
+    private fun PlatformAdministratorSummary.toHttpResponse(): PlatformAdministratorHttpResponse {
+        return PlatformAdministratorHttpResponse(
+            platformUserId = platformUserId,
+            platformRoleId = platformRoleId,
+            fullName = fullName,
+            email = email,
+            status = status,
+            lockedUntil = lockedUntil,
+            activeIdentityLinks = activeIdentityLinks,
+            effective = effective,
+        )
+    }
+
     private fun PlatformRoleSummary.toHttpResponse(): PlatformRoleHttpResponse {
         return PlatformRoleHttpResponse(
             platformRoleId = platformRoleId,
@@ -466,6 +506,17 @@ data class PlatformUserHttpResponse(
     val lockedUntil: Instant?,
     val roleCodes: List<String>,
     val activeIdentityLinks: Int,
+)
+
+data class PlatformAdministratorHttpResponse(
+    val platformUserId: UUID,
+    val platformRoleId: UUID,
+    val fullName: String,
+    val email: String,
+    val status: String,
+    val lockedUntil: Instant?,
+    val activeIdentityLinks: Int,
+    val effective: Boolean,
 )
 
 data class PlatformRoleHttpResponse(

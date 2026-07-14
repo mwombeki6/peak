@@ -44,6 +44,8 @@ class Phase5MigrationUpgradeIntegrationTests @Autowired constructor(
             val chargeId = UUID.randomUUID()
             val legacyPropertyAdminRoleId = UUID.randomUUID()
             val legacyTenantAdminRoleId = UUID.randomUUID()
+            val legacyPlatformRootRoleId = UUID.randomUUID()
+            val fullPlatformAuthorityRoleId = UUID.randomUUID()
             DriverManager.getConnection(
                 url,
                 postgres.username,
@@ -130,6 +132,39 @@ class Phase5MigrationUpgradeIntegrationTests @Autowired constructor(
                         )
                         """.trimIndent(),
                     )
+                    sql.execute(
+                        """
+                        INSERT INTO platform_roles (
+                            id, name, code, is_system, is_active
+                        ) VALUES (
+                            '$legacyPlatformRootRoleId',
+                            'Platform Root', 'platform_root', false, true
+                        )
+                        """.trimIndent(),
+                    )
+                    sql.execute(
+                        """
+                        INSERT INTO platform_roles (
+                            id, name, code, is_system, is_active
+                        ) VALUES (
+                            '$fullPlatformAuthorityRoleId',
+                            'Full Platform Authority',
+                            'full_platform_authority_$fullPlatformAuthorityRoleId',
+                            false,
+                            true
+                        )
+                        """.trimIndent(),
+                    )
+                    sql.execute(
+                        """
+                        INSERT INTO platform_role_permissions (
+                            platform_role_id, platform_permission_id
+                        )
+                        SELECT '$fullPlatformAuthorityRoleId', id
+                        FROM platform_permissions
+                        WHERE code = 'platform.admin.all'
+                        """.trimIndent(),
+                    )
                 }
             }
 
@@ -137,7 +172,7 @@ class Phase5MigrationUpgradeIntegrationTests @Autowired constructor(
                 .dataSource(url, postgres.username, postgres.password)
                 .load()
             flyway.migrate()
-            assertEquals("64", flyway.info().current().version.version)
+            assertEquals("65", flyway.info().current().version.version)
 
             DriverManager.getConnection(
                 url,
@@ -223,6 +258,42 @@ class Phase5MigrationUpgradeIntegrationTests @Autowired constructor(
                     rows.next()
                     assertEquals(3, rows.getInt(1))
                 }
+                connection.createStatement().executeQuery(
+                    """
+                    SELECT count(*)
+                    FROM platform_permissions
+                    WHERE code = 'platform.administrators.manage'
+                    """.trimIndent(),
+                ).use { rows ->
+                    rows.next()
+                    assertEquals(1, rows.getInt(1))
+                }
+                connection.prepareStatement(
+                    """
+                    SELECT count(*)
+                    FROM platform_role_permissions prp
+                    JOIN platform_permissions pp
+                      ON pp.id = prp.platform_permission_id
+                    WHERE prp.platform_role_id = ?
+                      AND pp.code = 'platform.administrators.manage'
+                    """.trimIndent(),
+                ).use {
+                    it.setObject(1, fullPlatformAuthorityRoleId)
+                    it.executeQuery().use { rows ->
+                        rows.next()
+                        assertEquals(1, rows.getInt(1))
+                    }
+                }
+                connection.createStatement().executeQuery(
+                    """
+                    SELECT count(*)
+                    FROM module_access_matrix
+                    WHERE screen_key LIKE 'platform.administrators.%'
+                    """.trimIndent(),
+                ).use { rows ->
+                    rows.next()
+                    assertEquals(3, rows.getInt(1))
+                }
                 connection.prepareStatement(
                     """
                     SELECT name, is_system
@@ -256,6 +327,27 @@ class Phase5MigrationUpgradeIntegrationTests @Autowired constructor(
                         )
                         assertEquals(
                             "tenant_admin_legacy_${legacyTenantAdminRoleId.toString().replace("-", "")}",
+                            rows.getString("code"),
+                        )
+                        assertEquals(false, rows.getBoolean("is_system"))
+                    }
+                }
+                connection.prepareStatement(
+                    """
+                    SELECT name, code, is_system
+                    FROM platform_roles
+                    WHERE id = ?
+                    """.trimIndent(),
+                ).use {
+                    it.setObject(1, legacyPlatformRootRoleId)
+                    it.executeQuery().use { rows ->
+                        assertTrue(rows.next())
+                        assertEquals(
+                            "Platform Root (Legacy $legacyPlatformRootRoleId)",
+                            rows.getString("name"),
+                        )
+                        assertEquals(
+                            "platform_root_legacy_${legacyPlatformRootRoleId.toString().replace("-", "")}",
                             rows.getString("code"),
                         )
                         assertEquals(false, rows.getBoolean("is_system"))

@@ -28,12 +28,13 @@ class PlatformBootstrapRunner(
 
         val result = requireNotNull(
             transactionTemplate.execute {
-                bootstrap(fullName, email, issuer, subject)
+                bootstrap(fullName, email, issuer, subject, properties.recoveryEnabled)
             },
         )
         logger.info(
-            "Platform bootstrap completed platformUserId={} changed={} correlationId={}",
+            "Platform bootstrap completed platformUserId={} recovery={} changed={} correlationId={}",
             result.platformUserId,
+            properties.recoveryEnabled,
             result.changed,
             result.correlationId,
         )
@@ -44,13 +45,48 @@ class PlatformBootstrapRunner(
         email: String,
         issuer: String,
         subject: String,
+        recoveryEnabled: Boolean,
     ): BootstrapResult {
+        jdbcTemplate.execute(
+            "SELECT pg_advisory_xact_lock(hashtext('peak.platform.administrator.continuity'))",
+        )
         val platformUserCount = requireNotNull(
             jdbcTemplate.queryForObject(
                 "SELECT count(*) FROM platform_users WHERE deleted_at IS NULL",
                 Int::class.java,
             ),
         )
+        val effectiveRootCount = requireNotNull(
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(DISTINCT pu.id)
+                FROM platform_users pu
+                JOIN platform_user_roles pur
+                  ON pur.platform_user_id = pu.id
+                JOIN platform_roles pr
+                  ON pr.id = pur.platform_role_id
+                WHERE pr.code = 'platform_root'
+                  AND pr.is_system = true
+                  AND pr.is_active = true
+                  AND pu.status = 'active'
+                  AND pu.deleted_at IS NULL
+                  AND (pu.locked_until IS NULL OR pu.locked_until <= now())
+                  AND EXISTS (
+                      SELECT 1
+                      FROM identity_links il
+                      WHERE il.platform_user_id = pu.id
+                        AND il.identity_mode = 'platform'
+                        AND il.revoked_at IS NULL
+                  )
+                """.trimIndent(),
+                Int::class.java,
+            ),
+        )
+        if (recoveryEnabled) {
+            check(effectiveRootCount == 0) {
+                "Platform recovery is closed while an effective platform root can sign in"
+            }
+        }
         var platformUserId = jdbcTemplate.query(
             """
             SELECT id
@@ -65,7 +101,7 @@ class PlatformBootstrapRunner(
         var changed = false
         val createdUser = platformUserId == null
 
-        if (platformUserCount > 0 && createdUser) {
+        if (platformUserCount > 0 && createdUser && !recoveryEnabled) {
             error(
                 "Platform bootstrap is closed because a different platform user already exists. " +
                         "Use authenticated platform administration or the documented recovery procedure.",
@@ -89,6 +125,23 @@ class PlatformBootstrapRunner(
                 platformUserId,
                 fullName,
                 email,
+            )
+            changed = true
+        } else if (recoveryEnabled) {
+            jdbcTemplate.update(
+                """
+                UPDATE platform_users
+                SET full_name = ?,
+                    status = 'active',
+                    locked_until = NULL,
+                    failed_attempts = 0,
+                    must_change_pw = false,
+                    mfa_enabled = true,
+                    updated_at = now()
+                WHERE id = ?
+                """.trimIndent(),
+                fullName,
+                platformUserId,
             )
             changed = true
         } else {
@@ -199,7 +252,7 @@ class PlatformBootstrapRunner(
                 "Bootstrap OIDC identity is already linked to another user"
             }
         } else {
-            check(createdUser) {
+            check(createdUser || recoveryEnabled) {
                 "Platform bootstrap is already complete; identity replacement requires authenticated administration"
             }
             jdbcTemplate.update(
@@ -227,7 +280,16 @@ class PlatformBootstrapRunner(
         }
 
         val correlationId = if (changed) {
-            val value = "platform-bootstrap-${UUID.randomUUID()}"
+            val eventName = if (recoveryEnabled) {
+                "platform.recovery.completed"
+            } else {
+                "platform.bootstrap.completed"
+            }
+            val value = if (recoveryEnabled) {
+                "platform-recovery-${UUID.randomUUID()}"
+            } else {
+                "platform-bootstrap-${UUID.randomUUID()}"
+            }
             jdbcTemplate.update(
                 """
                 INSERT INTO platform_audit_logs (
@@ -240,7 +302,7 @@ class PlatformBootstrapRunner(
                 )
                 VALUES (
                     ?,
-                    'platform.bootstrap.completed',
+                    ?,
                     'platform_users',
                     ?,
                     jsonb_build_object(
@@ -252,6 +314,7 @@ class PlatformBootstrapRunner(
                 )
                 """.trimIndent(),
                 platformUserId,
+                eventName,
                 platformUserId,
                 platformUserId.toString(),
                 issuer,

@@ -13,6 +13,7 @@ import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.usermanagement.api.AssignPlatformAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.AssignPlatformUserRoleCommand
 import com.mwombeki.peak.usermanagement.api.CreatePlatformRoleCommand
 import com.mwombeki.peak.usermanagement.api.CreatePlatformUserCommand
@@ -22,6 +23,7 @@ import com.mwombeki.peak.usermanagement.api.PlatformAdministrationConflictExcept
 import com.mwombeki.peak.usermanagement.api.PlatformAdministrationInProgressException
 import com.mwombeki.peak.usermanagement.api.PlatformAdministrationNotFoundException
 import com.mwombeki.peak.usermanagement.api.PlatformAdministrationPort
+import com.mwombeki.peak.usermanagement.api.PlatformAdministratorSummary
 import com.mwombeki.peak.usermanagement.api.PlatformIdentityLinkReceipt
 import com.mwombeki.peak.usermanagement.api.PlatformPermissionSummary
 import com.mwombeki.peak.usermanagement.api.PlatformRoleMutationReceipt
@@ -31,6 +33,7 @@ import com.mwombeki.peak.usermanagement.api.PlatformUserMutationReceipt
 import com.mwombeki.peak.usermanagement.api.PlatformUserRoleMutationReceipt
 import com.mwombeki.peak.usermanagement.api.PlatformUserSummary
 import com.mwombeki.peak.usermanagement.api.ProvisionTenantAdministratorCommand
+import com.mwombeki.peak.usermanagement.api.RevokePlatformAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.RevokePlatformOidcIdentityCommand
 import com.mwombeki.peak.usermanagement.api.RevokePlatformUserRoleCommand
 import com.mwombeki.peak.usermanagement.api.TenantAdministratorProvisioningReceipt
@@ -94,6 +97,63 @@ class PlatformAdministrationService(
                     ::mapPlatformUser,
                     platformUserId,
                 ).singleOrNull()
+            },
+        )
+    }
+
+    override fun listPlatformAdministrators(): List<PlatformAdministratorSummary> {
+        return requireNotNull(
+            transactionTemplate.execute {
+                bindPlatformContext()
+                requireCurrentPlatformPermission(
+                    PLATFORM_ROLE_VIEW_PERMISSION,
+                    "Platform operator lacks platform role view permission",
+                )
+                jdbcTemplate.query(
+                    """
+                    SELECT
+                        pu.id AS platform_user_id,
+                        pr.id AS platform_role_id,
+                        pu.full_name,
+                        pu.email,
+                        pu.status,
+                        pu.locked_until,
+                        COUNT(DISTINCT il.id)::integer AS active_identity_links,
+                        (
+                            pu.status = 'active'
+                            AND pu.deleted_at IS NULL
+                            AND (pu.locked_until IS NULL OR pu.locked_until <= now())
+                            AND COUNT(DISTINCT il.id) > 0
+                            AND pr.is_active = true
+                        ) AS effective
+                    FROM platform_user_roles pur
+                    JOIN platform_roles pr
+                      ON pr.id = pur.platform_role_id
+                    JOIN platform_users pu
+                      ON pu.id = pur.platform_user_id
+                    LEFT JOIN identity_links il
+                      ON il.platform_user_id = pu.id
+                     AND il.identity_mode = 'platform'
+                     AND il.revoked_at IS NULL
+                    WHERE pr.code = ?
+                      AND pr.is_system = true
+                    GROUP BY pu.id, pr.id, pr.is_active
+                    ORDER BY pu.full_name, pu.email, pu.id
+                    """.trimIndent(),
+                    { rs, _ ->
+                        PlatformAdministratorSummary(
+                            platformUserId = rs.getObject("platform_user_id", UUID::class.java),
+                            platformRoleId = rs.getObject("platform_role_id", UUID::class.java),
+                            fullName = rs.getString("full_name"),
+                            email = rs.getString("email"),
+                            status = rs.getString("status"),
+                            lockedUntil = rs.getTimestamp("locked_until")?.toInstant(),
+                            activeIdentityLinks = rs.getInt("active_identity_links"),
+                            effective = rs.getBoolean("effective"),
+                        )
+                    },
+                    PLATFORM_ROOT_ROLE_CODE,
+                )
             },
         )
     }
@@ -208,8 +268,15 @@ class PlatformAdministrationService(
             require(actorId != command.platformUserId) {
                 "Platform operator cannot change own lifecycle state"
             }
+            lockPlatformAdministratorContinuity()
             requirePlatformUser(command.platformUserId)
             requireActorCanManagePlatformUser(actorId, command.platformUserId)
+            if (
+                command.action.databaseValue != "active" &&
+                effectivePlatformAdministrator(command.platformUserId)
+            ) {
+                requireAnotherEffectivePlatformAdministrator(command.platformUserId)
+            }
 
             val rows = jdbcTemplate.update(
                 """
@@ -299,8 +366,8 @@ class PlatformAdministrationService(
                     VALUES (?, ?, ?, ?, false, true)
                     """.trimIndent(),
                     id,
-                    command.code.normalizedCode(),
-                    command.name.normalizedRequired("name"),
+                    command.code.normalizedPlatformRoleCode(),
+                    command.name.normalizedPlatformRoleName(),
                     command.description?.trim()?.takeIf { it.isNotEmpty() },
                 )
             } catch (ex: DuplicateKeyException) {
@@ -316,7 +383,7 @@ class PlatformAdministrationService(
                         resourceId = id,
                         payload = mapOf(
                             "platformRoleId" to id,
-                            "code" to command.code.normalizedCode(),
+                            "code" to command.code.normalizedPlatformRoleCode(),
                             "permissionCodes" to command.permissionCodes.map { it.normalizedCode() },
                         ),
                         idempotencyKeyId = reservationId,
@@ -336,6 +403,7 @@ class PlatformAdministrationService(
         ) { reservationId ->
             requireMutablePlatformRole(command.platformRoleId)
             requireDelegablePlatformRole(command.platformRoleId)
+            val roleName = command.name?.normalizedPlatformRoleName()
             val permissionIds = command.permissionCodes
                 ?.also(::requireDelegablePlatformPermissions)
                 ?.let(::requirePlatformPermissions)
@@ -349,7 +417,7 @@ class PlatformAdministrationService(
                 WHERE id = ?
                   AND is_system = false
                 """.trimIndent(),
-                command.name?.normalizedRequired("name"),
+                roleName,
                 command.description?.trim()?.takeIf { it.isNotEmpty() },
                 command.platformRoleId,
             )
@@ -436,6 +504,7 @@ class PlatformAdministrationService(
             }
             requireActivePlatformUser(command.platformUserId)
             requireActivePlatformRole(command.platformRoleId)
+            requireDynamicPlatformRole(command.platformRoleId)
             requireDelegablePlatformRole(command.platformRoleId)
             requireActorCanManagePlatformUser(actorId, command.platformUserId)
             val inserted = jdbcTemplate.update(
@@ -487,6 +556,7 @@ class PlatformAdministrationService(
             }
             requirePlatformUser(command.platformUserId)
             requirePlatformRole(command.platformRoleId)
+            requireDynamicPlatformRole(command.platformRoleId)
             requireDelegablePlatformRole(command.platformRoleId)
             requireActorCanManagePlatformUser(actorId, command.platformUserId)
             val deleted = jdbcTemplate.update(
@@ -514,6 +584,120 @@ class PlatformAdministrationService(
                         payload = mapOf(
                             "platformUserId" to command.platformUserId,
                             "platformRoleId" to command.platformRoleId,
+                        ),
+                        idempotencyKeyId = reservationId,
+                    )
+                }
+            }
+        }
+    }
+
+    override fun assignPlatformAdministrator(
+        command: AssignPlatformAdministratorCommand,
+    ): PlatformUserRoleMutationReceipt {
+        return mutate(
+            operationType = "platform.administrator.assign",
+            requestPayload = command,
+            resourceType = "platform_user_roles",
+            replayType = PlatformUserRoleMutationReceipt::class.java,
+        ) { reservationId ->
+            val actorId = currentPlatformActorId()
+            requireCurrentPlatformPermission(
+                PLATFORM_ADMINISTRATOR_MANAGE_PERMISSION,
+                "Platform operator lacks platform administrator management permission",
+            )
+            require(actorId != command.platformUserId) {
+                "Platform operator cannot assign own platform administrator access"
+            }
+            lockPlatformAdministratorContinuity()
+            requireActivePlatformUser(command.platformUserId)
+            val platformRoleId = requireSystemPlatformRootRole()
+            val inserted = jdbcTemplate.update(
+                """
+                INSERT INTO platform_user_roles (platform_user_id, platform_role_id, assigned_by)
+                VALUES (?, ?, ?)
+                ON CONFLICT ON CONSTRAINT platform_user_roles_pkey DO NOTHING
+                """.trimIndent(),
+                command.platformUserId,
+                platformRoleId,
+                actorId,
+            ) == 1
+
+            PlatformUserRoleMutationReceipt(
+                platformUserId = command.platformUserId,
+                platformRoleId = platformRoleId,
+                assigned = true,
+                changed = inserted,
+                replayed = false,
+            ).also { receipt ->
+                if (receipt.changed) {
+                    recordPlatformSideEffects(
+                        action = "platform.administrator.assigned",
+                        resourceType = "platform_user_roles",
+                        resourceId = command.platformUserId,
+                        payload = mapOf(
+                            "platformUserId" to command.platformUserId,
+                            "platformRoleId" to platformRoleId,
+                        ),
+                        idempotencyKeyId = reservationId,
+                    )
+                }
+            }
+        }
+    }
+
+    override fun revokePlatformAdministrator(
+        command: RevokePlatformAdministratorCommand,
+    ): PlatformUserRoleMutationReceipt {
+        return mutate(
+            operationType = "platform.administrator.revoke",
+            requestPayload = command,
+            resourceType = "platform_user_roles",
+            replayType = PlatformUserRoleMutationReceipt::class.java,
+        ) { reservationId ->
+            val actorId = currentPlatformActorId()
+            requireCurrentPlatformPermission(
+                PLATFORM_ADMINISTRATOR_MANAGE_PERMISSION,
+                "Platform operator lacks platform administrator management permission",
+            )
+            require(actorId != command.platformUserId) {
+                "Platform operator cannot revoke own platform administrator access"
+            }
+            lockPlatformAdministratorContinuity()
+            requirePlatformUser(command.platformUserId)
+            val platformRoleId = requireSystemPlatformRootRole()
+            val assigned = platformUserRoleAssignmentExists(
+                command.platformUserId,
+                platformRoleId,
+            )
+            if (assigned) {
+                requireAnotherEffectivePlatformAdministrator(command.platformUserId)
+            }
+            val deleted = assigned && jdbcTemplate.update(
+                """
+                DELETE FROM platform_user_roles
+                WHERE platform_user_id = ?
+                  AND platform_role_id = ?
+                """.trimIndent(),
+                command.platformUserId,
+                platformRoleId,
+            ) == 1
+
+            PlatformUserRoleMutationReceipt(
+                platformUserId = command.platformUserId,
+                platformRoleId = platformRoleId,
+                assigned = false,
+                changed = deleted,
+                replayed = false,
+            ).also { receipt ->
+                if (receipt.changed) {
+                    recordPlatformSideEffects(
+                        action = "platform.administrator.revoked",
+                        resourceType = "platform_user_roles",
+                        resourceId = command.platformUserId,
+                        payload = mapOf(
+                            "platformUserId" to command.platformUserId,
+                            "platformRoleId" to platformRoleId,
                         ),
                         idempotencyKeyId = reservationId,
                     )
@@ -626,8 +810,16 @@ class PlatformAdministrationService(
             require(actorId != command.platformUserId) {
                 "Platform operator cannot revoke own identity link"
             }
+            lockPlatformAdministratorContinuity()
             requirePlatformUser(command.platformUserId)
             requireActorCanManagePlatformUser(actorId, command.platformUserId)
+            if (
+                activePlatformIdentityLink(command.platformUserId, command.identityLinkId) &&
+                activePlatformIdentityLinkCount(command.platformUserId) == 1 &&
+                effectivePlatformAdministrator(command.platformUserId)
+            ) {
+                requireAnotherEffectivePlatformAdministrator(command.platformUserId)
+            }
             val rows = jdbcTemplate.update(
                 """
                 UPDATE identity_links
@@ -881,6 +1073,24 @@ class PlatformAdministrationService(
         }
     }
 
+    private fun requireCurrentPlatformPermission(permissionCode: String, denialMessage: String) {
+        val allowed = jdbcTemplate.queryForObject(
+            "SELECT platform_user_has_permission(?, ?)",
+            Boolean::class.java,
+            currentPlatformActorId(),
+            permissionCode,
+        ) == true
+        require(allowed) {
+            denialMessage
+        }
+    }
+
+    private fun lockPlatformAdministratorContinuity() {
+        jdbcTemplate.execute(
+            "SELECT pg_advisory_xact_lock(hashtext('$PLATFORM_ADMINISTRATOR_LOCK_KEY'))",
+        )
+    }
+
     private fun requireSupportBreakGlassAccess(
         tenantId: UUID,
         actionCode: String,
@@ -1007,6 +1217,120 @@ class PlatformAdministrationService(
         ) == true
         if (!exists) {
             throw PlatformAdministrationNotFoundException("Platform role was not found")
+        }
+    }
+
+    private fun requireDynamicPlatformRole(platformRoleId: UUID) {
+        val isSystem = jdbcTemplate.queryForObject(
+            "SELECT is_system FROM platform_roles WHERE id = ?",
+            Boolean::class.java,
+            platformRoleId,
+        ) ?: throw PlatformAdministrationNotFoundException("Platform role was not found")
+        require(!isSystem) {
+            "System platform role assignments require dedicated administrator routes"
+        }
+    }
+
+    private fun requireSystemPlatformRootRole(): UUID {
+        return jdbcTemplate.query(
+            """
+            SELECT id
+            FROM platform_roles
+            WHERE code = ?
+              AND is_system = true
+              AND is_active = true
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("id", UUID::class.java) },
+            PLATFORM_ROOT_ROLE_CODE,
+        ).singleOrNull()
+            ?: throw PlatformAdministrationNotFoundException(
+                "Active system Platform Root role was not found",
+            )
+    }
+
+    private fun platformUserRoleAssignmentExists(
+        platformUserId: UUID,
+        platformRoleId: UUID,
+    ): Boolean {
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM platform_user_roles
+                WHERE platform_user_id = ?
+                  AND platform_role_id = ?
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            platformUserId,
+            platformRoleId,
+        ) == true
+    }
+
+    private fun effectivePlatformAdministrator(platformUserId: UUID): Boolean {
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM platform_user_roles pur
+                JOIN platform_roles pr
+                  ON pr.id = pur.platform_role_id
+                JOIN platform_users pu
+                  ON pu.id = pur.platform_user_id
+                WHERE pur.platform_user_id = ?
+                  AND pr.code = ?
+                  AND pr.is_system = true
+                  AND pr.is_active = true
+                  AND pu.status = 'active'
+                  AND pu.deleted_at IS NULL
+                  AND (pu.locked_until IS NULL OR pu.locked_until <= now())
+                  AND EXISTS (
+                      SELECT 1
+                      FROM identity_links il
+                      WHERE il.platform_user_id = pu.id
+                        AND il.identity_mode = 'platform'
+                        AND il.revoked_at IS NULL
+                  )
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            platformUserId,
+            PLATFORM_ROOT_ROLE_CODE,
+        ) == true
+    }
+
+    private fun requireAnotherEffectivePlatformAdministrator(excludedPlatformUserId: UUID) {
+        val exists = jdbcTemplate.queryForObject(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM platform_user_roles pur
+                JOIN platform_roles pr
+                  ON pr.id = pur.platform_role_id
+                JOIN platform_users pu
+                  ON pu.id = pur.platform_user_id
+                WHERE pur.platform_user_id <> ?
+                  AND pr.code = ?
+                  AND pr.is_system = true
+                  AND pr.is_active = true
+                  AND pu.status = 'active'
+                  AND pu.deleted_at IS NULL
+                  AND (pu.locked_until IS NULL OR pu.locked_until <= now())
+                  AND EXISTS (
+                      SELECT 1
+                      FROM identity_links il
+                      WHERE il.platform_user_id = pu.id
+                        AND il.identity_mode = 'platform'
+                        AND il.revoked_at IS NULL
+                  )
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            excludedPlatformUserId,
+            PLATFORM_ROOT_ROLE_CODE,
+        ) == true
+        require(exists) {
+            "Platform administrator access cannot be removed without another effective administrator"
         }
     }
 
@@ -1186,6 +1510,43 @@ class PlatformAdministrationService(
         ) == true
     }
 
+    private fun activePlatformIdentityLink(
+        platformUserId: UUID,
+        identityLinkId: UUID,
+    ): Boolean {
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM identity_links
+                WHERE id = ?
+                  AND identity_mode = 'platform'
+                  AND platform_user_id = ?
+                  AND revoked_at IS NULL
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            identityLinkId,
+            platformUserId,
+        ) == true
+    }
+
+    private fun activePlatformIdentityLinkCount(platformUserId: UUID): Int {
+        return requireNotNull(
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*)
+                FROM identity_links
+                WHERE identity_mode = 'platform'
+                  AND platform_user_id = ?
+                  AND revoked_at IS NULL
+                """.trimIndent(),
+                Int::class.java,
+                platformUserId,
+            ),
+        )
+    }
+
     private fun identityLinkRevokedAt(identityLinkId: UUID): Instant? {
         return jdbcTemplate.queryForObject(
             "SELECT revoked_at FROM identity_links WHERE id = ?",
@@ -1285,6 +1646,22 @@ class PlatformAdministrationService(
         return normalizedRequired("code").lowercase()
     }
 
+    private fun String.normalizedPlatformRoleCode(): String {
+        return normalizedCode().also { roleCode ->
+            require(roleCode != PLATFORM_ROOT_ROLE_CODE) {
+                "platform_root is reserved for the system Platform Root role"
+            }
+        }
+    }
+
+    private fun String.normalizedPlatformRoleName(): String {
+        return normalizedRequired("name").also { roleName ->
+            require(!roleName.equals(PLATFORM_ROOT_ROLE_NAME, ignoreCase = true)) {
+                "Platform Root is reserved for the system platform role"
+            }
+        }
+    }
+
     private fun canonicalInitialStatus(status: String): String {
         val normalized = status.trim().lowercase()
         require(normalized == "invited" || normalized == "active") {
@@ -1299,6 +1676,12 @@ class PlatformAdministrationService(
     )
 
     private companion object {
+        private const val PLATFORM_ADMINISTRATOR_LOCK_KEY = "peak.platform.administrator.continuity"
+        private const val PLATFORM_ADMINISTRATOR_MANAGE_PERMISSION = "platform.administrators.manage"
+        private const val PLATFORM_ROLE_VIEW_PERMISSION = "platform.roles.view"
+        private const val PLATFORM_ROOT_ROLE_CODE = "platform_root"
+        private const val PLATFORM_ROOT_ROLE_NAME = "Platform Root"
+
         val PLATFORM_USER_SELECT = """
             SELECT
                 pu.id,

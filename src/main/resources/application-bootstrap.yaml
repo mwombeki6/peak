@@ -18,6 +18,7 @@ peak:
   bootstrap:
     platform:
       enabled: ${PEAK_PLATFORM_BOOTSTRAP_ENABLED:false}
+      recovery-enabled: ${PEAK_PLATFORM_RECOVERY_ENABLED:false}
       full-name: ${PEAK_PLATFORM_BOOTSTRAP_FULL_NAME:}
       email: ${PEAK_PLATFORM_BOOTSTRAP_EMAIL:}
       issuer: ${PEAK_PLATFORM_BOOTSTRAP_ISSUER:}

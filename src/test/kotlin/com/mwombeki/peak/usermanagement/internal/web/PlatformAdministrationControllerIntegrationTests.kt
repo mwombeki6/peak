@@ -4,7 +4,11 @@ import com.jayway.jsonpath.JsonPath
 import com.mwombeki.peak.TestcontainersConfiguration
 import com.mwombeki.peak.shared.context.PeakRequestHeaders
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import org.hamcrest.Matchers.hasItem
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
@@ -182,6 +186,218 @@ class PlatformAdministrationControllerIntegrationTests {
         )
             .andExpect(status().isBadRequest)
             .andExpect(jsonPath("$.detail").value("Platform operator cannot change own lifecycle state"))
+    }
+
+    @Test
+    fun assignsListsAndRevokesPlatformAdministratorThroughDedicatedRoutes() {
+        val rootRoleId = resetSystemPlatformRootRoleAssignments()
+        val actorId = insertPlatformActorWithPermissions(
+            "platform.administrators.manage",
+            "platform.roles.view",
+        )
+        insertPlatformUserRole(actorId, rootRoleId, actorId)
+        insertPlatformIdentityLink(actorId)
+        val targetUserId = insertPlatformUser()
+        insertPlatformIdentityLink(targetUserId)
+
+        mockMvc.perform(
+            post("/api/v1/platform/administrators/$targetUserId/assign")
+                .platform(actorId, "corr-platform-admin-assign", "idem-platform-admin-assign"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.platformRoleId").value(rootRoleId.toString()))
+            .andExpect(jsonPath("$.assigned").value(true))
+            .andExpect(jsonPath("$.changed").value(true))
+
+        mockMvc.perform(
+            post("/api/v1/platform/administrators/$targetUserId/assign")
+                .platform(actorId, "corr-platform-admin-assign", "idem-platform-admin-assign"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.replayed").value(true))
+
+        mockMvc.perform(
+            get("/api/v1/platform/administrators")
+                .platform(actorId, "corr-platform-admin-list"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$[*].platformUserId", hasItem(targetUserId.toString())))
+            .andExpect(jsonPath("$[*].effective", hasItem(true)))
+
+        mockMvc.perform(
+            post("/api/v1/platform/administrators/$targetUserId/revoke")
+                .platform(actorId, "corr-platform-admin-revoke", "idem-platform-admin-revoke"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.assigned").value(false))
+            .andExpect(jsonPath("$.changed").value(true))
+
+        check(platformUserRoleAssignmentCount(targetUserId, rootRoleId) == 0)
+        assertPlatformAdministratorAuditAndOutboxWereRecorded(targetUserId)
+    }
+
+    @Test
+    fun rejectsRemovingLastEffectivePlatformAdministratorThroughEveryAccessPath() {
+        val rootRoleId = resetSystemPlatformRootRoleAssignments()
+        val actorId = insertPlatformActorWithPermissions(
+            "platform.admin.all",
+            "platform.administrators.manage",
+            "platform.users.manage",
+            "platform.identity_links.manage",
+        )
+        val targetUserId = insertPlatformUser()
+        insertPlatformUserRole(targetUserId, rootRoleId, actorId)
+        val identityLinkId = insertPlatformIdentityLink(targetUserId)
+        val expectedDetail =
+            "Platform administrator access cannot be removed without another effective administrator"
+
+        mockMvc.perform(
+            post("/api/v1/platform/administrators/$targetUserId/revoke")
+                .platform(actorId, "corr-last-platform-admin-revoke", "idem-last-platform-admin-revoke"),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.detail").value(expectedDetail))
+
+        mockMvc.perform(
+            post("/api/v1/platform/users/$targetUserId/disable")
+                .platform(actorId, "corr-last-platform-admin-disable", "idem-last-platform-admin-disable"),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.detail").value(expectedDetail))
+
+        mockMvc.perform(
+            post("/api/v1/platform/users/$targetUserId/identity-links/$identityLinkId/revoke")
+                .platform(
+                    actorId,
+                    "corr-last-platform-admin-identity",
+                    "idem-last-platform-admin-identity",
+                ),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.detail").value(expectedDetail))
+
+        check(platformUserStatus(targetUserId) == "active")
+        check(platformUserRoleAssignmentCount(targetUserId, rootRoleId) == 1)
+        check(identityLinkRevokedAt(identityLinkId) == null)
+    }
+
+    @Test
+    fun rejectsGenericSystemRoleAssignmentAndReservedDynamicRootIdentifiers() {
+        val rootRoleId = resetSystemPlatformRootRoleAssignments()
+        val actorId = insertPlatformActorWithPermissions(
+            "platform.roles.manage",
+            "platform.users.manage",
+        )
+        val targetUserId = insertPlatformUser()
+
+        mockMvc.perform(
+            post("/api/v1/platform/users/$targetUserId/roles/$rootRoleId/assign")
+                .platform(actorId, "corr-generic-platform-root", "idem-generic-platform-root"),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(
+                jsonPath("$.detail")
+                    .value("System platform role assignments require dedicated administrator routes"),
+            )
+
+        mockMvc.perform(
+            post("/api/v1/platform/roles")
+                .platform(actorId, "corr-reserved-platform-root-code", "idem-reserved-platform-root-code")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "code": "platform_root",
+                      "name": "Different Name",
+                      "permissionCodes": ["platform.roles.manage"]
+                    }
+                    """.trimIndent(),
+                ),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(
+                jsonPath("$.detail")
+                    .value("platform_root is reserved for the system Platform Root role"),
+            )
+
+        mockMvc.perform(
+            post("/api/v1/platform/roles")
+                .platform(actorId, "corr-reserved-platform-root-name", "idem-reserved-platform-root-name")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "code": "different_code",
+                      "name": "Platform Root",
+                      "permissionCodes": ["platform.roles.manage"]
+                    }
+                    """.trimIndent(),
+                ),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(
+                jsonPath("$.detail")
+                    .value("Platform Root is reserved for the system platform role"),
+            )
+    }
+
+    @Test
+    fun serializesConcurrentPlatformAdministratorRevocations() {
+        val rootRoleId = resetSystemPlatformRootRoleAssignments()
+        val actorId = insertPlatformActorWithPermissions("platform.administrators.manage")
+        val firstRootId = insertPlatformUser()
+        val secondRootId = insertPlatformUser()
+        insertPlatformUserRole(firstRootId, rootRoleId, actorId)
+        insertPlatformUserRole(secondRootId, rootRoleId, actorId)
+        insertPlatformIdentityLink(firstRootId)
+        insertPlatformIdentityLink(secondRootId)
+        val start = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+
+        try {
+            val futures = listOf(firstRootId, secondRootId).map { targetUserId ->
+                executor.submit<Int> {
+                    start.await(10, TimeUnit.SECONDS)
+                    mockMvc.perform(
+                        post("/api/v1/platform/administrators/$targetUserId/revoke")
+                            .platform(
+                                actorId,
+                                "corr-concurrent-root-$targetUserId",
+                                "idem-concurrent-root-$targetUserId",
+                            ),
+                    ).andReturn().response.status
+                }
+            }
+            start.countDown()
+            val statuses = futures.map { it.get(30, TimeUnit.SECONDS) }.sorted()
+
+            assertEquals(listOf(200, 400), statuses)
+            assertEquals(
+                1,
+                jdbcTemplate.queryForObject(
+                    "SELECT count(*) FROM platform_user_roles WHERE platform_role_id = ?",
+                    Int::class.java,
+                    rootRoleId,
+                ),
+            )
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun deniesPlatformAdministratorMutationWithoutDedicatedPermission() {
+        val rootRoleId = resetSystemPlatformRootRoleAssignments()
+        val actorId = insertPlatformActorWithPermissions("platform.roles.manage")
+        val targetUserId = insertPlatformUser()
+        insertPlatformUserRole(targetUserId, rootRoleId, actorId)
+        insertPlatformIdentityLink(targetUserId)
+
+        mockMvc.perform(
+            post("/api/v1/platform/administrators/$targetUserId/revoke")
+                .platform(actorId, "corr-platform-admin-denied", "idem-platform-admin-denied"),
+        )
+            .andExpect(status().isForbidden)
     }
 
     @Test
@@ -720,6 +936,36 @@ class PlatformAdministrationControllerIntegrationTests {
         return roleId
     }
 
+    private fun resetSystemPlatformRootRoleAssignments(): UUID {
+        val existingRoleId = jdbcTemplate.query(
+            """
+            SELECT id
+            FROM platform_roles
+            WHERE code = 'platform_root'
+              AND is_system = true
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("id", UUID::class.java) },
+        ).singleOrNull()
+        val roleId = existingRoleId ?: UUID.randomUUID().also { newRoleId ->
+            jdbcTemplate.update(
+                """
+                INSERT INTO platform_roles (id, code, name, is_system, is_active)
+                VALUES (?, 'platform_root', 'Platform Root', true, true)
+                """.trimIndent(),
+                newRoleId,
+            )
+        }
+        jdbcTemplate.update(
+            "UPDATE platform_roles SET is_active = true WHERE id = ?",
+            roleId,
+        )
+        jdbcTemplate.update(
+            "DELETE FROM platform_user_roles WHERE platform_role_id = ?",
+            roleId,
+        )
+        return roleId
+    }
+
     private fun insertPlatformUserRole(platformUserId: UUID, platformRoleId: UUID, assignedBy: UUID) {
         jdbcTemplate.update(
             """
@@ -921,6 +1167,35 @@ class PlatformAdministrationControllerIntegrationTests {
         }
         check((outboxCount ?: 0) > 0) {
             "Expected platform outbox events for platform user changes"
+        }
+    }
+
+    private fun assertPlatformAdministratorAuditAndOutboxWereRecorded(platformUserId: UUID) {
+        val auditCount = jdbcTemplate.queryForObject(
+            """
+            SELECT count(*)
+            FROM platform_audit_logs
+            WHERE entity_id = ?
+              AND action IN ('platform.administrator.assigned', 'platform.administrator.revoked')
+            """.trimIndent(),
+            Int::class.java,
+            platformUserId,
+        )
+        val outboxCount = jdbcTemplate.queryForObject(
+            """
+            SELECT count(*)
+            FROM outbox_events
+            WHERE aggregate_id = ?
+              AND event_type IN ('platform.administrator.assigned', 'platform.administrator.revoked')
+            """.trimIndent(),
+            Int::class.java,
+            platformUserId,
+        )
+        check((auditCount ?: 0) == 2) {
+            "Expected platform administrator assignment and revocation audit events"
+        }
+        check((outboxCount ?: 0) == 2) {
+            "Expected platform administrator assignment and revocation outbox events"
         }
     }
 

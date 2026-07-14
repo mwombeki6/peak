@@ -20,15 +20,16 @@ This directory contains the Podman Compose deployment baseline for Peak.
 6. Bootstrap production login roles: `ops/scripts/bootstrap-db-roles.sh`.
 7. Start PostgreSQL and wait for its health check, then run Flyway through the migration profile: `podman compose --env-file ops/production/.env -f ops/production/compose.yaml --profile migration run --rm --no-deps peak-migration`. The `--no-deps` flag is required with Podman Compose so a one-shot migration does not reconcile or replace already-running services.
 8. On the first installation only, create the initial operator in Keycloak, set `PEAK_PLATFORM_BOOTSTRAP_ENABLED=true` plus the operator name, email, exact issuer, and Keycloak subject, then run `ops/scripts/bootstrap-platform.sh`. Immediately set the flag back to `false` and clear the four bootstrap identity values. The command refuses to create a different root after platform initialization.
-9. Start API and worker: `podman compose --env-file ops/production/.env -f ops/production/compose.yaml up -d peak-api peak-worker`.
-10. Configure a host reverse proxy to terminate TLS for `PEAK_PUBLIC_HOST` and
+9. If every platform root has lost effective access, use the audited offline recovery procedure: configure the replacement Keycloak identity, set both `PEAK_PLATFORM_BOOTSTRAP_ENABLED=true` and `PEAK_PLATFORM_RECOVERY_ENABLED=true`, then run `ops/scripts/recover-platform-root.sh`. Recovery refuses to run if any effective root remains. Immediately disable both flags and clear the identity values after success.
+10. Start API and worker: `podman compose --env-file ops/production/.env -f ops/production/compose.yaml up -d peak-api peak-worker`.
+11. Configure a host reverse proxy to terminate TLS for `PEAK_PUBLIC_HOST` and
     `KEYCLOAK_HOSTNAME`, forwarding only to `127.0.0.1:8080` and
     `127.0.0.1:8081`. Preserve `X-Forwarded-For`, `X-Forwarded-Proto`, and
     `Host`, overwrite any client-supplied forwarding headers, and restrict
     direct access to both loopback listeners.
-11. Verify the deployment: `ops/scripts/smoke-test.sh http://localhost:8080 http://localhost:8081`.
+12. Verify the deployment: `ops/scripts/smoke-test.sh http://localhost:8080 http://localhost:8081`.
 
-The standard deploy script performs steps 3, 7, 8, and 9:
+The standard deploy script performs steps 3, 7, 8, and 10:
 
 ```sh
 ops/scripts/deploy.sh
