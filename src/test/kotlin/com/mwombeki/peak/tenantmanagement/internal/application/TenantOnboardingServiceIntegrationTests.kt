@@ -107,6 +107,48 @@ class TenantOnboardingServiceIntegrationTests {
     }
 
     @Test
+    fun allowsSupportTenantLookupOnlyForTheExactApprovedSession() {
+        val platformUserId = UUID.randomUUID()
+        val tenantId = UUID.randomUUID()
+        val planId = UUID.randomUUID()
+        insertPlatformFixture(platformUserId)
+        insertPlan(planId)
+        insertTenantWithProfile(tenantId, planId)
+        val supportSessionId = insertActiveBreakGlassGrant(
+            platformUserId = platformUserId,
+            tenantId = tenantId,
+            actionCode = "platform.tenants.view",
+        )
+        requestContextHolder.set(
+            supportContext(
+                platformUserId = platformUserId,
+                supportTenantId = tenantId,
+                supportSessionId = supportSessionId,
+                correlationId = "corr-support-tenant-lookup-allowed",
+            ),
+        )
+
+        val response = requireNotNull(tenantOnboardingPort.getTenantById(tenantId))
+
+        assertEquals(tenantId, response.id)
+        val auditOutcome = jdbcTemplate.queryForObject(
+            """
+            SELECT outcome
+            FROM platform_audit_logs
+            WHERE action = 'platform.support.break_glass.access'
+              AND tenant_id = ?
+              AND entity_id = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """.trimIndent(),
+            String::class.java,
+            tenantId,
+            supportSessionId,
+        )
+        assertEquals("success", auditOutcome)
+    }
+
+    @Test
     fun rejectsSupportTenantLookupWhenSessionTenantDoesNotMatchTargetTenant() {
         val platformUserId = UUID.randomUUID()
         val supportTenantId = UUID.randomUUID()
@@ -235,7 +277,8 @@ class TenantOnboardingServiceIntegrationTests {
         platformUserId: UUID,
         tenantId: UUID,
         actionCode: String,
-    ) {
+        supportSessionId: UUID = UUID.randomUUID(),
+    ): UUID {
         val approverId = UUID.randomUUID()
         jdbcTemplate.update(
             """
@@ -249,6 +292,7 @@ class TenantOnboardingServiceIntegrationTests {
         jdbcTemplate.update(
             """
             INSERT INTO platform_break_glass_access (
+                id,
                 platform_user_id,
                 tenant_id,
                 action_code,
@@ -260,13 +304,15 @@ class TenantOnboardingServiceIntegrationTests {
                 starts_at,
                 expires_at
             )
-            VALUES (?, ?, ?, 'Regression test support access', 'active', ?, now(), now(), now() - interval '1 minute', now() + interval '1 hour')
+            VALUES (?, ?, ?, ?, 'Regression test support access', 'active', ?, now(), now(), now() - interval '1 minute', now() + interval '1 hour')
             """.trimIndent(),
+            supportSessionId,
             platformUserId,
             tenantId,
             actionCode,
             approverId,
         )
+        return supportSessionId
     }
 
     private fun platformContext(
@@ -288,13 +334,14 @@ class TenantOnboardingServiceIntegrationTests {
     private fun supportContext(
         platformUserId: UUID,
         supportTenantId: UUID,
+        supportSessionId: UUID = UUID.randomUUID(),
         correlationId: String,
     ): RequestContext {
         return RequestContext(
             identity = RequestIdentity.Support(
                 platformUserId = platformUserId,
                 tenantId = supportTenantId,
-                supportSessionId = UUID.randomUUID(),
+                supportSessionId = supportSessionId,
                 correlationId = correlationId,
             ),
             correlationId = correlationId,

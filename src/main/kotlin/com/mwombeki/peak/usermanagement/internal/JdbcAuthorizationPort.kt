@@ -8,6 +8,8 @@ import com.mwombeki.peak.usermanagement.api.AuthorizationPort
 import com.mwombeki.peak.usermanagement.api.GuardMode
 import com.mwombeki.peak.usermanagement.api.RouteAuthorizationRequest
 import com.mwombeki.peak.usermanagement.api.RouteScope
+import com.mwombeki.peak.usermanagement.api.SupportTenantAccessPort
+import com.mwombeki.peak.usermanagement.api.SupportTenantAccessRequest
 import java.util.UUID
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
@@ -18,6 +20,7 @@ class JdbcAuthorizationPort(
     private val jdbcTemplate: JdbcTemplate,
     private val requestContextHolder: RequestContextHolder,
     private val databaseSessionContext: DatabaseSessionContext,
+    private val supportTenantAccessPort: SupportTenantAccessPort,
 ) : AuthorizationPort {
     override fun authorize(request: RouteAuthorizationRequest): AuthorizationDecision {
         require(TransactionSynchronizationManager.isActualTransactionActive()) {
@@ -138,11 +141,6 @@ class JdbcAuthorizationPort(
         identity: RequestIdentity,
         request: RouteAuthorizationRequest,
     ): AuthorizationDecision {
-        val platformUserId = when (identity) {
-            is RequestIdentity.Platform -> identity.platformUserId
-            is RequestIdentity.Support -> identity.platformUserId
-            else -> return AuthorizationDecision.denied("Platform identity is required")
-        }
         if (request.routeScope != RouteScope.PLATFORM) {
             return AuthorizationDecision.denied("Invalid route scope for platform guard")
         }
@@ -150,10 +148,24 @@ class JdbcAuthorizationPort(
             return AuthorizationDecision.denied("Platform guard requires permission")
         }
 
+        if (identity is RequestIdentity.Support) {
+            return supportTenantAccessPort.authorize(
+                SupportTenantAccessRequest(
+                    tenantId = request.tenantId,
+                    permissionCode = request.permissionCode,
+                    operation = "route.${request.moduleId}.${request.permissionCode}",
+                    auditSuccess = false,
+                ),
+            )
+        }
+        if (identity !is RequestIdentity.Platform) {
+            return AuthorizationDecision.denied("Platform identity is required")
+        }
+
         val allowed = jdbcTemplate.queryForObject(
             "SELECT platform_user_has_permission(?, ?)",
             Boolean::class.java,
-            platformUserId,
+            identity.platformUserId,
             request.permissionCode,
         ) == true
 

@@ -241,6 +241,18 @@ class RouteAccessMatrixCoverageIntegrationTests {
                 routeScope = RouteScope.PLATFORM,
             ),
             ScopedRouteExpectation(
+                method = "POST",
+                path = "/api/v1/platform/tenants/$tenantId/approve",
+                permissionCode = "platform.tenants.manage",
+                routeScope = RouteScope.PLATFORM,
+            ),
+            ScopedRouteExpectation(
+                method = "POST",
+                path = "/api/v1/platform/tenants/$tenantId/suspend",
+                permissionCode = "platform.tenants.manage",
+                routeScope = RouteScope.PLATFORM,
+            ),
+            ScopedRouteExpectation(
                 method = "GET",
                 path = "/api/v1/platform/administrators",
                 permissionCode = "platform.roles.view",
@@ -274,6 +286,12 @@ class RouteAccessMatrixCoverageIntegrationTests {
                 method = "DELETE",
                 path = "/api/v1/properties/$propertyId/inventory/recipes/$menuItemId",
                 permissionCode = "inventory.manage",
+                routeScope = RouteScope.PROPERTY,
+            ),
+            ScopedRouteExpectation(
+                method = "POST",
+                path = "/api/v1/properties/$propertyId/reports/daily_management_summary/runs",
+                permissionCode = "reports.generate",
                 routeScope = RouteScope.PROPERTY,
             ),
             ScopedRouteExpectation(
@@ -398,6 +416,9 @@ class RouteAccessMatrixCoverageIntegrationTests {
             }
             assertEquals(expectation.routeScope, request.routeScope, expectation.path)
             assertEquals(expectation.permissionCode, request.permissionCode, expectation.path)
+            if (expectation.path.startsWith("/api/v1/platform/tenants/$tenantId")) {
+                assertEquals(tenantId, request.tenantId, expectation.path)
+            }
         }
     }
 

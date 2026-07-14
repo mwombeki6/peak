@@ -4,7 +4,8 @@
         allowedDependencies = {
                 "shared::context",
                 "audit::api",
-                "reliability::api"
+                "reliability::api",
+                "usermanagement::api"
         }
 )
 package com.mwombeki.peak.platformgovernance;

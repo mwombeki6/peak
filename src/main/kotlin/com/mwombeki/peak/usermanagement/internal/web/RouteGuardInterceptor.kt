@@ -69,6 +69,14 @@ class RouteGuardInterceptor(
                 detail = ex.message ?: "Route parameters are invalid",
             )
             return false
+        } catch (ex: RouteAccessConfigurationException) {
+            deny(
+                response = response,
+                status = HttpStatus.INTERNAL_SERVER_ERROR,
+                title = "Route guard misconfigured",
+                detail = ex.message ?: "Route access contracts are ambiguous",
+            )
+            return false
         }
 
         if (decision.allowed) {

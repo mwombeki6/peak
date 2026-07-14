@@ -1,9 +1,11 @@
 package com.mwombeki.peak.usermanagement.internal.web
 
+import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.usermanagement.api.RouteAuthorizationRequest
 import java.util.UUID
-import com.mwombeki.peak.shared.context.RequestIdentity
 import org.springframework.stereotype.Component
+
+class RouteAccessConfigurationException(message: String) : IllegalStateException(message)
 
 @Component
 class RouteAccessMatcher {
@@ -28,14 +30,25 @@ class RouteAccessMatcher {
             )
         }
 
-        return candidates.maxWithOrNull(
+        val comparator =
             compareBy<RouteRuleMatch> { it.score.methodScore }
                 .thenBy { it.score.literalCount }
                 .thenBy { it.score.segmentCount }
-                .thenByDescending { it.score.wildcardCount },
-        )?.let { match ->
-            match.rule.toAuthorizationRequest(match.variables, match.identity)
+                .thenByDescending { it.score.wildcardCount }
+        val best = candidates.maxWithOrNull(comparator) ?: return null
+        val bestRequests = candidates
+            .filter { candidate -> comparator.compare(candidate, best) == 0 }
+            .map { match ->
+                match.rule.toAuthorizationRequest(match.variables, match.identity)
+            }
+            .distinct()
+
+        if (bestRequests.size != 1) {
+            throw RouteAccessConfigurationException(
+                "Ambiguous route access contracts for ${httpMethod.uppercase()} $normalizedPath",
+            )
         }
+        return bestRequests.single()
     }
 
     private fun RouteAccessRule.methodMatches(httpMethod: String): Boolean {

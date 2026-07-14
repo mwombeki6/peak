@@ -153,6 +153,47 @@ class RouteGuardInterceptorTests {
         assertTrue(response.contentAsString.contains("Request context is not bound"))
     }
 
+    @Test
+    fun failsClosedWhenRouteContractsAreAmbiguous() {
+        val tenantId = UUID.fromString("11111111-1111-1111-1111-111111111111")
+        val userId = UUID.fromString("22222222-2222-2222-2222-222222222222")
+        val propertyId = UUID.fromString("33333333-3333-3333-3333-333333333333")
+        holder.set(requestContext(RequestIdentity.Tenant(tenantId, userId)))
+        val response = MockHttpServletResponse()
+
+        val shouldContinue = interceptor(
+            rules = listOf(
+                RouteAccessRule(
+                    moduleId = "reports",
+                    httpMethod = "POST",
+                    apiPattern = "/api/properties/:propertyId/reports/:reportCode/runs",
+                    permissionCode = "reports.generate",
+                    routeScope = RouteScope.PROPERTY,
+                    guardMode = GuardMode.STAFF_PERMISSION,
+                ),
+                RouteAccessRule(
+                    moduleId = "reports",
+                    httpMethod = "POST",
+                    apiPattern = "/api/properties/:propertyId/reports/:reportCode/runs",
+                    permissionCode = "reports.manual_generate",
+                    routeScope = RouteScope.PROPERTY,
+                    guardMode = GuardMode.STAFF_PERMISSION,
+                ),
+            ),
+        ).preHandle(
+            MockHttpServletRequest(
+                "POST",
+                "/api/v1/properties/$propertyId/reports/daily/runs",
+            ),
+            response,
+            Any(),
+        )
+
+        assertFalse(shouldContinue)
+        assertEquals(500, response.status)
+        assertTrue(response.contentAsString.contains("Ambiguous route access contracts"))
+    }
+
     private fun interceptor(
         rules: List<RouteAccessRule>,
     ): RouteGuardInterceptor {

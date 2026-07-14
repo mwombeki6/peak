@@ -826,7 +826,7 @@ class PlatformAdministrationControllerIntegrationTests {
                     """.trimIndent(),
                 ),
         )
-            .andExpect(status().isBadRequest)
+            .andExpect(status().isForbidden)
             .andExpect(jsonPath("$.detail").value("Support session tenant does not match target tenant"))
 
         val auditOutcome = jdbcTemplate.queryForObject(
