@@ -12,16 +12,16 @@ set -a
 set +a
 
 if [ "${PEAK_PLATFORM_BOOTSTRAP_ENABLED:-false}" != "true" ]; then
-  echo "PEAK_PLATFORM_BOOTSTRAP_ENABLED must be true for the one-shot bootstrap." >&2
+  echo "PEAK_PLATFORM_BOOTSTRAP_ENABLED must be true for platform recovery." >&2
   exit 1
 fi
 
-if [ "${PEAK_PLATFORM_RECOVERY_ENABLED:-false}" = "true" ]; then
-  echo "Use ops/scripts/recover-platform-root.sh when recovery mode is enabled." >&2
+if [ "${PEAK_PLATFORM_RECOVERY_ENABLED:-false}" != "true" ]; then
+  echo "PEAK_PLATFORM_RECOVERY_ENABLED must be true for platform recovery." >&2
   exit 1
 fi
 
 podman compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --profile bootstrap \
   run --rm --no-deps peak-bootstrap
 
-echo "Platform bootstrap completed. Set PEAK_PLATFORM_BOOTSTRAP_ENABLED=false and clear its identity values."
+echo "Platform root recovery completed. Disable both flags and clear the four identity values."

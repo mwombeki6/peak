@@ -37,6 +37,9 @@ All routes below are platform-scoped and are covered by `module_access_matrix`. 
 | --- | --- | --- |
 | `GET` | `/api/v1/platform/users` | List platform users, roles, and active identity-link counts. |
 | `GET` | `/api/v1/platform/users/{platformUserId}` | View one platform user. |
+| `GET` | `/api/v1/platform/administrators` | List system platform administrators and effective sign-in state. |
+| `POST` | `/api/v1/platform/administrators/{platformUserId}/assign` | Appoint an active platform user as a platform administrator. |
+| `POST` | `/api/v1/platform/administrators/{platformUserId}/revoke` | Revoke root access only after another effective administrator exists. |
 | `POST` | `/api/v1/platform/users` | Create an invited or active platform user. |
 | `PUT` | `/api/v1/platform/users/{platformUserId}` | Update platform user profile fields. |
 | `POST` | `/api/v1/platform/users/{platformUserId}/lock` | Lock a platform user. |
@@ -55,9 +58,11 @@ All routes below are platform-scoped and are covered by `module_access_matrix`. 
 | `POST` | `/api/v1/platform/tenants/{tenantId}/administrators` | Provision an initial or recovery administrator, immutable system role, permissions, and OIDC link. |
 | `POST` | `/api/v1/platform/tenants/{tenantId}/profile/verify` | Verify the tenant business profile after platform review. |
 
-Mutating platform administration routes require `Idempotency-Key`. Successful changes write a `platform_audit_logs` record and enqueue a platform outbox event. System platform roles cannot be modified, and an operator cannot lock, disable, assign roles to, revoke roles from, link identities for, or revoke identity links from themselves. Dynamic platform role creation, update, deactivation, assignment, and revocation cannot manage permissions above the actor's effective platform permission set. Platform user profile, lifecycle, role assignment, role revocation, identity-link creation, and identity-link revocation also require the actor to hold the target user's current effective platform permissions; `platform.admin.all` satisfies this hierarchy check.
+Mutating platform administration routes require `Idempotency-Key`. Successful changes write a `platform_audit_logs` record and enqueue a platform outbox event. System platform roles cannot be modified or assigned through ordinary role routes, and an operator cannot lock, disable, assign roles to, revoke roles from, link identities for, or revoke identity links from themselves. Dynamic platform role creation, update, deactivation, assignment, and revocation cannot manage permissions above the actor's effective platform permission set. Platform user profile, lifecycle, role assignment, role revocation, identity-link creation, and identity-link revocation also require the actor to hold the target user's current effective platform permissions; `platform.admin.all` satisfies this hierarchy check.
 
-The initial platform root is created once with the non-web `bootstrap` runtime. It requires a real Keycloak issuer/subject, writes an audit event, and closes after a platform user exists. Run `ops/scripts/bootstrap-platform.sh`; never seed platform identities with application SQL.
+Platform-root succession is the controlled exception for a system platform-role assignment. Dedicated routes require `platform.administrators.manage`, serialize all root-removal paths with a transaction-scoped PostgreSQL advisory lock, and reject revocation, disabling, locking, or final identity unlink when it would leave no other effective root. A root is effective only when the system role is active and the user is active, unlocked, undeleted, and has an unrevoked platform OIDC identity.
+
+The initial platform root is created once with the non-web `bootstrap` runtime. It requires a real Keycloak issuer/subject, writes an audit event, and closes after a platform user exists. Run `ops/scripts/bootstrap-platform.sh`; never seed platform identities with application SQL. If every root is already ineffective, an operator with database and deployment authority may run `ops/scripts/recover-platform-root.sh` with both explicit flags enabled. Recovery refuses to run while any effective root can sign in, reactivates or creates the named operator, restores the immutable root role and current permissions, links the supplied OIDC identity, and records `platform.recovery.completed`.
 
 Metrics:
 

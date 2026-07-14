@@ -242,6 +242,24 @@ class RouteAccessMatrixCoverageIntegrationTests {
             ),
             ScopedRouteExpectation(
                 method = "GET",
+                path = "/api/v1/platform/administrators",
+                permissionCode = "platform.roles.view",
+                routeScope = RouteScope.PLATFORM,
+            ),
+            ScopedRouteExpectation(
+                method = "POST",
+                path = "/api/v1/platform/administrators/$platformUserId/assign",
+                permissionCode = "platform.administrators.manage",
+                routeScope = RouteScope.PLATFORM,
+            ),
+            ScopedRouteExpectation(
+                method = "POST",
+                path = "/api/v1/platform/administrators/$platformUserId/revoke",
+                permissionCode = "platform.administrators.manage",
+                routeScope = RouteScope.PLATFORM,
+            ),
+            ScopedRouteExpectation(
+                method = "GET",
                 path = "/api/v1/properties/$propertyId/inventory/recipes",
                 permissionCode = "inventory.view",
                 routeScope = RouteScope.PROPERTY,

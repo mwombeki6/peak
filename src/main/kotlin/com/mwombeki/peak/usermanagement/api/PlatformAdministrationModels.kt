@@ -6,6 +6,7 @@ import java.util.UUID
 interface PlatformAdministrationPort {
     fun listPlatformUsers(): List<PlatformUserSummary>
     fun getPlatformUser(platformUserId: UUID): PlatformUserSummary?
+    fun listPlatformAdministrators(): List<PlatformAdministratorSummary>
     fun createPlatformUser(command: CreatePlatformUserCommand): PlatformUserMutationReceipt
     fun updatePlatformUser(command: UpdatePlatformUserCommand): PlatformUserMutationReceipt
     fun changePlatformUserLifecycle(command: PlatformUserLifecycleCommand): PlatformUserMutationReceipt
@@ -16,6 +17,12 @@ interface PlatformAdministrationPort {
     fun deactivatePlatformRole(command: DeactivatePlatformRoleCommand): PlatformRoleMutationReceipt
     fun assignPlatformUserRole(command: AssignPlatformUserRoleCommand): PlatformUserRoleMutationReceipt
     fun revokePlatformUserRole(command: RevokePlatformUserRoleCommand): PlatformUserRoleMutationReceipt
+    fun assignPlatformAdministrator(
+        command: AssignPlatformAdministratorCommand,
+    ): PlatformUserRoleMutationReceipt
+    fun revokePlatformAdministrator(
+        command: RevokePlatformAdministratorCommand,
+    ): PlatformUserRoleMutationReceipt
     fun listPlatformPermissions(): List<PlatformPermissionSummary>
     fun linkPlatformOidcIdentity(command: LinkPlatformOidcIdentityCommand): PlatformIdentityLinkReceipt
     fun revokePlatformOidcIdentity(command: RevokePlatformOidcIdentityCommand): PlatformIdentityLinkReceipt
@@ -74,6 +81,14 @@ data class RevokePlatformUserRoleCommand(
     val platformRoleId: UUID,
 )
 
+data class AssignPlatformAdministratorCommand(
+    val platformUserId: UUID,
+)
+
+data class RevokePlatformAdministratorCommand(
+    val platformUserId: UUID,
+)
+
 data class LinkPlatformOidcIdentityCommand(
     val platformUserId: UUID,
     val issuer: String,
@@ -106,6 +121,17 @@ data class PlatformUserSummary(
     val lockedUntil: Instant?,
     val roleCodes: List<String>,
     val activeIdentityLinks: Int,
+)
+
+data class PlatformAdministratorSummary(
+    val platformUserId: UUID,
+    val platformRoleId: UUID,
+    val fullName: String,
+    val email: String,
+    val status: String,
+    val lockedUntil: Instant?,
+    val activeIdentityLinks: Int,
+    val effective: Boolean,
 )
 
 data class PlatformRoleSummary(
