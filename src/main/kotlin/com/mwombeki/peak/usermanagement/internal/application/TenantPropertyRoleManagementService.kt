@@ -9,7 +9,6 @@ import com.mwombeki.peak.reliability.api.IdempotencyReservation
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
-import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.usermanagement.api.AssignPropertyAdministratorCommand
@@ -30,6 +29,8 @@ import com.mwombeki.peak.usermanagement.api.PropertyUserRoleAssignmentReceipt
 import com.mwombeki.peak.usermanagement.api.RevokePropertyAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.RevokePropertyUserRoleCommand
 import com.mwombeki.peak.usermanagement.api.TenantPropertyRoleManagementPort
+import com.mwombeki.peak.usermanagement.api.TenantPermissionAccessPort
+import com.mwombeki.peak.usermanagement.api.TenantPermissionAccessRequest
 import com.mwombeki.peak.usermanagement.api.TenantUserRoleManagementConflictException
 import com.mwombeki.peak.usermanagement.api.TenantUserRoleManagementInProgressException
 import com.mwombeki.peak.usermanagement.api.TenantUserRoleManagementNotFoundException
@@ -47,7 +48,7 @@ import tools.jackson.databind.ObjectMapper
 class TenantPropertyRoleManagementService(
     private val jdbcTemplate: JdbcTemplate,
     private val requestContextHolder: RequestContextHolder,
-    private val databaseSessionContext: DatabaseSessionContext,
+    private val tenantPermissionAccessPort: TenantPermissionAccessPort,
     private val idempotencyPort: IdempotencyPort,
     private val auditPort: AuditPort,
     private val outboxPort: OutboxPort,
@@ -842,27 +843,11 @@ class TenantPropertyRoleManagementService(
     private fun bindTenantActorWithPermission(
         tenantId: UUID,
         permissionCode: String,
-        denialMessage: String,
+        denialMessage: String = "Tenant user lacks required permission",
     ): UUID {
-        val identity = requestContextHolder.current().identity
-        require(identity is RequestIdentity.Tenant) {
-            "Tenant user identity is required"
-        }
-        require(identity.tenantId == tenantId) {
-            "Requested tenant does not match identity"
-        }
-        databaseSessionContext.bind(identity)
-        val allowed = jdbcTemplate.queryForObject(
-            "SELECT user_has_tenant_permission(?, ?, ?)",
-            Boolean::class.java,
-            identity.tenantUserId,
-            tenantId,
-            permissionCode,
-        ) == true
-        require(allowed) {
-            denialMessage
-        }
-        return identity.tenantUserId
+        return tenantPermissionAccessPort.requireAuthorized(
+            TenantPermissionAccessRequest(tenantId, permissionCode, denialMessage),
+        )
     }
 
     private fun requirePropertyBelongsToTenant(tenantId: UUID, propertyId: UUID) {
@@ -1282,6 +1267,10 @@ class TenantPropertyRoleManagementService(
         propertyId: UUID,
         permissionCodes: List<String>,
     ) {
+        val normalizedCodes = permissionCodes.map { it.normalizedCode() }.distinct()
+        require(PROPERTY_ADMIN_ALL_PERMISSION !in normalizedCodes) {
+            "admin.all is reserved for the system Property Administrator role"
+        }
         val actorUserId = (requestContextHolder.current().identity as RequestIdentity.Tenant).tenantUserId
         val tenantSuperAdmin = jdbcTemplate.queryForObject(
             "SELECT user_has_tenant_permission(?, ?, ?)",
@@ -1294,9 +1283,7 @@ class TenantPropertyRoleManagementService(
             return
         }
 
-        val unauthorized = permissionCodes
-            .map { it.normalizedCode() }
-            .distinct()
+        val unauthorized = normalizedCodes
             .filterNot { permissionCode ->
                 jdbcTemplate.queryForObject(
                     "SELECT user_has_property_permission(?, ?, ?, ?)",
@@ -1321,6 +1308,20 @@ class TenantPropertyRoleManagementService(
             "At least one property permission is required"
         }
         val placeholders = normalizedCodes.joinToString(", ") { "?" }
+        val validCatalogCodes = jdbcTemplate.queryForList(
+            """
+            SELECT code
+            FROM permission_catalog
+            WHERE code IN ($placeholders)
+              AND is_tenant_permission = true
+              AND access_scope IN ('property', 'both')
+            """.trimIndent(),
+            String::class.java,
+            *normalizedCodes.toTypedArray(),
+        ).filterNotNull().toSet()
+        require(validCatalogCodes.size == normalizedCodes.size) {
+            "Dynamic property roles may contain only property-scoped permissions"
+        }
         val args = mutableListOf<Any>(tenantId)
         args.addAll(normalizedCodes)
         val permissionIds = jdbcTemplate.query(
@@ -1664,6 +1665,7 @@ class TenantPropertyRoleManagementService(
             "tenant.properties.administrators.manage"
         private const val TENANT_ADMIN_ALL_PERMISSION = "tenant.admin.all"
         private const val PROPERTY_CREATION_PERMISSION = "property.manage"
+        private const val PROPERTY_ADMIN_ALL_PERMISSION = "admin.all"
         private const val PROPERTY_ADMIN_ROLE_NAME = "Property Administrator"
 
         private val PROPERTY_ADMIN_PERMISSION_CODES = setOf(

@@ -516,10 +516,15 @@ class PropertyManagementIntegrationTests {
         jdbcTemplate.update(
             """
             INSERT INTO tenant_role_permissions (tenant_role_id, permission_id)
-            VALUES (?, ?)
+            SELECT ?, ?
+            FROM permission_catalog
+            WHERE code = ?
+              AND is_tenant_permission = true
+              AND access_scope IN ('tenant', 'both')
             """.trimIndent(),
             fixture.tenantRoleId,
             permissionId,
+            permissionCode,
         )
     }
 

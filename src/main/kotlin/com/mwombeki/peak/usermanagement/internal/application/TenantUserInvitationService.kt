@@ -22,6 +22,8 @@ import com.mwombeki.peak.usermanagement.api.TenantUserInvitationConflictExceptio
 import com.mwombeki.peak.usermanagement.api.TenantUserInvitationInProgressException
 import com.mwombeki.peak.usermanagement.api.TenantUserInvitationPort
 import com.mwombeki.peak.usermanagement.api.TenantUserInvitationReceipt
+import com.mwombeki.peak.usermanagement.api.TenantPermissionAccessPort
+import com.mwombeki.peak.usermanagement.api.TenantPermissionAccessRequest
 import java.sql.ResultSet
 import java.sql.Timestamp
 import java.time.Clock
@@ -40,6 +42,7 @@ class TenantUserInvitationService(
     private val jdbcTemplate: JdbcTemplate,
     private val requestContextHolder: RequestContextHolder,
     private val databaseSessionContext: DatabaseSessionContext,
+    private val tenantPermissionAccessPort: TenantPermissionAccessPort,
     private val idempotencyPort: IdempotencyPort,
     private val auditPort: AuditPort,
     private val outboxPort: OutboxPort,
@@ -68,9 +71,11 @@ class TenantUserInvitationService(
     }
 
     private fun inviteInsideTransaction(command: NormalizedInviteCommand): TenantUserInvitationReceipt {
+        tenantPermissionAccessPort.requireAuthorized(
+            TenantPermissionAccessRequest(command.tenantId, TENANT_USER_MANAGE_PERMISSION),
+        )
         val identity = requestContextHolder.current().identity
         val actor = actorFor(identity, command.tenantId)
-        databaseSessionContext.bind(identity)
 
         val reservation = idempotencyPort.reserve(
             IdempotencyCommand(
@@ -429,9 +434,36 @@ class TenantUserInvitationService(
             tenantId,
             tenantRoleId,
         ).filterNotNull()
-        val unauthorized = permissionCodes
-            .map { it.normalizedCode() }
-            .distinct()
+        val normalizedCodes = permissionCodes.map { it.normalizedCode() }.distinct()
+        require(TENANT_ADMIN_ALL_PERMISSION !in normalizedCodes) {
+            "tenant.admin.all is reserved for the system Tenant Administrator role"
+        }
+        val invalidScope = jdbcTemplate.queryForObject(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM tenant_role_permissions trp
+                JOIN permissions p
+                  ON p.id = trp.permission_id
+                 AND p.tenant_id = ?
+                LEFT JOIN permission_catalog pc
+                  ON pc.code = p.code
+                WHERE trp.tenant_role_id = ?
+                  AND (
+                      pc.code IS NULL
+                      OR pc.is_tenant_permission = false
+                      OR pc.access_scope NOT IN ('tenant', 'both')
+                  )
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            tenantId,
+            tenantRoleId,
+        ) == true
+        require(!invalidScope) {
+            "Tenant invitation roles can include only tenant-scoped permissions"
+        }
+        val unauthorized = normalizedCodes
             .filterNot { permissionCode ->
                 jdbcTemplate.queryForObject(
                     "SELECT user_has_tenant_permission(?, ?, ?)",
@@ -593,6 +625,8 @@ class TenantUserInvitationService(
     )
 
     private companion object {
+        private const val TENANT_ADMIN_ALL_PERMISSION = "tenant.admin.all"
+        private const val TENANT_USER_MANAGE_PERMISSION = "tenant.users.manage"
         val EMAIL_PATTERN = Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")
     }
 }

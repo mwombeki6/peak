@@ -586,8 +586,8 @@ class RuntimeDatabaseRoleIntegrationTests {
         )
         jdbcTemplate.update(
             """
-            INSERT INTO platform_roles (id, name, code)
-            VALUES (?, ?, ?)
+            INSERT INTO platform_roles (id, name, code, is_system)
+            VALUES (?, ?, ?, true)
             """.trimIndent(),
             platformRoleId,
             "Runtime Platform Role $platformRoleId",

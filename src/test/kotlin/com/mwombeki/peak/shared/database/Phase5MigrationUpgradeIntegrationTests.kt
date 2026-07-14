@@ -5,6 +5,7 @@ import java.sql.DriverManager
 import java.time.LocalDate
 import java.util.UUID
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.Test
@@ -166,6 +167,33 @@ class Phase5MigrationUpgradeIntegrationTests @Autowired constructor(
                     )
                     sql.execute(
                         """
+                        INSERT INTO permissions (id, tenant_id, code, description)
+                        SELECT gen_random_uuid(), '$tenantId', code, description
+                        FROM permission_catalog
+                        WHERE code IN ('tenant.admin.all', 'admin.all')
+                        ON CONFLICT (tenant_id, code) DO NOTHING
+                        """.trimIndent(),
+                    )
+                    sql.execute(
+                        """
+                        INSERT INTO tenant_role_permissions (tenant_role_id, permission_id)
+                        SELECT '$legacyTenantAdminRoleId', id
+                        FROM permissions
+                        WHERE tenant_id = '$tenantId'
+                          AND code = 'tenant.admin.all'
+                        """.trimIndent(),
+                    )
+                    sql.execute(
+                        """
+                        INSERT INTO role_permissions (role_id, permission_id)
+                        SELECT '$legacyPropertyAdminRoleId', id
+                        FROM permissions
+                        WHERE tenant_id = '$tenantId'
+                          AND code = 'admin.all'
+                        """.trimIndent(),
+                    )
+                    sql.execute(
+                        """
                         INSERT INTO platform_roles (
                             id, name, code, is_system, is_active
                         ) VALUES (
@@ -204,7 +232,7 @@ class Phase5MigrationUpgradeIntegrationTests @Autowired constructor(
                 .dataSource(url, postgres.username, postgres.password)
                 .load()
             flyway.migrate()
-            assertEquals("66", flyway.info().current().version.version)
+            assertEquals("67", flyway.info().current().version.version)
 
             DriverManager.getConnection(
                 url,
@@ -245,6 +273,98 @@ class Phase5MigrationUpgradeIntegrationTests @Autowired constructor(
                     it.executeQuery().use { rows ->
                         rows.next()
                         assertEquals(1, rows.getInt(1))
+                    }
+                }
+                connection.prepareStatement(
+                    """
+                    SELECT count(*)
+                    FROM platform_role_permissions prp
+                    JOIN platform_permissions pp
+                      ON pp.id = prp.platform_permission_id
+                    WHERE prp.platform_role_id = ?
+                      AND pp.code = 'platform.admin.all'
+                    """.trimIndent(),
+                ).use {
+                    it.setObject(1, fullPlatformAuthorityRoleId)
+                    it.executeQuery().use { rows ->
+                        rows.next()
+                        assertEquals(0, rows.getInt(1))
+                    }
+                }
+                connection.prepareStatement(
+                    """
+                    SELECT count(*)
+                    FROM tenant_role_permissions trp
+                    JOIN permissions p ON p.id = trp.permission_id
+                    WHERE trp.tenant_role_id = ?
+                      AND p.code = 'tenant.admin.all'
+                    """.trimIndent(),
+                ).use {
+                    it.setObject(1, legacyTenantAdminRoleId)
+                    it.executeQuery().use { rows ->
+                        rows.next()
+                        assertEquals(0, rows.getInt(1))
+                    }
+                }
+                connection.prepareStatement(
+                    """
+                    SELECT count(*)
+                    FROM role_permissions rp
+                    JOIN permissions p ON p.id = rp.permission_id
+                    WHERE rp.role_id = ?
+                      AND p.code = 'admin.all'
+                    """.trimIndent(),
+                ).use {
+                    it.setObject(1, legacyPropertyAdminRoleId)
+                    it.executeQuery().use { rows ->
+                        rows.next()
+                        assertEquals(0, rows.getInt(1))
+                    }
+                }
+                assertFailsWith<java.sql.SQLException> {
+                    connection.prepareStatement(
+                        """
+                        INSERT INTO platform_role_permissions (
+                            platform_role_id,
+                            platform_permission_id
+                        )
+                        SELECT ?, id
+                        FROM platform_permissions
+                        WHERE code = 'platform.admin.all'
+                        """.trimIndent(),
+                    ).use {
+                        it.setObject(1, fullPlatformAuthorityRoleId)
+                        it.executeUpdate()
+                    }
+                }
+                assertFailsWith<java.sql.SQLException> {
+                    connection.prepareStatement(
+                        """
+                        INSERT INTO tenant_role_permissions (tenant_role_id, permission_id)
+                        SELECT ?, id
+                        FROM permissions
+                        WHERE tenant_id = ?
+                          AND code = 'tenant.admin.all'
+                        """.trimIndent(),
+                    ).use {
+                        it.setObject(1, legacyTenantAdminRoleId)
+                        it.setObject(2, tenantId)
+                        it.executeUpdate()
+                    }
+                }
+                assertFailsWith<java.sql.SQLException> {
+                    connection.prepareStatement(
+                        """
+                        INSERT INTO role_permissions (role_id, permission_id)
+                        SELECT ?, id
+                        FROM permissions
+                        WHERE tenant_id = ?
+                          AND code = 'admin.all'
+                        """.trimIndent(),
+                    ).use {
+                        it.setObject(1, legacyPropertyAdminRoleId)
+                        it.setObject(2, tenantId)
+                        it.executeUpdate()
                     }
                 }
                 connection.createStatement().executeQuery(
@@ -293,7 +413,7 @@ class Phase5MigrationUpgradeIntegrationTests @Autowired constructor(
                     it.setObject(1, legacyTenantAdminRoleId)
                     it.executeQuery().use { rows ->
                         rows.next()
-                        assertEquals(1, rows.getInt(1))
+                        assertEquals(0, rows.getInt(1))
                     }
                 }
                 connection.prepareStatement(

@@ -9,7 +9,6 @@ import com.mwombeki.peak.reliability.api.IdempotencyReservation
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
-import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.usermanagement.api.AssignTenantAdministratorCommand
@@ -24,6 +23,8 @@ import com.mwombeki.peak.usermanagement.api.RevokeTenantAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.RevokeTenantUserRoleCommand
 import com.mwombeki.peak.usermanagement.api.TenantAdministratorSummary
 import com.mwombeki.peak.usermanagement.api.TenantPermissionSummary
+import com.mwombeki.peak.usermanagement.api.TenantPermissionAccessPort
+import com.mwombeki.peak.usermanagement.api.TenantPermissionAccessRequest
 import com.mwombeki.peak.usermanagement.api.TenantRoleMutationReceipt
 import com.mwombeki.peak.usermanagement.api.TenantRoleSummary
 import com.mwombeki.peak.usermanagement.api.TenantUserRoleAssignmentReceipt
@@ -45,7 +46,7 @@ import tools.jackson.databind.ObjectMapper
 class TenantUserRoleManagementService(
     private val jdbcTemplate: JdbcTemplate,
     private val requestContextHolder: RequestContextHolder,
-    private val databaseSessionContext: DatabaseSessionContext,
+    private val tenantPermissionAccessPort: TenantPermissionAccessPort,
     private val idempotencyPort: IdempotencyPort,
     private val auditPort: AuditPort,
     private val outboxPort: OutboxPort,
@@ -55,8 +56,7 @@ class TenantUserRoleManagementService(
     override fun listTenantRoles(query: ListTenantRolesQuery): List<TenantRoleSummary> {
         return requireNotNull(
             transactionTemplate.execute {
-                requireTenantActor(query.tenantId)
-                databaseSessionContext.bind(requestContextHolder.current().identity)
+                bindTenantActorWithPermission(query.tenantId, TENANT_ROLE_VIEW_PERMISSION)
                 jdbcTemplate.query(
                     """
                     SELECT
@@ -92,8 +92,7 @@ class TenantUserRoleManagementService(
     override fun getTenantRole(query: GetTenantRoleQuery): TenantRoleSummary? {
         return requireNotNull(
             transactionTemplate.execute {
-                requireTenantActor(query.tenantId)
-                databaseSessionContext.bind(requestContextHolder.current().identity)
+                bindTenantActorWithPermission(query.tenantId, TENANT_ROLE_VIEW_PERMISSION)
                 jdbcTemplate.query(
                     """
                     SELECT
@@ -132,14 +131,17 @@ class TenantUserRoleManagementService(
     ): List<TenantPermissionSummary> {
         return requireNotNull(
             transactionTemplate.execute {
-                requireTenantActor(query.tenantId)
-                databaseSessionContext.bind(requestContextHolder.current().identity)
+                bindTenantActorWithPermission(query.tenantId, TENANT_ROLE_VIEW_PERMISSION)
                 jdbcTemplate.query(
                     """
-                    SELECT id, tenant_id, code, description
-                    FROM permissions
-                    WHERE tenant_id = ?
-                    ORDER BY code
+                    SELECT p.id, p.tenant_id, p.code, p.description
+                    FROM permissions p
+                    JOIN permission_catalog pc
+                      ON pc.code = p.code
+                    WHERE p.tenant_id = ?
+                      AND pc.is_tenant_permission = true
+                      AND pc.access_scope IN ('tenant', 'both')
+                    ORDER BY p.code
                     """.trimIndent(),
                     ::mapTenantPermission,
                     query.tenantId,
@@ -564,11 +566,13 @@ class TenantUserRoleManagementService(
     private fun assignInsideTransaction(
         command: AssignTenantUserRoleCommand,
     ): TenantUserRoleAssignmentReceipt {
-        val actorUserId = requireTenantActor(command.tenantId)
+        val actorUserId = bindTenantActorWithPermission(
+            command.tenantId,
+            TENANT_USER_MANAGE_PERMISSION,
+        )
         require(actorUserId != command.userId) {
             "Tenant user cannot assign own tenant roles"
         }
-        databaseSessionContext.bind(requestContextHolder.current().identity)
 
         val reservation = idempotencyPort.reserve(
             IdempotencyCommand(
@@ -603,11 +607,13 @@ class TenantUserRoleManagementService(
     private fun revokeInsideTransaction(
         command: RevokeTenantUserRoleCommand,
     ): TenantUserRoleAssignmentReceipt {
-        val actorUserId = requireTenantActor(command.tenantId)
+        val actorUserId = bindTenantActorWithPermission(
+            command.tenantId,
+            TENANT_USER_MANAGE_PERMISSION,
+        )
         require(actorUserId != command.userId) {
             "Tenant user cannot revoke own tenant roles"
         }
-        databaseSessionContext.bind(requestContextHolder.current().identity)
 
         val reservation = idempotencyPort.reserve(
             IdempotencyCommand(
@@ -766,21 +772,11 @@ class TenantUserRoleManagementService(
     private fun bindTenantActorWithPermission(
         tenantId: UUID,
         permissionCode: String,
-        denialMessage: String,
+        denialMessage: String = "Tenant user lacks required permission",
     ): UUID {
-        val actorUserId = requireTenantActor(tenantId)
-        databaseSessionContext.bind(requestContextHolder.current().identity)
-        val allowed = jdbcTemplate.queryForObject(
-            "SELECT user_has_tenant_permission(?, ?, ?)",
-            Boolean::class.java,
-            actorUserId,
-            tenantId,
-            permissionCode,
-        ) == true
-        require(allowed) {
-            denialMessage
-        }
-        return actorUserId
+        return tenantPermissionAccessPort.requireAuthorized(
+            TenantPermissionAccessRequest(tenantId, permissionCode, denialMessage),
+        )
     }
 
     private fun lockTenantForAdministratorContinuity(tenantId: UUID) {
@@ -1189,8 +1185,7 @@ class TenantUserRoleManagementService(
     ): TenantRoleMutationReceipt {
         return requireNotNull(
             transactionTemplate.execute {
-                requireTenantActor(tenantId)
-                databaseSessionContext.bind(requestContextHolder.current().identity)
+                bindTenantActorWithPermission(tenantId, TENANT_USER_MANAGE_PERMISSION)
                 val reservation = idempotencyPort.reserve(
                     IdempotencyCommand(
                         operationType = operationType,
@@ -1237,15 +1232,33 @@ class TenantUserRoleManagementService(
             "At least one tenant permission is required"
         }
         val placeholders = normalizedCodes.joinToString(", ") { "?" }
+        val validCatalogCodes = jdbcTemplate.queryForList(
+            """
+            SELECT code
+            FROM permission_catalog
+            WHERE code IN ($placeholders)
+              AND is_tenant_permission = true
+              AND access_scope IN ('tenant', 'both')
+            """.trimIndent(),
+            String::class.java,
+            *normalizedCodes.toTypedArray(),
+        ).filterNotNull().toSet()
+        require(validCatalogCodes.size == normalizedCodes.size) {
+            "Dynamic tenant roles may contain only tenant-scoped permissions"
+        }
         val args = mutableListOf<Any>(tenantId)
         args.addAll(normalizedCodes)
         val permissionIds = jdbcTemplate.query(
             """
-            SELECT id
-            FROM permissions
-            WHERE tenant_id = ?
-              AND code IN ($placeholders)
-            ORDER BY code
+            SELECT p.id
+            FROM permissions p
+            JOIN permission_catalog pc
+              ON pc.code = p.code
+            WHERE p.tenant_id = ?
+              AND p.code IN ($placeholders)
+              AND pc.is_tenant_permission = true
+              AND pc.access_scope IN ('tenant', 'both')
+            ORDER BY p.code
             """.trimIndent(),
             { rs, _ -> rs.getObject("id", UUID::class.java) },
             *args.toTypedArray(),
@@ -1333,9 +1346,11 @@ class TenantUserRoleManagementService(
         permissionCodes: List<String>,
         actorUserId: UUID = requireTenantActor(tenantId),
     ) {
-        val unauthorized = permissionCodes
-            .map { it.normalizedCode() }
-            .distinct()
+        val normalizedCodes = permissionCodes.map { it.normalizedCode() }.distinct()
+        require(TENANT_ADMIN_ALL_PERMISSION !in normalizedCodes) {
+            "tenant.admin.all is reserved for the system Tenant Administrator role"
+        }
+        val unauthorized = normalizedCodes
             .filterNot { permissionCode ->
                 jdbcTemplate.queryForObject(
                     "SELECT user_has_tenant_permission(?, ?, ?)",
@@ -1471,6 +1486,7 @@ class TenantUserRoleManagementService(
         const val TENANT_ADMIN_ALL_PERMISSION = "tenant.admin.all"
         private const val TENANT_ADMINISTRATOR_MANAGE_PERMISSION = "tenant.administrators.manage"
         private const val TENANT_ROLE_VIEW_PERMISSION = "tenant.roles.view"
+        private const val TENANT_USER_MANAGE_PERMISSION = "tenant.users.manage"
         private const val TENANT_ADMIN_ROLE_CODE = "tenant_admin"
         private const val TENANT_ADMIN_ROLE_NAME = "Tenant Administrator"
     }

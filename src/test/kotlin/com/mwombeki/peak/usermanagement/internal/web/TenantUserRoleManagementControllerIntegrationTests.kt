@@ -58,7 +58,7 @@ class TenantUserRoleManagementControllerIntegrationTests {
             .andExpect(status().isOk)
             .andExpect(jsonPath("$[*].tenantRoleId", hasItem(fixture.targetRoleId.toString())))
             .andExpect(jsonPath("$[*].code", hasItem(fixture.targetRoleCode)))
-            .andExpect(content().string(containsString("reports.view")))
+            .andExpect(content().string(containsString("tenant.profile.view")))
     }
 
     @Test
@@ -172,7 +172,7 @@ class TenantUserRoleManagementControllerIntegrationTests {
                       "code": "$roleCode",
                       "name": "Front Office Supervisor",
                       "description": "Can supervise front office workflows",
-                      "permissionCodes": ["reports.view"]
+                      "permissionCodes": ["tenant.profile.view"]
                     }
                     """.trimIndent(),
                 )
@@ -202,7 +202,7 @@ class TenantUserRoleManagementControllerIntegrationTests {
                       "code": "$roleCode",
                       "name": "Front Office Supervisor",
                       "description": "Can supervise front office workflows",
-                      "permissionCodes": ["reports.view"]
+                      "permissionCodes": ["tenant.profile.view"]
                     }
                     """.trimIndent(),
                 )
@@ -225,7 +225,7 @@ class TenantUserRoleManagementControllerIntegrationTests {
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.tenantRoleId").value(tenantRoleId.toString()))
             .andExpect(jsonPath("$.code").value(roleCode))
-            .andExpect(jsonPath("$.permissionCodes", hasItem("reports.view")))
+            .andExpect(jsonPath("$.permissionCodes", hasItem("tenant.profile.view")))
 
         mockMvc.perform(
             put("/api/v1/tenants/${fixture.tenantId}/roles/$tenantRoleId")
@@ -406,7 +406,7 @@ class TenantUserRoleManagementControllerIntegrationTests {
         jdbcTemplate.update(
             """
             INSERT INTO permissions (id, tenant_id, code, description)
-            VALUES (?, ?, 'reports.view', 'View reports')
+            VALUES (?, ?, 'tenant.profile.view', 'View tenant profile')
             """.trimIndent(),
             fixture.reportsPermissionId,
             fixture.tenantId,

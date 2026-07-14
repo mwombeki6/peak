@@ -9,7 +9,6 @@ import com.mwombeki.peak.reliability.api.IdempotencyReservation
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
-import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.usermanagement.api.AssignPlatformAdministratorCommand
@@ -23,6 +22,8 @@ import com.mwombeki.peak.usermanagement.api.PlatformAdministrationInProgressExce
 import com.mwombeki.peak.usermanagement.api.PlatformAdministrationNotFoundException
 import com.mwombeki.peak.usermanagement.api.PlatformAdministrationPort
 import com.mwombeki.peak.usermanagement.api.PlatformAdministratorSummary
+import com.mwombeki.peak.usermanagement.api.PlatformAccessPort
+import com.mwombeki.peak.usermanagement.api.PlatformAccessRequest
 import com.mwombeki.peak.usermanagement.api.PlatformIdentityLinkReceipt
 import com.mwombeki.peak.usermanagement.api.PlatformPermissionSummary
 import com.mwombeki.peak.usermanagement.api.PlatformRoleMutationReceipt
@@ -35,8 +36,6 @@ import com.mwombeki.peak.usermanagement.api.ProvisionTenantAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.RevokePlatformAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.RevokePlatformOidcIdentityCommand
 import com.mwombeki.peak.usermanagement.api.RevokePlatformUserRoleCommand
-import com.mwombeki.peak.usermanagement.api.SupportTenantAccessPort
-import com.mwombeki.peak.usermanagement.api.SupportTenantAccessRequest
 import com.mwombeki.peak.usermanagement.api.TenantAdministratorProvisioningReceipt
 import com.mwombeki.peak.usermanagement.api.TenantProfileVerificationReceipt
 import com.mwombeki.peak.usermanagement.api.UpdatePlatformRoleCommand
@@ -58,11 +57,10 @@ import tools.jackson.databind.ObjectMapper
 class PlatformAdministrationService(
     private val jdbcTemplate: JdbcTemplate,
     private val requestContextHolder: RequestContextHolder,
-    private val databaseSessionContext: DatabaseSessionContext,
     private val idempotencyPort: IdempotencyPort,
     private val auditPort: AuditPort,
     private val outboxPort: OutboxPort,
-    private val supportTenantAccessPort: SupportTenantAccessPort,
+    private val platformAccessPort: PlatformAccessPort,
     private val transactionTemplate: TransactionTemplate,
     private val objectMapper: ObjectMapper,
     private val meterRegistry: MeterRegistry,
@@ -71,7 +69,7 @@ class PlatformAdministrationService(
     override fun listPlatformUsers(): List<PlatformUserSummary> {
         return requireNotNull(
             transactionTemplate.execute {
-                bindPlatformContext()
+                requirePlatformAccess(PLATFORM_USER_VIEW_PERMISSION, "platform.users.list")
                 jdbcTemplate.query(
                     """
                     $PLATFORM_USER_SELECT
@@ -88,7 +86,7 @@ class PlatformAdministrationService(
     override fun getPlatformUser(platformUserId: UUID): PlatformUserSummary? {
         return requireNotNull(
             transactionTemplate.execute {
-                bindPlatformContext()
+                requirePlatformAccess(PLATFORM_USER_VIEW_PERMISSION, "platform.users.get")
                 jdbcTemplate.query(
                     """
                     $PLATFORM_USER_SELECT
@@ -106,11 +104,7 @@ class PlatformAdministrationService(
     override fun listPlatformAdministrators(): List<PlatformAdministratorSummary> {
         return requireNotNull(
             transactionTemplate.execute {
-                bindPlatformContext()
-                requireCurrentPlatformPermission(
-                    PLATFORM_ROLE_VIEW_PERMISSION,
-                    "Platform operator lacks platform role view permission",
-                )
+                requirePlatformAccess(PLATFORM_ROLE_VIEW_PERMISSION, "platform.administrators.list")
                 jdbcTemplate.query(
                     """
                     SELECT
@@ -165,6 +159,7 @@ class PlatformAdministrationService(
     ): PlatformUserMutationReceipt {
         return mutate(
             operationType = "platform.user.create",
+            permissionCode = PLATFORM_USER_MANAGE_PERMISSION,
             requestPayload = command,
             resourceType = "platform_users",
             replayType = PlatformUserMutationReceipt::class.java,
@@ -208,6 +203,7 @@ class PlatformAdministrationService(
     ): PlatformUserMutationReceipt {
         return mutate(
             operationType = "platform.user.update",
+            permissionCode = PLATFORM_USER_MANAGE_PERMISSION,
             requestPayload = command,
             resourceType = "platform_users",
             replayType = PlatformUserMutationReceipt::class.java,
@@ -262,6 +258,7 @@ class PlatformAdministrationService(
     ): PlatformUserMutationReceipt {
         return mutate(
             operationType = "platform.user.${command.action.databaseValue}",
+            permissionCode = PLATFORM_USER_MANAGE_PERMISSION,
             requestPayload = command,
             resourceType = "platform_users",
             replayType = PlatformUserMutationReceipt::class.java,
@@ -319,7 +316,7 @@ class PlatformAdministrationService(
     override fun listPlatformRoles(): List<PlatformRoleSummary> {
         return requireNotNull(
             transactionTemplate.execute {
-                bindPlatformContext()
+                requirePlatformAccess(PLATFORM_ROLE_VIEW_PERMISSION, "platform.roles.list")
                 jdbcTemplate.query(
                     """
                     $PLATFORM_ROLE_SELECT
@@ -335,7 +332,7 @@ class PlatformAdministrationService(
     override fun getPlatformRole(platformRoleId: UUID): PlatformRoleSummary? {
         return requireNotNull(
             transactionTemplate.execute {
-                bindPlatformContext()
+                requirePlatformAccess(PLATFORM_ROLE_VIEW_PERMISSION, "platform.roles.get")
                 jdbcTemplate.query(
                     """
                     $PLATFORM_ROLE_SELECT
@@ -354,6 +351,7 @@ class PlatformAdministrationService(
     ): PlatformRoleMutationReceipt {
         return mutate(
             operationType = "platform.role.create",
+            permissionCode = PLATFORM_ROLE_MANAGE_PERMISSION,
             requestPayload = command,
             resourceType = "platform_roles",
             replayType = PlatformRoleMutationReceipt::class.java,
@@ -399,6 +397,7 @@ class PlatformAdministrationService(
     ): PlatformRoleMutationReceipt {
         return mutate(
             operationType = "platform.role.update",
+            permissionCode = PLATFORM_ROLE_MANAGE_PERMISSION,
             requestPayload = command,
             resourceType = "platform_roles",
             replayType = PlatformRoleMutationReceipt::class.java,
@@ -454,6 +453,7 @@ class PlatformAdministrationService(
     ): PlatformRoleMutationReceipt {
         return mutate(
             operationType = "platform.role.deactivate",
+            permissionCode = PLATFORM_ROLE_MANAGE_PERMISSION,
             requestPayload = command,
             resourceType = "platform_roles",
             replayType = PlatformRoleMutationReceipt::class.java,
@@ -496,6 +496,7 @@ class PlatformAdministrationService(
     ): PlatformUserRoleMutationReceipt {
         return mutate(
             operationType = "platform.user.role.assign",
+            permissionCode = PLATFORM_ROLE_MANAGE_PERMISSION,
             requestPayload = command,
             resourceType = "platform_user_roles",
             replayType = PlatformUserRoleMutationReceipt::class.java,
@@ -548,6 +549,7 @@ class PlatformAdministrationService(
     ): PlatformUserRoleMutationReceipt {
         return mutate(
             operationType = "platform.user.role.revoke",
+            permissionCode = PLATFORM_ROLE_MANAGE_PERMISSION,
             requestPayload = command,
             resourceType = "platform_user_roles",
             replayType = PlatformUserRoleMutationReceipt::class.java,
@@ -599,6 +601,7 @@ class PlatformAdministrationService(
     ): PlatformUserRoleMutationReceipt {
         return mutate(
             operationType = "platform.administrator.assign",
+            permissionCode = PLATFORM_ADMINISTRATOR_MANAGE_PERMISSION,
             requestPayload = command,
             resourceType = "platform_user_roles",
             replayType = PlatformUserRoleMutationReceipt::class.java,
@@ -653,6 +656,7 @@ class PlatformAdministrationService(
     ): PlatformUserRoleMutationReceipt {
         return mutate(
             operationType = "platform.administrator.revoke",
+            permissionCode = PLATFORM_ADMINISTRATOR_MANAGE_PERMISSION,
             requestPayload = command,
             resourceType = "platform_user_roles",
             replayType = PlatformUserRoleMutationReceipt::class.java,
@@ -711,7 +715,7 @@ class PlatformAdministrationService(
     override fun listPlatformPermissions(): List<PlatformPermissionSummary> {
         return requireNotNull(
             transactionTemplate.execute {
-                bindPlatformContext()
+                requirePlatformAccess(PLATFORM_PERMISSION_VIEW_PERMISSION, "platform.permissions.list")
                 jdbcTemplate.query(
                     """
                     SELECT id, code, namespace, description
@@ -729,6 +733,7 @@ class PlatformAdministrationService(
     ): PlatformIdentityLinkReceipt {
         return mutate(
             operationType = "platform.user.identity.link",
+            permissionCode = PLATFORM_IDENTITY_LINK_MANAGE_PERMISSION,
             requestPayload = command,
             resourceType = "identity_links",
             replayType = PlatformIdentityLinkReceipt::class.java,
@@ -804,6 +809,7 @@ class PlatformAdministrationService(
     ): PlatformIdentityLinkReceipt {
         return mutate(
             operationType = "platform.user.identity.revoke",
+            permissionCode = PLATFORM_IDENTITY_LINK_MANAGE_PERMISSION,
             requestPayload = command,
             resourceType = "identity_links",
             replayType = PlatformIdentityLinkReceipt::class.java,
@@ -867,15 +873,12 @@ class PlatformAdministrationService(
     ): TenantAdministratorProvisioningReceipt {
         return mutate(
             operationType = "platform.tenant.administrator.provision",
+            permissionCode = PLATFORM_SECURITY_MANAGE_PERMISSION,
+            targetTenantId = command.tenantId,
             requestPayload = command,
             resourceType = "users",
             replayType = TenantAdministratorProvisioningReceipt::class.java,
         ) { reservationId ->
-            requireSupportBreakGlassAccess(
-                tenantId = command.tenantId,
-                actionCode = "platform.security.manage",
-                operation = "platform.tenants.administrator.provision",
-            )
             val row = jdbcTemplate.query(
                 """
                 SELECT user_id, tenant_role_id, identity_link_id, changed
@@ -921,15 +924,12 @@ class PlatformAdministrationService(
     ): TenantProfileVerificationReceipt {
         return mutate(
             operationType = "platform.tenant.profile.verify",
+            permissionCode = PLATFORM_TENANT_VERIFY_PERMISSION,
+            targetTenantId = command.tenantId,
             requestPayload = command,
             resourceType = "tenant_profiles",
             replayType = TenantProfileVerificationReceipt::class.java,
         ) { reservationId ->
-            requireSupportBreakGlassAccess(
-                tenantId = command.tenantId,
-                actionCode = "platform.tenants.verify",
-                operation = "platform.tenants.profile.verify",
-            )
             val row = jdbcTemplate.query(
                 """
                 SELECT verification_status, changed
@@ -964,6 +964,8 @@ class PlatformAdministrationService(
 
     private fun <T : Any> mutate(
         operationType: String,
+        permissionCode: String,
+        targetTenantId: UUID? = null,
         requestPayload: Any,
         resourceType: String,
         replayType: Class<T>,
@@ -971,7 +973,11 @@ class PlatformAdministrationService(
     ): T {
         return requireNotNull(
             transactionTemplate.execute {
-                bindPlatformContext()
+                requirePlatformAccess(
+                    permissionCode = permissionCode,
+                    operation = operationType,
+                    tenantId = targetTenantId,
+                )
                 val reservation = idempotencyPort.reserve(
                     IdempotencyCommand(
                         operationType = operationType,
@@ -1058,11 +1064,6 @@ class PlatformAdministrationService(
         }
     }
 
-    private fun bindPlatformContext() {
-        requirePlatformIdentity()
-        databaseSessionContext.bind(requestContextHolder.current().identity)
-    }
-
     private fun currentPlatformActorId(): UUID {
         return requirePlatformIdentity()
     }
@@ -1093,15 +1094,15 @@ class PlatformAdministrationService(
         )
     }
 
-    private fun requireSupportBreakGlassAccess(
-        tenantId: UUID,
-        actionCode: String,
+    private fun requirePlatformAccess(
+        permissionCode: String,
         operation: String,
+        tenantId: UUID? = null,
     ) {
-        supportTenantAccessPort.requireAuthorized(
-            SupportTenantAccessRequest(
+        platformAccessPort.requireAuthorized(
+            PlatformAccessRequest(
                 tenantId = tenantId,
-                permissionCode = actionCode,
+                permissionCode = permissionCode,
                 operation = operation,
             ),
         )
@@ -1369,10 +1370,12 @@ class PlatformAdministrationService(
     }
 
     private fun requireDelegablePlatformPermissions(permissionCodes: List<String>) {
+        val normalizedCodes = permissionCodes.map { it.normalizedCode() }.distinct()
+        require(PLATFORM_ROOT_PERMISSION !in normalizedCodes) {
+            "platform.admin.all is reserved for the system Platform Root role"
+        }
         val actorId = currentPlatformActorId()
-        val unauthorized = permissionCodes
-            .map { it.normalizedCode() }
-            .distinct()
+        val unauthorized = normalizedCodes
             .filterNot { permissionCode ->
                 jdbcTemplate.queryForObject(
                     "SELECT platform_user_has_permission(?, ?)",
@@ -1652,7 +1655,15 @@ class PlatformAdministrationService(
     private companion object {
         private const val PLATFORM_ADMINISTRATOR_LOCK_KEY = "peak.platform.administrator.continuity"
         private const val PLATFORM_ADMINISTRATOR_MANAGE_PERMISSION = "platform.administrators.manage"
+        private const val PLATFORM_IDENTITY_LINK_MANAGE_PERMISSION = "platform.identity_links.manage"
+        private const val PLATFORM_PERMISSION_VIEW_PERMISSION = "platform.permissions.view"
+        private const val PLATFORM_ROLE_MANAGE_PERMISSION = "platform.roles.manage"
         private const val PLATFORM_ROLE_VIEW_PERMISSION = "platform.roles.view"
+        private const val PLATFORM_ROOT_PERMISSION = "platform.admin.all"
+        private const val PLATFORM_SECURITY_MANAGE_PERMISSION = "platform.security.manage"
+        private const val PLATFORM_TENANT_VERIFY_PERMISSION = "platform.tenants.verify"
+        private const val PLATFORM_USER_MANAGE_PERMISSION = "platform.users.manage"
+        private const val PLATFORM_USER_VIEW_PERMISSION = "platform.users.view"
         private const val PLATFORM_ROOT_ROLE_CODE = "platform_root"
         private const val PLATFORM_ROOT_ROLE_NAME = "Platform Root"
 

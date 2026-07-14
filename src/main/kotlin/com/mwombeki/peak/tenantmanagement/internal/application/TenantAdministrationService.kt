@@ -9,9 +9,6 @@ import com.mwombeki.peak.reliability.api.IdempotencyReservation
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
-import com.mwombeki.peak.shared.context.DatabaseSessionContext
-import com.mwombeki.peak.shared.context.RequestContextHolder
-import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.tenantmanagement.api.TenantAdministrationConflictException
 import com.mwombeki.peak.tenantmanagement.api.TenantAdministrationInProgressException
 import com.mwombeki.peak.tenantmanagement.api.TenantAdministrationNotFoundException
@@ -20,6 +17,8 @@ import com.mwombeki.peak.tenantmanagement.api.TenantModuleCommand
 import com.mwombeki.peak.tenantmanagement.api.TenantModuleMutationReceipt
 import com.mwombeki.peak.tenantmanagement.api.TenantModuleSummary
 import com.mwombeki.peak.tenantmanagement.api.TenantReadinessResponse
+import com.mwombeki.peak.usermanagement.api.TenantPermissionAccessPort
+import com.mwombeki.peak.usermanagement.api.TenantPermissionAccessRequest
 import io.micrometer.core.instrument.MeterRegistry
 import java.util.UUID
 import org.springframework.jdbc.core.JdbcTemplate
@@ -30,8 +29,7 @@ import tools.jackson.databind.ObjectMapper
 @Component
 class TenantAdministrationService(
     private val jdbcTemplate: JdbcTemplate,
-    private val requestContextHolder: RequestContextHolder,
-    private val databaseSessionContext: DatabaseSessionContext,
+    private val tenantPermissionAccessPort: TenantPermissionAccessPort,
     private val idempotencyPort: IdempotencyPort,
     private val auditPort: AuditPort,
     private val outboxPort: OutboxPort,
@@ -43,7 +41,7 @@ class TenantAdministrationService(
     override fun listTenantModules(tenantId: UUID): List<TenantModuleSummary> {
         return requireNotNull(
             transactionTemplate.execute {
-                bindTenantContext(tenantId)
+                requireTenantPermission(tenantId, MODULE_VIEW_PERMISSION)
                 jdbcTemplate.query(
                     """
                     SELECT
@@ -100,7 +98,7 @@ class TenantAdministrationService(
     override fun getTenantReadiness(tenantId: UUID): TenantReadinessResponse {
         return requireNotNull(
             transactionTemplate.execute {
-                bindTenantContext(tenantId)
+                requireTenantPermission(tenantId, TENANT_PROFILE_VIEW_PERMISSION)
                 val missing = mutableListOf<String>()
 
                 if (!tenantExistsAndUsable(tenantId)) {
@@ -136,7 +134,7 @@ class TenantAdministrationService(
     ): TenantModuleMutationReceipt {
         return requireNotNull(
             transactionTemplate.execute {
-                bindTenantContext(command.tenantId)
+                requireTenantPermission(command.tenantId, MODULE_MANAGE_PERMISSION)
                 val moduleId = command.moduleId.normalizedModuleId()
                 requireManageableModule(moduleId)
                 val reservation = idempotencyPort.reserve(
@@ -209,16 +207,10 @@ class TenantAdministrationService(
         )
     }
 
-    private fun bindTenantContext(tenantId: UUID): UUID {
-        val identity = requestContextHolder.current().identity
-        require(identity is RequestIdentity.Tenant) {
-            "Tenant user identity is required"
-        }
-        require(identity.tenantId == tenantId) {
-            "Requested tenant does not match identity"
-        }
-        databaseSessionContext.bind(identity)
-        return identity.tenantUserId
+    private fun requireTenantPermission(tenantId: UUID, permissionCode: String): UUID {
+        return tenantPermissionAccessPort.requireAuthorized(
+            TenantPermissionAccessRequest(tenantId, permissionCode),
+        )
     }
 
     private fun requireManageableModule(moduleId: String) {
@@ -444,5 +436,11 @@ class TenantAdministrationService(
     private fun String.normalizedModuleId(): String {
         return trim().lowercase().takeIf { it.isNotEmpty() }
             ?: throw IllegalArgumentException("moduleId is required")
+    }
+
+    private companion object {
+        const val MODULE_MANAGE_PERMISSION = "module.manage"
+        const val MODULE_VIEW_PERMISSION = "module.view"
+        const val TENANT_PROFILE_VIEW_PERMISSION = "tenant.profile.view"
     }
 }

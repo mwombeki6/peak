@@ -3,12 +3,17 @@ package com.mwombeki.peak.usermanagement.internal.web
 import com.jayway.jsonpath.JsonPath
 import com.mwombeki.peak.TestcontainersConfiguration
 import com.mwombeki.peak.shared.context.PeakRequestHeaders
+import com.mwombeki.peak.shared.context.RequestContext
+import com.mwombeki.peak.shared.context.RequestContextHolder
+import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.usermanagement.api.PlatformAdministrationPort
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import org.hamcrest.Matchers.hasItem
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
@@ -40,6 +45,66 @@ class PlatformAdministrationControllerIntegrationTests {
 
     @Autowired
     private lateinit var jdbcTemplate: JdbcTemplate
+
+    @Autowired
+    private lateinit var platformAdministrationPort: PlatformAdministrationPort
+
+    @Autowired
+    private lateinit var requestContextHolder: RequestContextHolder
+
+    @Test
+    fun namedPlatformApiRequiresPermissionWithoutHttpGuard() {
+        val actorId = insertPlatformActorWithPermissions("platform.audit.view")
+        requestContextHolder.set(
+            RequestContext(
+                identity = RequestIdentity.Platform(
+                    platformUserId = actorId,
+                    correlationId = "corr-platform-named-api-denied",
+                ),
+                correlationId = "corr-platform-named-api-denied",
+                idempotencyKey = null,
+                httpMethod = "GET",
+                requestPath = "/internal/platform/users",
+            ),
+        )
+
+        try {
+            val error = assertFailsWith<IllegalArgumentException> {
+                platformAdministrationPort.listPlatformUsers()
+            }
+            assertEquals("Platform user lacks required permission", error.message)
+        } finally {
+            requestContextHolder.clear()
+        }
+    }
+
+    @Test
+    fun rejectsReservedPlatformWildcardForDynamicRole() {
+        val actorId = insertPlatformActorWithPermissions(
+            "platform.admin.all",
+            "platform.roles.manage",
+        )
+
+        mockMvc.perform(
+            post("/api/v1/platform/roles")
+                .platform(actorId, "corr-platform-reserved-wildcard", "idem-platform-reserved-wildcard")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "code": "dynamic_platform_root",
+                      "name": "Dynamic Platform Root",
+                      "permissionCodes": ["platform.admin.all"]
+                    }
+                    """.trimIndent(),
+                ),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(
+                jsonPath("$.detail")
+                    .value("platform.admin.all is reserved for the system Platform Root role"),
+            )
+    }
 
     @Test
     fun managesPlatformUsersRolesAndIdentityLinksThroughSecuredRoutes() {
@@ -871,14 +936,16 @@ class PlatformAdministrationControllerIntegrationTests {
     private fun insertPlatformActorWithPermissions(vararg permissionCodes: String): UUID {
         val platformUserId = insertPlatformUser()
         val roleId = UUID.randomUUID()
+        val isSystem = "platform.admin.all" in permissionCodes
         jdbcTemplate.update(
             """
             INSERT INTO platform_roles (id, code, name, is_system, is_active)
-            VALUES (?, ?, ?, false, true)
+            VALUES (?, ?, ?, ?, true)
             """.trimIndent(),
             roleId,
             "tenant-bootstrap-${roleId.toString().take(8)}",
             "Tenant Bootstrap Operator",
+            isSystem,
         )
         permissionCodes.forEach { permissionCode ->
             val permissionId = jdbcTemplate.queryForObject(

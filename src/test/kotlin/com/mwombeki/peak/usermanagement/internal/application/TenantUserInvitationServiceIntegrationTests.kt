@@ -334,8 +334,8 @@ class TenantUserInvitationServiceIntegrationTests {
     fun rejectsInvitationIntoRoleWithPermissionActorDoesNotHold() {
         val fixture = tenantFixture()
         insertTenantFixture(fixture)
-        ensureTenantPermission(fixture.tenantId, "reports.view")
-        insertTenantRolePermission(fixture.roleId, fixture.tenantId, "reports.view")
+        ensureTenantPermission(fixture.tenantId, "tenant.roles.view")
+        insertTenantRolePermission(fixture.roleId, fixture.tenantId, "tenant.roles.view")
         requestContextHolder.set(tenantContext(fixture, "idem-invite-escalation-role"))
 
         val error = assertFailsWith<IllegalArgumentException> {
@@ -381,7 +381,7 @@ class TenantUserInvitationServiceIntegrationTests {
         }
 
         assertEquals(
-            "Tenant user identity is required to invite tenant users",
+            "Tenant user identity is required",
             error.message,
         )
         val invitationCount = jdbcTemplate.queryForObject(
@@ -870,6 +870,28 @@ class TenantUserInvitationServiceIntegrationTests {
             fixture.tenantId,
             "Tenant Role ${fixture.roleId}",
             "tenant-role-${fixture.roleId}",
+        )
+        val inviterRoleId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_roles (id, tenant_id, name, code)
+            VALUES (?, ?, ?, ?)
+            """.trimIndent(),
+            inviterRoleId,
+            fixture.tenantId,
+            "Invitation Manager $inviterRoleId",
+            "invitation-manager-$inviterRoleId",
+        )
+        ensureTenantPermission(fixture.tenantId, "tenant.users.manage")
+        insertTenantRolePermission(inviterRoleId, fixture.tenantId, "tenant.users.manage")
+        jdbcTemplate.update(
+            """
+            INSERT INTO user_tenant_roles (user_id, tenant_id, tenant_role_id)
+            VALUES (?, ?, ?)
+            """.trimIndent(),
+            fixture.inviterUserId,
+            fixture.tenantId,
+            inviterRoleId,
         )
     }
 

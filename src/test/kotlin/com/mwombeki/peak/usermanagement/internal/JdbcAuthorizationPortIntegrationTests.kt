@@ -417,7 +417,7 @@ class JdbcAuthorizationPortIntegrationTests {
 
         assertFalse(decision.allowed)
         assertEquals(
-            "Support identity requires a tenant-targeted platform route",
+            "Support identity requires a tenant-targeted platform operation",
             decision.reason,
         )
     }
