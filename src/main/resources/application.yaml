@@ -21,6 +21,10 @@ spring:
 peak:
   runtime:
     mode: ${PEAK_RUNTIME_MODE:api}
+  observability:
+    operational-metrics:
+      enabled: ${PEAK_OPERATIONAL_METRICS_ENABLED:true}
+      refresh-interval-ms: ${PEAK_OPERATIONAL_METRICS_REFRESH_INTERVAL_MS:30000}
   guest-identity:
     hash-key: ${PEAK_GUEST_IDENTITY_HASH_KEY:local-development-identity-hmac-key}
     hash-key-version: ${PEAK_GUEST_IDENTITY_HASH_KEY_VERSION:v1}

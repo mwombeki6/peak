@@ -2,6 +2,7 @@ package com.mwombeki.peak.audit.internal
 
 import com.mwombeki.peak.audit.api.AuditPort
 import com.mwombeki.peak.audit.api.PlatformAuditEvent
+import com.mwombeki.peak.audit.api.SystemPlatformAuditEvent
 import com.mwombeki.peak.audit.api.TenantAuditEvent
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
@@ -85,6 +86,34 @@ class JdbcAuditPort(
             databaseSessionContext.bind(requestContextHolder.current().identity)
             insertPlatformEvent(event)
         }
+    }
+
+    override fun recordSystemPlatformEvent(event: SystemPlatformAuditEvent) {
+        requireActiveTransaction()
+        jdbcTemplate.update(
+            """
+            INSERT INTO platform_audit_logs (
+                platform_user_id,
+                action,
+                entity_type,
+                entity_id,
+                tenant_id,
+                new_values,
+                correlation_id,
+                outcome
+            )
+            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?)
+            """.trimIndent(),
+            event.platformUserId,
+            event.action,
+            event.resource.type,
+            event.resource.id,
+            event.targetTenantId,
+            json(event.after),
+            event.correlationId,
+            event.outcome.databaseValue,
+        )
+        recordMetric("platform_system", event.outcome.databaseValue)
     }
 
     private fun insertPlatformEvent(event: PlatformAuditEvent) {

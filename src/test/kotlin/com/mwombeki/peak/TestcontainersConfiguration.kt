@@ -34,7 +34,14 @@ class TestcontainersConfiguration {
         }
 
         val sharedPostgresContainer: PostgreSQLContainer by lazy {
-            PostgreSQLContainer(DockerImageName.parse("postgres:18"))
+            PostgreSQLContainer(
+                DockerImageName.parse(
+                    System.getenv("PEAK_TEST_POSTGRES_IMAGE")
+                        ?.trim()
+                        ?.takeIf { it.isNotEmpty() }
+                        ?: "postgres:18.4",
+                ),
+            )
         }
     }
 }

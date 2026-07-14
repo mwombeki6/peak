@@ -34,3 +34,19 @@ data class PlatformAuditEvent(
         }
     }
 }
+
+@NamedInterface("api")
+data class SystemPlatformAuditEvent(
+    val platformUserId: UUID,
+    val action: String,
+    val resource: AuditResource,
+    val correlationId: String,
+    val targetTenantId: UUID? = null,
+    val outcome: AuditOutcome = AuditOutcome.SUCCESS,
+    val after: Map<String, Any?>? = null,
+) {
+    init {
+        require(action.isNotBlank()) { "Audit action is required" }
+        require(correlationId.isNotBlank()) { "Audit correlation ID is required" }
+    }
+}

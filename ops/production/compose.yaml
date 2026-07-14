@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:18
+    image: postgres:18.4@sha256:b913fd5699b8bd23fa4b06d72ecdd939fad43b80fb8651bac06caa0e6d135cac
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -15,7 +15,7 @@ services:
       retries: 10
 
   keycloak-db:
-    image: postgres:18
+    image: postgres:18.4@sha256:b913fd5699b8bd23fa4b06d72ecdd939fad43b80fb8651bac06caa0e6d135cac
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${KEYCLOAK_DB}
@@ -175,7 +175,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health/readiness >/dev/null"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health/readiness >/dev/null"]
       interval: 30s
       timeout: 5s
       retries: 5

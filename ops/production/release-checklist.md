@@ -6,13 +6,17 @@
 - [ ] Container scan has no unaccepted critical/high findings.
 - [ ] Deploy image is identified by commit SHA or registry digest.
 - [ ] `./gradlew test` report is retained.
-- [ ] Flyway validates from an empty PostgreSQL 18 database through the expected version.
+- [ ] Warning-free Kotlin compilation and the full required test suite pass with no skips.
+- [ ] Flyway validates from empty PostgreSQL 16 and 18 databases through the expected version.
+- [ ] Populated V49, V53, and V67 upgrades preserve tenant and financial invariants.
 - [ ] V40 payment data upgrades to the V41 canonical lifecycle.
 - [ ] Populated V44 department data upgrades through the V49 canonical
       operations contracts.
 - [ ] Modulith dependency verification and required integration tests pass with
       no skipped results.
 - [ ] `podman compose ... config` and `validate-production-env.sh` pass.
+- [ ] The OpenAPI baseline is backward compatible, lint passes, and the generated TypeScript client compiles.
+- [ ] OCI/JAR/filesystem/configuration/secret scans, SBOM, and provenance are retained.
 
 ## Security Evidence
 
@@ -54,14 +58,16 @@
 
 ## Acceptance And Rollout
 
-- [ ] Phase 1 security/runtime regression plan passes.
-- [ ] Phase 2 property/administration acceptance passes.
-- [ ] Phase 3 end-to-end and concurrency plan passes.
-- [ ] Phase 3 Podman evidence uses Keycloak plus separate API/worker roles and
-      the signed fiscal simulator.
-- [ ] Phase 4 Podman/Newman evidence covers housekeeping inspection, maintenance
+- [ ] Security/runtime and database-role regression gates pass.
+- [ ] Tenant onboarding and property administration acceptance passes.
+- [ ] Core hospitality journey and concurrency acceptance passes.
+- [ ] Podman evidence uses Keycloak plus separate API/worker roles and the
+      signed fiscal simulator.
+- [ ] Department operations acceptance covers housekeeping inspection, maintenance
       release-to-dirty, weighted-average stock, partial receiving, replay-safe
       kitchen consumption, and authenticated WebSocket/KDS access.
+- [ ] Close-reporting acceptance verifies close snapshots, deterministic PDFs,
+      private storage, signed-link expiry, consent, delivery retry and cleanup.
 - [ ] ClickPesa protected sandbox evidence is tracked as a non-blocking external
       follow-up; cash, room-charge, and simulated mobile-money acceptance pass.
 - [ ] Release image is deployed to staging and `smoke-test.sh` passes.
@@ -71,3 +77,4 @@
       are recorded.
 - [ ] Accepted commit SHA and immutable image digest are recorded after the
       worktree is clean.
+- [ ] Merge-SHA, `latest`, and semantic `v1.x.y` tags resolve to the same manifest digest.

@@ -1,5 +1,7 @@
 package com.mwombeki.peak.platformgovernance.web
 
+import com.mwombeki.peak.shared.exception.ApiProblemFactory
+
 import com.mwombeki.peak.platformgovernance.api.TenantGovernancePort
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController
 class PlatformGovernanceController(
     private val governancePort: TenantGovernancePort,
     private val requestContextHolder: RequestContextHolder,
+    private val apiProblemFactory: ApiProblemFactory,
 ) {
 
     @PostMapping("/{id}/approve")
@@ -70,12 +73,7 @@ class PlatformGovernanceController(
         title: String,
         detail: String?,
     ): ResponseEntity<ProblemDetail> {
-        val problem = ProblemDetail.forStatusAndDetail(
-            status,
-            detail ?: "Governance request failed",
-        )
-        problem.title = title
-        return ResponseEntity.status(status).body(problem)
+        return apiProblemFactory.response(status, title, detail ?: "Governance request failed")
     }
 }
 

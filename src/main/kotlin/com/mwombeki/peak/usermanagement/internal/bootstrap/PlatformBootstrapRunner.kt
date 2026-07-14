@@ -1,5 +1,8 @@
 package com.mwombeki.peak.usermanagement.internal.bootstrap
 
+import com.mwombeki.peak.audit.api.AuditPort
+import com.mwombeki.peak.audit.api.AuditResource
+import com.mwombeki.peak.audit.api.SystemPlatformAuditEvent
 import java.util.UUID
 import org.slf4j.LoggerFactory
 import org.springframework.boot.ApplicationArguments
@@ -19,6 +22,7 @@ class PlatformBootstrapRunner(
     private val properties: PlatformBootstrapProperties,
     private val jdbcTemplate: JdbcTemplate,
     private val transactionTemplate: TransactionTemplate,
+    private val auditPort: AuditPort,
 ) : ApplicationRunner {
     override fun run(args: ApplicationArguments) {
         val fullName = properties.fullName.required("PEAK_PLATFORM_BOOTSTRAP_FULL_NAME")
@@ -290,35 +294,18 @@ class PlatformBootstrapRunner(
             } else {
                 "platform-bootstrap-${UUID.randomUUID()}"
             }
-            jdbcTemplate.update(
-                """
-                INSERT INTO platform_audit_logs (
-                    platform_user_id,
-                    action,
-                    entity_type,
-                    entity_id,
-                    new_values,
-                    correlation_id
-                )
-                VALUES (
-                    ?,
-                    ?,
-                    'platform_users',
-                    ?,
-                    jsonb_build_object(
-                        'platformUserId', ?::text,
-                        'roleCode', 'platform_root',
-                        'issuer', ?
+            auditPort.recordSystemPlatformEvent(
+                SystemPlatformAuditEvent(
+                    platformUserId = platformUserId,
+                    action = eventName,
+                    resource = AuditResource("platform_users", platformUserId),
+                    correlationId = value,
+                    after = mapOf(
+                        "platformUserId" to platformUserId,
+                        "roleCode" to "platform_root",
+                        "issuer" to issuer,
                     ),
-                    ?
-                )
-                """.trimIndent(),
-                platformUserId,
-                eventName,
-                platformUserId,
-                platformUserId.toString(),
-                issuer,
-                value,
+                ),
             )
             value
         } else {

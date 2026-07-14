@@ -46,5 +46,7 @@ Production profile validation fails startup when unsafe defaults are present.
 Production Podman files live in `ops/production`. Start with `ops/production/.env.example`, run the database role bootstrap, then execute the migration, API, and worker services separately.
 
 Module-specific ownership notes live beside each module under `src/main/kotlin/com/mwombeki/peak/*/README.md`.
+The canonical module/dependency inventory and database ownership contract live
+under `docs/architecture`; both are enforced by architecture tests.
 The complete rollout, rollback, restore, Keycloak, and smoke-test procedures are
 in `ops/production/README.md`.

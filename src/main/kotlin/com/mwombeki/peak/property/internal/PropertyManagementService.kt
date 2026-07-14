@@ -50,6 +50,8 @@ import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.tenantmanagement.api.ConfigureTenantModuleCommand
+import com.mwombeki.peak.tenantmanagement.api.TenantModuleConfigurationPort
 import com.mwombeki.peak.usermanagement.api.EnsurePropertyAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.PropertyAccessBootstrapPort
 import io.micrometer.core.instrument.MeterRegistry
@@ -76,6 +78,7 @@ class PropertyManagementService(
     private val objectMapper: ObjectMapper,
     private val meterRegistry: MeterRegistry,
     private val propertyAccessBootstrapPort: PropertyAccessBootstrapPort,
+    private val tenantModuleConfigurationPort: TenantModuleConfigurationPort,
 ) : PropertyPort, PropertyOperationsPort {
 
     override fun requireAssignableRoom(
@@ -403,7 +406,13 @@ class PropertyManagementService(
                 throw PropertyManagementConflictException("Property code is already in use")
             }
 
-            enableTenantModule(identity.tenantId, PROPERTY_MODULE_ID, source = "system")
+            tenantModuleConfigurationPort.enableConfiguredModule(
+                ConfigureTenantModuleCommand(
+                    tenantId = identity.tenantId,
+                    moduleId = PROPERTY_MODULE_ID,
+                    source = "system",
+                ),
+            )
             upsertPropertyModule(identity.tenantId, propertyId, PROPERTY_MODULE_ID, enabled = true)
             propertyAccessBootstrapPort.ensurePropertyAdministrator(
                 EnsurePropertyAdministratorCommand(
@@ -2333,28 +2342,6 @@ class PropertyManagementService(
         }
     }
 
-    private fun enableTenantModule(
-        tenantId: UUID,
-        moduleId: String,
-        source: String,
-    ) {
-        jdbcTemplate.update(
-            """
-            INSERT INTO tenant_modules (tenant_id, module_id, is_enabled, is_configured, source, configured_at)
-            VALUES (?, ?, true, true, ?, now())
-            ON CONFLICT ON CONSTRAINT tenant_modules_tenant_id_module_id_key
-            DO UPDATE SET is_enabled = true,
-                          is_configured = true,
-                          source = EXCLUDED.source,
-                          configured_at = COALESCE(tenant_modules.configured_at, now()),
-                          updated_at = now()
-            """.trimIndent(),
-            tenantId,
-            moduleId,
-            source,
-        )
-    }
-
     private fun upsertPropertyModule(
         tenantId: UUID,
         propertyId: UUID,
@@ -2433,17 +2420,7 @@ class PropertyManagementService(
         tenantId: UUID,
         moduleId: String,
     ): Boolean {
-        return exists(
-            """
-            SELECT EXISTS(
-                SELECT 1
-                FROM tenant_modules
-                WHERE tenant_id = ? AND module_id = ? AND is_enabled = true
-            )
-            """.trimIndent(),
-            tenantId,
-            moduleId,
-        )
+        return tenantModuleConfigurationPort.isEnabled(tenantId, moduleId)
     }
 
     private fun propertyModuleEnabled(

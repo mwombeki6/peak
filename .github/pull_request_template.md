@@ -19,10 +19,11 @@
 - [ ] Clean Flyway migration validation passes.
 - [ ] `git diff --check` passes.
 - [ ] Podman Compose and production environment contract validate.
-- [ ] Module README, OpenAPI behavior, Postman collection, and E2E plan are updated.
+- [ ] Module inventory, OpenAPI baseline/client, API collection, and acceptance plan are updated.
 
 ## Rollout
 
 - [ ] Backward compatibility and rollback impact are documented.
 - [ ] Provider or Keycloak contract changes were validated in staging.
 - [ ] Operational metrics, readiness, alerts, and smoke-test expectations are defined.
+- [ ] The release uses a semantic `v1.x.y` product version and product-facing artifact names.

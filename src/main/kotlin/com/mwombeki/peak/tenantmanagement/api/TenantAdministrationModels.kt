@@ -1,6 +1,7 @@
 package com.mwombeki.peak.tenantmanagement.api
 
 import java.util.UUID
+import org.springframework.modulith.NamedInterface
 
 interface TenantAdministrationPort {
     fun listTenantModules(tenantId: UUID): List<TenantModuleSummary>
@@ -50,3 +51,46 @@ class TenantAdministrationConflictException(
 class TenantAdministrationInProgressException(
     message: String,
 ) : TenantAdministrationException(message)
+
+/**
+ * Owner-side contract for system-driven tenant lifecycle changes.
+ *
+ * Callers retain responsibility for authorization, idempotency, audit, and
+ * outbox publication. This port owns only the serialized tenant-table
+ * transition and its canonical lifecycle row.
+ */
+@NamedInterface("api")
+interface TenantLifecycleMutationPort {
+    fun transition(command: TenantLifecycleTransitionCommand): TenantLifecycleTransition
+}
+
+@NamedInterface("api")
+data class TenantLifecycleTransitionCommand(
+    val tenantId: UUID,
+    val operatorId: UUID,
+    val allowedCurrentStatuses: Set<String>,
+    val newStatus: String,
+    val eventType: String,
+    val reason: String,
+)
+
+@NamedInterface("api")
+data class TenantLifecycleTransition(
+    val tenantId: UUID,
+    val previousStatus: String,
+    val newStatus: String,
+)
+
+/** Owner-side access to the tenant-level module record. */
+@NamedInterface("api")
+interface TenantModuleConfigurationPort {
+    fun enableConfiguredModule(command: ConfigureTenantModuleCommand)
+    fun isEnabled(tenantId: UUID, moduleId: String): Boolean
+}
+
+@NamedInterface("api")
+data class ConfigureTenantModuleCommand(
+    val tenantId: UUID,
+    val moduleId: String,
+    val source: String,
+)

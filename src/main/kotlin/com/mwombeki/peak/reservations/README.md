@@ -1,6 +1,6 @@
 # Reservations Module
 
-Owns Phase 3 guest profiles and reservation lifecycle.
+Owns guest profiles and the reservation lifecycle.
 
 ## Responsibilities
 

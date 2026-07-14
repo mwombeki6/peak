@@ -1,5 +1,7 @@
 package com.mwombeki.peak.usermanagement.internal.web
 
+import com.mwombeki.peak.shared.exception.ApiProblemFactory
+
 import com.mwombeki.peak.usermanagement.api.AssignTenantAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.AssignTenantUserRoleCommand
 import com.mwombeki.peak.usermanagement.api.CreateTenantRoleCommand
@@ -42,6 +44,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/v1")
 class TenantUserRoleManagementController(
     private val roleManagementPort: TenantUserRoleManagementPort,
+    private val apiProblemFactory: ApiProblemFactory,
 ) {
     @GetMapping("/tenants/{tenantId}/roles")
     fun listTenantRoles(
@@ -207,9 +210,7 @@ class TenantUserRoleManagementController(
         title: String,
         detail: String,
     ): ResponseEntity<ProblemDetail> {
-        val problem = ProblemDetail.forStatusAndDetail(status, detail)
-        problem.title = title
-        return ResponseEntity.status(status).body(problem)
+        return apiProblemFactory.response(status, title, detail)
     }
 
     private fun RuntimeException.publicMessage(): String {

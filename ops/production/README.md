@@ -63,7 +63,7 @@ ops/scripts/deploy.sh
 - Import and verify the Keycloak realm before allowing tenant users to authenticate.
 - Keep `PEAK_SECURITY_JWT_ISSUER_URI` equal to the Keycloak realm issuer and `PEAK_SECURITY_JWT_AUDIENCE=peak-api`.
 - Resolve tenant and platform users through active OIDC `identity_links`; do not rely on client-editable user attributes for authorization.
-- Keep payment and fiscal credentials out of checked-in YAML. Phase 3 payment
+- Keep payment and fiscal credentials out of checked-in YAML. Production payment
   accounts use `providerCode=clickpesa`,
   `apiKeySecretRef=env:PEAK_CLICKPESA_API_KEY`, and
   `checksumKeySecretRef=env:PEAK_CLICKPESA_CHECKSUM_KEY`.
@@ -196,7 +196,7 @@ provider p95 latency exceeds the configured read timeout.
 
 Realtime alerts should include journal polling stalls, replay growth,
 connection-limit rejections, send failures, and abrupt disconnect spikes.
-Phase 3 dashboard, alert rules, and the incident procedure are in
+The product dashboard, domain alert rules, and incident procedures are in
 `ops/observability`. Payment/fiscal alerts include ClickPesa token failures,
 poll backlog, checksum/webhook failures, reconciliation backlog, fiscal
 corrections, POS variance, and night-audit blockers.

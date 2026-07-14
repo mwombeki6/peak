@@ -1,5 +1,7 @@
 package com.mwombeki.peak.property.internal.web
 
+import com.mwombeki.peak.shared.exception.ApiProblemFactory
+
 import com.mwombeki.peak.property.api.BuildingResponse
 import com.mwombeki.peak.property.api.CreateBuildingRequest
 import com.mwombeki.peak.property.api.CreateDepartmentRequest
@@ -54,6 +56,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/v1/properties")
 class PropertyManagementController(
     private val propertyPort: PropertyPort,
+    private val apiProblemFactory: ApiProblemFactory,
 ) {
     @PostMapping
     fun createProperty(
@@ -464,9 +467,7 @@ class PropertyManagementController(
         title: String,
         detail: String,
     ): ResponseEntity<ProblemDetail> {
-        val problem = ProblemDetail.forStatusAndDetail(status, detail)
-        problem.title = title
-        return ResponseEntity.status(status).body(problem)
+        return apiProblemFactory.response(status, title, detail)
     }
 
     private fun RuntimeException.publicMessage(): String {

@@ -3,6 +3,7 @@
         displayName = "User Management",
         allowedDependencies = {
                 "shared::context",
+                "shared::exception",
                 "shared::security",
                 "shared::secrets",
                 "audit::api",

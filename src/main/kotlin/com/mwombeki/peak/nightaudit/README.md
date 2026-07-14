@@ -1,6 +1,6 @@
 # Night Audit Module
 
-Owns Phase 3 property close checks and blocking issue capture.
+Owns property close checks, blocking issue capture, and immutable close snapshots.
 
 ## Responsibilities
 

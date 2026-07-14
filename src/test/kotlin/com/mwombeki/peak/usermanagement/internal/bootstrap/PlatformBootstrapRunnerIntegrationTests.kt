@@ -1,6 +1,7 @@
 package com.mwombeki.peak.usermanagement.internal.bootstrap
 
 import com.mwombeki.peak.TestcontainersConfiguration
+import com.mwombeki.peak.audit.api.AuditPort
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -25,6 +26,9 @@ class PlatformBootstrapRunnerIntegrationTests {
 
     @Autowired
     private lateinit var transactionManager: PlatformTransactionManager
+
+    @Autowired
+    private lateinit var auditPort: AuditPort
 
     @Test
     fun recoversPlatformRootOnlyWhenNoEffectiveAdministratorCanSignIn() {
@@ -144,6 +148,7 @@ class PlatformBootstrapRunnerIntegrationTests {
             ),
             jdbcTemplate = jdbcTemplate,
             transactionTemplate = TransactionTemplate(transactionManager),
+            auditPort = auditPort,
         )
     }
 

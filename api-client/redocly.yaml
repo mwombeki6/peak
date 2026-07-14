@@ -1,0 +1,13 @@
+extends:
+  - recommended
+
+rules:
+  no-server-example.com: off
+  # V1 retains the legacy /properties/taxes/{taxRateId} route. Spring resolves
+  # the UUID property segment before static child routes, so this is not
+  # ambiguous at runtime and changing it would break the published contract.
+  no-ambiguous-paths: off
+  info-license-strict: off
+  operation-operationId: warn
+  operation-description: warn
+  no-unused-components: warn

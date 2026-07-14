@@ -1,6 +1,6 @@
 # Billing Module
 
-Owns Phase 3 folio, charge, payment-posting, invoice, and checkout validation
+Owns folio, charge, payment-posting, invoice, and checkout validation
 contracts.
 
 ## Responsibilities
@@ -33,5 +33,5 @@ directly to billing tables. There is no public direct-payment billing route.
 ## Financial Safety
 
 The module relies on PostgreSQL financial guard functions for totals,
-immutability, and document-number allocation. New Phase 3 writes are restricted
+immutability, and document-number allocation. New financial writes are restricted
 to `cash` and `mobile_money`.

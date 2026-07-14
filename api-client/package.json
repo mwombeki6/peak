@@ -1,0 +1,19 @@
+{
+  "name": "@peak/v1-client",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "openapi-typescript ../src/test/resources/contracts/openapi-v1.json -o src/peak-v1.ts",
+    "lint:openapi": "redocly lint ../src/test/resources/contracts/openapi-v1.json --config redocly.yaml",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "openapi-fetch": "0.17.0"
+  },
+  "devDependencies": {
+    "@redocly/cli": "2.39.0",
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3"
+  }
+}

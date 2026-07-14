@@ -1,0 +1,15 @@
+{
+  "title": "Peak Hospitality Operations",
+  "uid": "peak-hospitality-operations",
+  "schemaVersion": 39,
+  "panels": [
+    {"id": 1, "title": "API request rate", "type": "timeseries", "targets": [{"expr": "sum(rate(http_server_requests_seconds_count[5m]))"}]},
+    {"id": 2, "title": "API errors", "type": "timeseries", "targets": [{"expr": "sum by (status) (rate(http_server_requests_seconds_count{status=~\"4..|5..\"}[5m]))"}]},
+    {"id": 3, "title": "Database pool utilization", "type": "timeseries", "targets": [{"expr": "hikaricp_connections_active / clamp_min(hikaricp_connections_max, 1)"}]},
+    {"id": 4, "title": "Outbox delivery failures", "type": "timeseries", "targets": [{"expr": "sum by (destination) (rate(peak_outbox_worker_failed_total[5m]))"}]},
+    {"id": 5, "title": "Payment and fiscal backlog", "type": "timeseries", "targets": [{"expr": "peak_payment_poll_backlog"}, {"expr": "peak_fiscal_backlog"}]},
+    {"id": 6, "title": "Night audit blockers", "type": "timeseries", "targets": [{"expr": "peak_night_audit_blockers"}]},
+    {"id": 7, "title": "Realtime failures", "type": "timeseries", "targets": [{"expr": "sum(rate(peak_realtime_events_delivery_failures_total[5m]))"}]},
+    {"id": 8, "title": "Report generation and delivery", "type": "timeseries", "targets": [{"expr": "sum by (report_code, result) (rate(peak_reporting_generation_total[5m]))"}, {"expr": "sum by (channel, result) (rate(peak_reporting_delivery_total[5m]))"}]}
+  ]
+}
