@@ -75,4 +75,24 @@ class GlobalExceptionHandlerTests {
 
         assertEquals(HttpStatus.NO_CONTENT, response.statusCode)
     }
+
+    @Test
+    fun normalizesRequestParsingAndRoutingFailures() {
+        MDC.put("correlation_id", "corr-invalid-request")
+        val request = MockHttpServletRequest("POST", "/api/v1/test")
+
+        val responses = listOf(
+            handler.handleUnsupportedMediaType(request) to HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+            handler.handleUnreadableMessage(request) to HttpStatus.BAD_REQUEST,
+            handler.handleArgumentTypeMismatch(request) to HttpStatus.BAD_REQUEST,
+            handler.handleUnsupportedMethod(request) to HttpStatus.METHOD_NOT_ALLOWED,
+        )
+
+        responses.forEach { (response, expectedStatus) ->
+            val problem = assertNotNull(response.body)
+            assertEquals(expectedStatus, response.statusCode)
+            assertEquals("corr-invalid-request", problem.properties?.get("traceId"))
+            assertEquals("/api/v1/test", problem.properties?.get("path"))
+        }
+    }
 }

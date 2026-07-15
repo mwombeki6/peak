@@ -4,10 +4,13 @@ import com.mwombeki.peak.TestcontainersConfiguration
 import com.mwombeki.peak.housekeeping.api.AssignHousekeepingTaskRequest
 import com.mwombeki.peak.housekeeping.api.CompleteHousekeepingTaskRequest
 import com.mwombeki.peak.housekeeping.api.CreateHousekeepingTaskRequest
+import com.mwombeki.peak.housekeeping.api.CreateLostAndFoundRequest
 import com.mwombeki.peak.housekeeping.api.HousekeepingConflictException
 import com.mwombeki.peak.housekeeping.api.HousekeepingTaskStatus
 import com.mwombeki.peak.housekeeping.api.HousekeepingTaskType
 import com.mwombeki.peak.housekeeping.api.InspectHousekeepingTaskRequest
+import com.mwombeki.peak.housekeeping.api.LostAndFoundStatus
+import com.mwombeki.peak.housekeeping.api.LostAndFoundTransitionRequest
 import com.mwombeki.peak.housekeeping.api.UpdateHousekeepingSettingsRequest
 import com.mwombeki.peak.housekeeping.internal.HousekeepingService
 import com.mwombeki.peak.housekeeping.internal.HousekeepingCheckoutOutboxHandler
@@ -24,9 +27,14 @@ import com.mwombeki.peak.inventory.api.TransferStockRequest
 import com.mwombeki.peak.inventory.api.UpsertRecipeRequest
 import com.mwombeki.peak.inventory.internal.InventoryService
 import com.mwombeki.peak.maintenance.api.CreateRoomBlockRequest
+import com.mwombeki.peak.maintenance.api.AssignWorkOrderRequest
+import com.mwombeki.peak.maintenance.api.CreateMaintenanceRequest
+import com.mwombeki.peak.maintenance.api.CreateWorkOrderRequest
+import com.mwombeki.peak.maintenance.api.MaintenancePriority
 import com.mwombeki.peak.maintenance.api.MaintenanceReasonRequest
 import com.mwombeki.peak.maintenance.api.RoomBlockStatus
 import com.mwombeki.peak.maintenance.api.RoomBlockType
+import com.mwombeki.peak.maintenance.api.WorkOrderStatus
 import com.mwombeki.peak.maintenance.internal.MaintenanceService
 import com.mwombeki.peak.pos.api.AddPosOrderItemRequest
 import com.mwombeki.peak.pos.api.CreatePosOrderRequest
@@ -215,6 +223,130 @@ class Phase4DepartmentOperationsIntegrationTests {
         )
         assertEquals(RoomBlockStatus.RELEASED, released.status)
         assertEquals("vacant_dirty", roomStatus(f))
+    }
+
+    @Test
+    fun `lost property custody records staff actor without treating staff as guest`() {
+        val f = fixture()
+        bind(f, f.userId, "lost-property-record")
+        val item = housekeeping.createLostAndFound(
+            f.propertyId,
+            CreateLostAndFoundRequest(
+                roomId = f.roomId,
+                description = "Wallet sealed in evidence bag",
+                storageLocation = "Duty manager safe",
+            ),
+        )
+        bind(f, f.userId, "lost-property-claim")
+        val claimed = housekeeping.transitionLostAndFound(
+            f.propertyId,
+            item.id,
+            LostAndFoundStatus.CLAIMED,
+            LostAndFoundTransitionRequest(
+                reason = "Guest matched identity and described contents",
+                claimantDetails = "Identity checked at reception",
+            ),
+        )
+        assertEquals(LostAndFoundStatus.CLAIMED, claimed.status)
+        assertEquals(
+            null,
+            jdbc.queryForObject(
+                "SELECT claimed_by FROM lost_and_found WHERE tenant_id = ? AND id = ?",
+                UUID::class.java,
+                f.tenantId,
+                item.id,
+            ),
+        )
+        assertEquals(
+            f.userId,
+            jdbc.queryForObject(
+                """
+                SELECT actor_id FROM lost_and_found_custody_events
+                WHERE tenant_id = ? AND item_id = ? AND to_status = 'claimed'
+                """.trimIndent(),
+                UUID::class.java,
+                f.tenantId,
+                item.id,
+            ),
+        )
+        bind(f, f.supervisorId, "lost-property-return")
+        val returned = housekeeping.transitionLostAndFound(
+            f.propertyId,
+            item.id,
+            LostAndFoundStatus.RETURNED,
+            LostAndFoundTransitionRequest("Wallet handed to verified guest"),
+        )
+        assertEquals(LostAndFoundStatus.RETURNED, returned.status)
+    }
+
+    @Test
+    fun `maintenance assigns tenant staff and requires independent verification`() {
+        val f = fixture()
+        bind(f, f.userId, "maintenance-request")
+        val request = maintenance.createRequest(
+            f.propertyId,
+            CreateMaintenanceRequest(
+                roomId = f.roomId,
+                category = "HVAC",
+                description = "Air conditioner trips under load",
+                priority = MaintenancePriority.HIGH,
+            ),
+        )
+        bind(f, f.userId, "maintenance-work-order")
+        val workOrder = maintenance.createWorkOrder(
+            f.propertyId,
+            CreateWorkOrderRequest(
+                requestId = request.id,
+                roomId = f.roomId,
+                title = "Repair room air conditioner",
+                priority = "high",
+                category = "hvac",
+            ),
+        )
+        bind(f, f.userId, "maintenance-assign")
+        val assigned = maintenance.assignWorkOrder(
+            f.propertyId,
+            workOrder.id,
+            AssignWorkOrderRequest(f.userId),
+        )
+        assertEquals(WorkOrderStatus.ASSIGNED, assigned.status)
+        assertEquals(f.userId, assigned.assignedTo)
+        bind(f, f.userId, "maintenance-start")
+        maintenance.transitionWorkOrder(f.propertyId, workOrder.id, "start", null)
+        bind(f, f.userId, "maintenance-complete")
+        val completed = maintenance.transitionWorkOrder(
+            f.propertyId,
+            workOrder.id,
+            "complete",
+            MaintenanceReasonRequest("Breaker replaced and load tested"),
+        )
+        assertEquals(WorkOrderStatus.AWAITING_VERIFICATION, completed.status)
+        bind(f, f.userId, "maintenance-self-verify")
+        assertFails {
+            maintenance.transitionWorkOrder(f.propertyId, workOrder.id, "verify", null)
+        }
+        bind(f, f.supervisorId, "maintenance-independent-verify")
+        val verified = maintenance.transitionWorkOrder(
+            f.propertyId,
+            workOrder.id,
+            "verify",
+            null,
+        )
+        assertEquals(WorkOrderStatus.VERIFIED, verified.status)
+        assertEquals(f.supervisorId, verified.verifiedBy)
+        assertEquals(
+            0,
+            jdbc.queryForObject(
+                """
+                SELECT count(*)
+                FROM pg_constraint
+                WHERE conrelid = 'work_orders'::regclass
+                  AND contype = 'f'
+                  AND confrelid = 'employees'::regclass
+                """.trimIndent(),
+                Int::class.java,
+            ),
+        )
     }
 
     @Test

@@ -7,10 +7,14 @@ import org.slf4j.MDC
 import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
 import org.springframework.http.ResponseEntity
+import org.springframework.http.converter.HttpMessageNotReadableException
+import org.springframework.web.HttpMediaTypeNotSupportedException
+import org.springframework.web.HttpRequestMethodNotSupportedException
 import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.context.request.async.AsyncRequestTimeoutException
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 import org.springframework.web.server.ResponseStatusException
 import java.util.UUID
 
@@ -78,6 +82,54 @@ class GlobalExceptionHandler {
             traceId = traceId
         )
         return ResponseEntity(errorResponse, HttpStatus.UNPROCESSABLE_ENTITY)
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotSupportedException::class)
+    fun handleUnsupportedMediaType(
+        request: HttpServletRequest,
+    ): ResponseEntity<ProblemDetail> {
+        return problem(
+            status = HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+            title = "Unsupported media type",
+            detail = "Request Content-Type is not supported",
+            request = request,
+        )
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException::class)
+    fun handleUnreadableMessage(
+        request: HttpServletRequest,
+    ): ResponseEntity<ProblemDetail> {
+        return problem(
+            status = HttpStatus.BAD_REQUEST,
+            title = "Malformed request",
+            detail = "Request body is not valid JSON",
+            request = request,
+        )
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException::class)
+    fun handleArgumentTypeMismatch(
+        request: HttpServletRequest,
+    ): ResponseEntity<ProblemDetail> {
+        return problem(
+            status = HttpStatus.BAD_REQUEST,
+            title = "Invalid request parameter",
+            detail = "A path or query parameter has an invalid value",
+            request = request,
+        )
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException::class)
+    fun handleUnsupportedMethod(
+        request: HttpServletRequest,
+    ): ResponseEntity<ProblemDetail> {
+        return problem(
+            status = HttpStatus.METHOD_NOT_ALLOWED,
+            title = "Method not allowed",
+            detail = "HTTP method is not supported for this route",
+            request = request,
+        )
     }
 
     @ExceptionHandler(ResponseStatusException::class)
