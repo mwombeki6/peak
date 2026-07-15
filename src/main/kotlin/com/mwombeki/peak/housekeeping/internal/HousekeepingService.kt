@@ -314,11 +314,10 @@ class HousekeepingService(
             """
             UPDATE lost_and_found
             SET status = ?, claimed_at = CASE WHEN ? = 'claimed' THEN now() ELSE claimed_at END,
-                claimed_by = CASE WHEN ? = 'claimed' THEN ? ELSE claimed_by END,
                 disposition_reason = ?, updated_by = ?, updated_at = now()
             WHERE tenant_id = ? AND property_id = ? AND id = ?
             """.trimIndent(),
-            target.db(), target.db(), target.db(), actor.tenantUserId,
+            target.db(), target.db(),
             request.reason.required("reason"), actor.tenantUserId,
             actor.tenantId, propertyId, itemId,
         )

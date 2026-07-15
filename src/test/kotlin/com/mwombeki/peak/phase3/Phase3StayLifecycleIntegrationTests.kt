@@ -64,6 +64,110 @@ class Phase3StayLifecycleIntegrationTests {
     }
 
     @Test
+    fun concurrentReservationsCannotDoubleAllocateTheSameRoom() {
+        val fixture = phase3Fixture()
+        insertAuthorizedFixture(fixture)
+        val guestIds = (1..2).map { number ->
+            postForId(
+                fixture = fixture,
+                path = "/api/v1/properties/${fixture.propertyId}/guests",
+                idempotencyKey = "concurrent-room-guest-$number-${fixture.tenantId}",
+                idField = "id",
+                json = """
+                    {
+                      "fullName": "Concurrent Room Guest $number",
+                      "email": "concurrent-$number-${fixture.tenantId}@example.com",
+                      "nationality": "TZ"
+                    }
+                """.trimIndent(),
+            )
+        }
+        val checkInDate = LocalDate.now().plusDays(2)
+        val checkOutDate = checkInDate.plusDays(2)
+        val ready = CountDownLatch(2)
+        val start = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val statuses = guestIds.mapIndexed { index, guestId ->
+                executor.submit<Int> {
+                    ready.countDown()
+                    check(start.await(10, TimeUnit.SECONDS))
+                    mockMvc.perform(
+                        post("/api/v1/properties/${fixture.propertyId}/reservations")
+                            .secureJson(
+                                """
+                                {
+                                  "primaryGuestId": "$guestId",
+                                  "roomTypeId": "${fixture.roomTypeId}",
+                                  "roomId": "${fixture.roomId}",
+                                  "checkInDate": "$checkInDate",
+                                  "checkOutDate": "$checkOutDate",
+                                  "adults": 1,
+                                  "children": 0,
+                                  "ratePerNight": 100.00
+                                }
+                                """.trimIndent(),
+                            )
+                            .headersFor(
+                                fixture,
+                                "corr-concurrent-room-$index-${fixture.tenantId}",
+                                "idem-concurrent-room-$index-${fixture.tenantId}",
+                            ),
+                    ).andReturn().response.status
+                }
+            }
+            check(ready.await(10, TimeUnit.SECONDS))
+            start.countDown()
+            kotlin.test.assertEquals(
+                listOf(200, 409),
+                statuses.map { it.get(30, TimeUnit.SECONDS) }.sorted(),
+            )
+        } finally {
+            executor.shutdownNow()
+        }
+
+        kotlin.test.assertEquals(
+            1,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*)
+                FROM reservation_rooms
+                WHERE tenant_id = ?
+                  AND room_id = ?
+                  AND status = 'reserved'
+                  AND check_in_date = ?
+                  AND check_out_date = ?
+                """.trimIndent(),
+                Int::class.java,
+                fixture.tenantId,
+                fixture.roomId,
+                checkInDate,
+                checkOutDate,
+            ),
+        )
+        kotlin.test.assertEquals(
+            1,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*)
+                FROM folios f
+                JOIN reservations r ON r.tenant_id = f.tenant_id
+                  AND r.id = f.reservation_id
+                WHERE r.tenant_id = ?
+                  AND r.property_id = ?
+                  AND r.check_in_date = ?
+                  AND r.check_out_date = ?
+                """.trimIndent(),
+                Int::class.java,
+                fixture.tenantId,
+                fixture.propertyId,
+                checkInDate,
+                checkOutDate,
+            ),
+        )
+    }
+
+    @Test
     fun concurrentNightAuditAttemptsShareOneDailyControlCase() {
         val fixture = phase3Fixture()
         insertAuthorizedFixture(fixture)

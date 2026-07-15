@@ -182,6 +182,7 @@ jobs:
         run: |
           sh -n ops/scripts/*.sh
           bash -n ops/testing/*.sh
+          python3 -m py_compile ops/testing/*.py
           python3 -m json.tool ops/keycloak/peak-realm.json >/dev/null
           find ops/testing ops/observability -name '*.json' -print0 | \
             xargs -0 -n1 python3 -m json.tool >/dev/null
@@ -228,7 +229,7 @@ jobs:
           path: build/security/peak.cdx.json
 
   acceptance:
-    name: Core hospitality and close-reporting acceptance
+    name: Adversarial real-hotel acceptance and load
     runs-on: ubuntu-latest
     needs: [unit-integration, operations, container-security]
     steps:
@@ -275,20 +276,25 @@ jobs:
             -e 's|^PEAK_REPORT_STORAGE_ACCESS_KEY=.*|PEAK_REPORT_STORAGE_ACCESS_KEY=acceptance-report-access-key|' \
             -e 's|^PEAK_REPORT_STORAGE_SECRET_KEY=.*|PEAK_REPORT_STORAGE_SECRET_KEY=acceptance-report-secret-key|' \
             "$RUNNER_TEMP/peak-acceptance.env"
-      - name: Run API-driven acceptance journey
+      - name: Run multi-role adversarial hotel journey
         env:
           COMPOSE_PROJECT_NAME: peak-acceptance-ci
           ENV_FILE: ${{ runner.temp }}/peak-acceptance.env
           TENANT_PROPERTY_BUILD_IMAGE: "false"
           TENANT_PROPERTY_RESET: "true"
-          CLOSE_REPORTING_TENANT_PASSWORD: Acceptance-CI-2026
-        run: ops/testing/run-close-reporting-acceptance.sh
+          REAL_HOTEL_TENANT_PASSWORD: Acceptance-CI-Tenant-2026
+          REAL_HOTEL_OTHER_PASSWORD: Acceptance-CI-Other-2026
+          REAL_HOTEL_STAFF_PASSWORD: Acceptance-CI-Staff-2026
+          REAL_HOTEL_ROOT_PASSWORD: Acceptance-CI-Root-2026
+          REAL_HOTEL_LOAD_REQUESTS: "800"
+          REAL_HOTEL_LOAD_CONCURRENCY: "24"
+        run: ops/testing/run-real-hotel-acceptance.sh
       - name: Upload acceptance evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: hospitality-acceptance-evidence
-          path: build/evidence/close-reporting
+          path: build/evidence/real-hotel
       - name: Stop acceptance stack
         if: always()
         env:
