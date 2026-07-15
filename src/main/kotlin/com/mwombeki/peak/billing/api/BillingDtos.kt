@@ -167,6 +167,8 @@ data class CheckoutFinancialState(
 
 data class BillingNightAuditSummary(
     val openUnpaidFolios: Int,
+    val openUnpaidBalance: BigDecimal = BigDecimal.ZERO,
+    val openUnpaidFolioIds: List<UUID> = emptyList(),
     val foliosMissingIssuedInvoice: Int,
     val pendingFolioPayments: Int,
     val issuedInvoiceIds: List<UUID>,

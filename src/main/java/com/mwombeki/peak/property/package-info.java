@@ -6,6 +6,7 @@
                 "shared::exception",
                 "audit::api",
                 "reliability::api",
+                "tenantmanagement::api",
                 "usermanagement::api"
         }
 )

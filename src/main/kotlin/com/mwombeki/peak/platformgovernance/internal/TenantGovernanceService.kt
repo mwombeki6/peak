@@ -13,22 +13,23 @@ import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.tenantmanagement.api.TenantLifecycleMutationPort
+import com.mwombeki.peak.tenantmanagement.api.TenantLifecycleTransitionCommand
 import com.mwombeki.peak.usermanagement.api.PlatformAccessPort
 import com.mwombeki.peak.usermanagement.api.PlatformAccessRequest
 import java.util.UUID
-import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import tools.jackson.databind.ObjectMapper
 
 @Service
 class TenantGovernanceService(
-    private val jdbcTemplate: JdbcTemplate,
     private val requestContextHolder: RequestContextHolder,
     private val idempotencyPort: IdempotencyPort,
     private val auditPort: AuditPort,
     private val outboxPort: OutboxPort,
     private val platformAccessPort: PlatformAccessPort,
+    private val tenantLifecycleMutationPort: TenantLifecycleMutationPort,
     private val objectMapper: ObjectMapper,
 ) : TenantGovernancePort {
 
@@ -160,59 +161,27 @@ class TenantGovernanceService(
         message: String,
         idempotencyKeyId: UUID,
     ): GovernanceActionResponse {
-        val currentStatus = currentTenantStatusForUpdate(tenantId)
-            ?: throw IllegalArgumentException("Tenant was not found")
-
-        require(currentStatus in allowedCurrentStatuses) {
-            "Tenant cannot move from $currentStatus to $newStatus"
-        }
-
-        jdbcTemplate.update(
-            """
-            UPDATE tenants
-            SET status = ?,
-                updated_at = now()
-            WHERE id = ?
-              AND deleted_at IS NULL
-            """.trimIndent(),
-            newStatus,
-            tenantId,
-        )
-
-        jdbcTemplate.update(
-            """
-            INSERT INTO tenant_lifecycle_events (
-                tenant_id,
-                event_type,
-                status,
-                reason,
-                metadata,
-                performed_by_platform_user_id
-            )
-            VALUES (?, ?, 'completed', ?, ?::jsonb, ?)
-            """.trimIndent(),
-            tenantId,
-            lifecycleEventType,
-            reason.trim(),
-            objectMapper.writeValueAsString(
-                mapOf(
-                    "previousStatus" to currentStatus,
-                    "newStatus" to newStatus,
-                ),
+        val transition = tenantLifecycleMutationPort.transition(
+            TenantLifecycleTransitionCommand(
+                tenantId = tenantId,
+                operatorId = operatorId,
+                allowedCurrentStatuses = allowedCurrentStatuses,
+                newStatus = newStatus,
+                eventType = lifecycleEventType,
+                reason = reason,
             ),
-            operatorId,
         )
 
         val response = GovernanceActionResponse(
             tenantId = tenantId,
-            previousStatus = currentStatus,
-            newStatus = newStatus,
+            previousStatus = transition.previousStatus,
+            newStatus = transition.newStatus,
             message = message,
         )
         val payload = mapOf(
             "tenantId" to tenantId,
-            "previousStatus" to currentStatus,
-            "newStatus" to newStatus,
+            "previousStatus" to transition.previousStatus,
+            "newStatus" to transition.newStatus,
             "reason" to reason.trim(),
         )
         auditPort.recordPlatformEvent(
@@ -235,20 +204,6 @@ class TenantGovernanceService(
             ),
         )
         return response
-    }
-
-    private fun currentTenantStatusForUpdate(tenantId: UUID): String? {
-        return jdbcTemplate.query(
-            """
-            SELECT status
-            FROM tenants
-            WHERE id = ?
-              AND deleted_at IS NULL
-            FOR UPDATE
-            """.trimIndent(),
-            { rs, _ -> rs.getString("status") },
-            tenantId,
-        ).firstOrNull()
     }
 
     private fun requirePlatformAccess(

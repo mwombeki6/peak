@@ -1,4 +1,7 @@
 peak:
+  observability:
+    operational-metrics:
+      enabled: false
   usermanagement:
     invitation:
       expose-token-in-response: true

@@ -10,7 +10,7 @@ plugins {
 }
 
 group = "com.mwombeki"
-version = "0.0.1-SNAPSHOT"
+version = "1.0.0-SNAPSHOT"
 description = "Peak backend platform"
 
 java {
@@ -59,7 +59,7 @@ dependencies {
     // Communications
     implementation("org.springframework.boot:spring-boot-starter-mail")
 
-    // Phase 5 reporting and S3-compatible private object storage
+    // Reporting and S3-compatible private object storage
     implementation("org.apache.pdfbox:pdfbox:3.0.7")
     implementation("io.minio:minio:9.0.3")
     implementation("com.github.librepdf:openpdf-fonts-extra:3.0.5")
@@ -181,6 +181,9 @@ tasks.withType<Test>().configureEach {
         "spring.profiles.active",
         System.getProperty("spring.profiles.active") ?: "test",
     )
+    System.getProperty("peak.openapi.write-baseline")?.let { value ->
+        systemProperty("peak.openapi.write-baseline", value)
+    }
     val runtimeDir = System.getenv("XDG_RUNTIME_DIR")
     val podmanSocket = runtimeDir?.let {
         file("$it/podman/podman.sock")

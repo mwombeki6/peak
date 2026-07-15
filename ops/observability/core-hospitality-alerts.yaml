@@ -1,0 +1,50 @@
+groups:
+  - name: peak-core-hospitality
+    rules:
+      - alert: PeakClickPesaTokenFailures
+        expr: increase(peak_clickpesa_token_total{result="failed"}[10m]) > 2
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: ClickPesa token refresh is failing
+
+      - alert: PeakPaymentPollingBacklog
+        expr: peak_payment_poll_backlog > 100
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: Mobile-money status polling backlog is elevated
+
+      - alert: PeakWebhookFailures
+        expr: peak_payment_webhook_failures > 5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: ClickPesa webhook processing failures are elevated
+
+      - alert: PeakFiscalBacklog
+        expr: peak_fiscal_backlog > 20
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: Fiscal submissions or corrections are backlogged
+
+      - alert: PeakNightAuditBlocked
+        expr: peak_night_audit_blockers > 0
+        for: 2h
+        labels:
+          severity: warning
+        annotations:
+          summary: Night-audit blockers remain unresolved
+
+      - alert: PeakPosVarianceBacklog
+        expr: peak_pos_variance_backlog > 0
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: POS variance approvals are pending

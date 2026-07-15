@@ -1,0 +1,16 @@
+# API and worker overrides for the stay/finance acceptance foundation.
+services:
+  peak-api:
+    environment:
+      SPRING_PROFILES_ACTIVE: acceptance
+      PEAK_RUNTIME_MODE: api
+      PEAK_OUTBOX_WORKER_HEALTH_REQUIRED: "true"
+      PEAK_REPORT_STORAGE_ENABLED: "false"
+      MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: readinessState,db,keycloakDiscovery,workerRuntime,realtimeJournal,clickPesa
+
+  peak-worker:
+    environment:
+      SPRING_PROFILES_ACTIVE: acceptance,worker
+      PEAK_RUNTIME_MODE: worker
+      PEAK_OUTBOX_WORKER_ENABLED: "true"
+      PEAK_REPORT_STORAGE_ENABLED: "false"

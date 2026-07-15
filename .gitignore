@@ -1,6 +1,13 @@
 HELP.md
-docs/
+docs/*
+!docs/architecture/
+docs/architecture/*
+!docs/architecture/data-invariants.md
+!docs/architecture/database-ownership.csv
+!docs/architecture/module-inventory.md
+!docs/engineering-readiness.md
 .gradle
+api-client/node_modules/
 build/
 test_output*.txt
 ops/production/.env

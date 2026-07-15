@@ -161,6 +161,16 @@ class NightAuditService(
                     objectMapper.writeValueAsString(issue.payload),
                 )
             }
+            synchronizeFinancialControlCases(
+                actor = actor,
+                propertyId = propertyId,
+                businessDate = auditDate,
+                currency = propertyOperationsPort.closeSnapshotSummary(
+                    actor.tenantId,
+                    propertyId,
+                ).currency,
+                issues = issues,
+            )
             val blockingCount = issues.count { it.blocking }
             val summary = mapOf(
                 "auditDate" to auditDate,
@@ -288,6 +298,13 @@ class NightAuditService(
                     "Night audit issue was not found or was already resolved",
                 )
             }
+            acceptFinancialControlCase(
+                actor = actor,
+                propertyId = propertyId,
+                runId = runId,
+                issueId = issueId,
+                reason = reason,
+            )
             val unresolved = unresolvedBlockingIssueCount(
                 actor.tenantId,
                 propertyId,
@@ -621,6 +638,9 @@ class NightAuditService(
             code = "open_unpaid_folios",
             message = "Open folios have outstanding balances.",
             blocking = true,
+            amountAtRisk = billing.openUnpaidBalance,
+            resourceType = "folios",
+            resourceIds = billing.openUnpaidFolioIds,
         )
         addCountIssue(
             issues = issues,
@@ -637,6 +657,9 @@ class NightAuditService(
             code = "invoices_missing_accepted_fiscal_receipt",
             message = "Issued invoices are missing accepted fiscal receipts.",
             blocking = true,
+            amountAtRisk = closeData.fiscal.pendingTotal
+                .add(closeData.fiscal.failedTotal)
+                .abs(),
         )
         addCountIssue(
             issues = issues,
@@ -706,6 +729,9 @@ class NightAuditService(
         code: String,
         message: String,
         blocking: Boolean,
+        amountAtRisk: BigDecimal? = null,
+        resourceType: String? = null,
+        resourceIds: List<UUID> = emptyList(),
     ) {
         if (count <= 0) {
             return
@@ -718,7 +744,16 @@ class NightAuditService(
             message = "$message Count: $count",
             blocking = blocking,
             overrideAllowed = code !in NON_OVERRIDABLE_ISSUE_CODES,
-            payload = mapOf("count" to count),
+            payload = buildMap {
+                put("count", count)
+                amountAtRisk?.money()?.takeIf { it.signum() > 0 }?.let {
+                    put("amountAtRisk", it)
+                }
+                if (resourceType != null && resourceIds.isNotEmpty()) {
+                    put("resourceType", resourceType)
+                    put("resourceIds", resourceIds.sortedBy(UUID::toString))
+                }
+            },
         )
     }
 
@@ -741,8 +776,338 @@ class NightAuditService(
             message = "$message Difference: ${value.toPlainString()}",
             blocking = true,
             overrideAllowed = false,
-            payload = mapOf("difference" to value),
+            payload = mapOf(
+                "difference" to value,
+                "amountAtRisk" to value.abs(),
+            ),
         )
+    }
+
+    private fun synchronizeFinancialControlCases(
+        actor: TenantActor,
+        propertyId: UUID,
+        businessDate: LocalDate,
+        currency: String,
+        issues: List<NightAuditIssueDraft>,
+    ) {
+        val currentCodes = issues.mapTo(mutableSetOf()) { it.issueCode }
+        issues.forEach { issue ->
+            val amountAtRisk = issue.payload["amountAtRisk"] as? BigDecimal
+            val quantity = (issue.payload["count"] as? Number)?.toInt() ?: 1
+            val category = financialControlCategory(issue.issueCode)
+            val title = issue.issueCode
+                .split('_')
+                .joinToString(" ") { word ->
+                    word.replaceFirstChar(Char::uppercase)
+                }
+            val caseId = requireNotNull(
+                jdbcTemplate.queryForObject(
+                    """
+                    INSERT INTO financial_control_cases (
+                        tenant_id, property_id, business_date,
+                        source_run_id, source_issue_id, issue_code,
+                        category, severity, title, description, status,
+                        currency, quantity, amount_at_risk
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)
+                    ON CONFLICT (
+                        tenant_id, property_id, business_date, issue_code
+                    ) DO UPDATE SET
+                        source_run_id = EXCLUDED.source_run_id,
+                        source_issue_id = EXCLUDED.source_issue_id,
+                        category = EXCLUDED.category,
+                        severity = EXCLUDED.severity,
+                        title = EXCLUDED.title,
+                        description = EXCLUDED.description,
+                        status = CASE
+                            WHEN financial_control_cases.status IN (
+                                'resolved', 'accepted'
+                            ) THEN 'open'
+                            ELSE financial_control_cases.status
+                        END,
+                        currency = EXCLUDED.currency,
+                        quantity = EXCLUDED.quantity,
+                        amount_at_risk = EXCLUDED.amount_at_risk,
+                        assigned_to = CASE
+                            WHEN financial_control_cases.status IN (
+                                'resolved', 'accepted'
+                            ) THEN NULL
+                            ELSE financial_control_cases.assigned_to
+                        END,
+                        assigned_by = CASE
+                            WHEN financial_control_cases.status IN (
+                                'resolved', 'accepted'
+                            ) THEN NULL
+                            ELSE financial_control_cases.assigned_by
+                        END,
+                        assigned_at = CASE
+                            WHEN financial_control_cases.status IN (
+                                'resolved', 'accepted'
+                            ) THEN NULL
+                            ELSE financial_control_cases.assigned_at
+                        END,
+                        due_at = CASE
+                            WHEN financial_control_cases.status IN (
+                                'resolved', 'accepted'
+                            ) THEN NULL
+                            ELSE financial_control_cases.due_at
+                        END,
+                        resolution_type = CASE
+                            WHEN financial_control_cases.status IN (
+                                'resolved', 'accepted'
+                            ) THEN NULL
+                            ELSE financial_control_cases.resolution_type
+                        END,
+                        resolution_note = CASE
+                            WHEN financial_control_cases.status IN (
+                                'resolved', 'accepted'
+                            ) THEN NULL
+                            ELSE financial_control_cases.resolution_note
+                        END,
+                        resolved_by = CASE
+                            WHEN financial_control_cases.status IN (
+                                'resolved', 'accepted'
+                            ) THEN NULL
+                            ELSE financial_control_cases.resolved_by
+                        END,
+                        resolved_at = CASE
+                            WHEN financial_control_cases.status IN (
+                                'resolved', 'accepted'
+                            ) THEN NULL
+                            ELSE financial_control_cases.resolved_at
+                        END,
+                        value_recovered = CASE
+                            WHEN financial_control_cases.status IN (
+                                'resolved', 'accepted'
+                            ) THEN 0
+                            ELSE financial_control_cases.value_recovered
+                        END,
+                        value_protected = CASE
+                            WHEN financial_control_cases.status IN (
+                                'resolved', 'accepted'
+                            ) THEN 0
+                            ELSE financial_control_cases.value_protected
+                        END,
+                        last_detected_at = now(),
+                        occurrence_count = financial_control_cases.occurrence_count + 1,
+                        version = financial_control_cases.version + 1
+                    RETURNING id
+                    """.trimIndent(),
+                    UUID::class.java,
+                    actor.tenantId,
+                    propertyId,
+                    businessDate,
+                    issue.runId,
+                    issue.id,
+                    issue.issueCode,
+                    category,
+                    issue.severity,
+                    title,
+                    issue.message,
+                    currency,
+                    quantity,
+                    amountAtRisk?.abs()?.money(),
+                ),
+            )
+            insertFinancialControlEvidence(
+                actor = actor,
+                propertyId = propertyId,
+                caseId = caseId,
+                issue = issue,
+                amountAtRisk = amountAtRisk,
+            )
+            insertFinancialControlEvent(
+                actor = actor,
+                propertyId = propertyId,
+                caseId = caseId,
+                eventType = "case.detected",
+                payload = mapOf(
+                    "sourceRunId" to issue.runId,
+                    "sourceIssueId" to issue.id,
+                    "issueCode" to issue.issueCode,
+                    "quantity" to quantity,
+                    "amountAtRisk" to amountAtRisk,
+                ),
+            )
+        }
+
+        jdbcTemplate.query(
+            """
+            SELECT id, issue_code
+            FROM financial_control_cases
+            WHERE tenant_id = ?
+              AND property_id = ?
+              AND business_date = ?
+              AND status IN ('open', 'assigned')
+            FOR UPDATE
+            """.trimIndent(),
+            { rs, _ ->
+                rs.getObject("id", UUID::class.java) to
+                    rs.getString("issue_code")
+            },
+            actor.tenantId,
+            propertyId,
+            businessDate,
+        ).filter { (_, code) -> code !in currentCodes }
+            .forEach { (caseId, issueCode) ->
+                jdbcTemplate.update(
+                    """
+                    UPDATE financial_control_cases
+                    SET status = 'resolved',
+                        resolution_type = 'source_corrected',
+                        resolution_note = ?,
+                        value_recovered = 0,
+                        value_protected = 0,
+                        resolved_by = NULL,
+                        resolved_at = now(),
+                        version = version + 1
+                    WHERE tenant_id = ?
+                      AND property_id = ?
+                      AND id = ?
+                      AND status IN ('open', 'assigned')
+                    """.trimIndent(),
+                    "Source control passed on a later night-audit evaluation",
+                    actor.tenantId,
+                    propertyId,
+                    caseId,
+                )
+                insertFinancialControlEvent(
+                    actor = actor,
+                    propertyId = propertyId,
+                    caseId = caseId,
+                    eventType = "case.source_corrected",
+                    payload = mapOf("issueCode" to issueCode),
+                )
+            }
+    }
+
+    private fun insertFinancialControlEvidence(
+        actor: TenantActor,
+        propertyId: UUID,
+        caseId: UUID,
+        issue: NightAuditIssueDraft,
+        amountAtRisk: BigDecimal?,
+    ) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO financial_control_evidence (
+                tenant_id, property_id, case_id, source_run_id,
+                source_issue_id, evidence_type, amount, payload
+            ) VALUES (?, ?, ?, ?, ?, 'control_evaluation', ?, ?::jsonb)
+            """.trimIndent(),
+            actor.tenantId,
+            propertyId,
+            caseId,
+            issue.runId,
+            issue.id,
+            amountAtRisk?.abs()?.money(),
+            objectMapper.writeValueAsString(issue.payload),
+        )
+        val resourceType = issue.payload["resourceType"] as? String
+        val resourceIds = issue.payload["resourceIds"] as? List<*>
+        if (resourceType == null || resourceIds == null) {
+            return
+        }
+        resourceIds.filterIsInstance<UUID>().forEach { resourceId ->
+            jdbcTemplate.update(
+                """
+                INSERT INTO financial_control_evidence (
+                    tenant_id, property_id, case_id, source_run_id,
+                    source_issue_id, evidence_type, resource_type,
+                    resource_id, payload
+                ) VALUES (?, ?, ?, ?, ?, 'affected_resource', ?, ?, '{}'::jsonb)
+                """.trimIndent(),
+                actor.tenantId,
+                propertyId,
+                caseId,
+                issue.runId,
+                issue.id,
+                resourceType,
+                resourceId,
+            )
+        }
+    }
+
+    private fun acceptFinancialControlCase(
+        actor: TenantActor,
+        propertyId: UUID,
+        runId: UUID,
+        issueId: UUID,
+        reason: String,
+    ) {
+        val caseId = jdbcTemplate.query(
+            """
+            SELECT id
+            FROM financial_control_cases
+            WHERE tenant_id = ?
+              AND property_id = ?
+              AND source_run_id = ?
+              AND source_issue_id = ?
+              AND status IN ('open', 'assigned')
+            FOR UPDATE
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("id", UUID::class.java) },
+            actor.tenantId,
+            propertyId,
+            runId,
+            issueId,
+        ).singleOrNull() ?: return
+        jdbcTemplate.update(
+            """
+            UPDATE financial_control_cases
+            SET status = 'accepted',
+                resolution_type = 'supervisor_override',
+                resolution_note = ?,
+                resolved_by = ?,
+                resolved_at = now(),
+                version = version + 1
+            WHERE tenant_id = ? AND property_id = ? AND id = ?
+            """.trimIndent(),
+            reason,
+            actor.tenantUserId,
+            actor.tenantId,
+            propertyId,
+            caseId,
+        )
+        insertFinancialControlEvent(
+            actor = actor,
+            propertyId = propertyId,
+            caseId = caseId,
+            eventType = "case.accepted_by_override",
+            payload = mapOf("reason" to reason, "issueId" to issueId),
+        )
+    }
+
+    private fun insertFinancialControlEvent(
+        actor: TenantActor,
+        propertyId: UUID,
+        caseId: UUID,
+        eventType: String,
+        payload: Map<String, Any?>,
+    ) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO financial_control_case_events (
+                tenant_id, property_id, case_id, event_type, actor_id, payload
+            ) VALUES (?, ?, ?, ?, ?, ?::jsonb)
+            """.trimIndent(),
+            actor.tenantId,
+            propertyId,
+            caseId,
+            eventType,
+            actor.tenantUserId,
+            objectMapper.writeValueAsString(payload),
+        )
+    }
+
+    private fun financialControlCategory(issueCode: String): String = when {
+        issueCode.contains("payment") || issueCode.contains("unpaid") ->
+            "payment"
+        issueCode.contains("fiscal") || issueCode.contains("invoice") ->
+            "fiscal"
+        issueCode.contains("pos") -> "pos"
+        issueCode.contains("revenue") || issueCode.contains("folio") ->
+            "revenue"
+        else -> "operations"
     }
 
     private fun collectCloseData(

@@ -41,7 +41,7 @@ jobs:
     environment: clickpesa-sandbox
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Run protected ClickPesa sandbox acceptance
         env:
@@ -57,7 +57,7 @@ jobs:
         run: ops/testing/run-clickpesa-sandbox-acceptance.sh
 
       - name: Upload acceptance evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: clickpesa-sandbox-${{ github.run_id }}
           path: build/evidence/clickpesa/*.json

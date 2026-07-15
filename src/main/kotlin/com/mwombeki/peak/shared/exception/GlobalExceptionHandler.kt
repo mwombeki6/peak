@@ -33,13 +33,18 @@ class GlobalExceptionHandler {
         request: HttpServletRequest
     ): ResponseEntity<ErrorResponse> {
         val traceId = traceId(request)
-        log.warn("Business exception occurred [Trace: {}]: {} - Code: {}", traceId, ex.message, ex.errorCode)
+        log.warn(
+            "Business exception occurred [Trace: {}]: {} - Code: {}",
+            traceId,
+            PublicErrorSanitizer.sanitize(ex.message),
+            ex.errorCode,
+        )
 
         val errorResponse = ErrorResponse(
             status = ex.status.value(),
             error = ex.status.reasonPhrase,
             errorCode = ex.errorCode,
-            message = ex.message,
+            message = PublicErrorSanitizer.sanitize(ex.message),
             path = request.requestURI,
             traceId = traceId
         )
@@ -58,7 +63,11 @@ class GlobalExceptionHandler {
         val firstFieldError = ex.bindingResult.fieldError
         val customizedMessage = firstFieldError?.let { "[${it.field}] ${it.defaultMessage}" } ?: "Input request validation failed."
 
-        log.info("Request payload validation rejected [Trace: {}]: {}", traceId, customizedMessage)
+        log.info(
+            "Request payload validation rejected [Trace: {}]: {}",
+            traceId,
+            PublicErrorSanitizer.sanitize(customizedMessage),
+        )
 
         val errorResponse = ErrorResponse(
             status = HttpStatus.UNPROCESSABLE_ENTITY.value(),
@@ -79,7 +88,7 @@ class GlobalExceptionHandler {
         val traceId = traceId(request)
         val problem = ProblemDetail.forStatusAndDetail(
             ex.statusCode,
-            ex.reason ?: "Request failed",
+            PublicErrorSanitizer.sanitize(ex.reason ?: "Request failed"),
         )
         problem.title = HttpStatus.resolve(ex.statusCode.value())?.reasonPhrase
             ?: "Request failed"
@@ -97,7 +106,7 @@ class GlobalExceptionHandler {
         return problem(
             status = HttpStatus.BAD_REQUEST,
             title = "Invalid request",
-            detail = ex.message ?: "Request is invalid",
+            detail = PublicErrorSanitizer.sanitize(ex.message ?: "Request is invalid"),
             request = request,
         )
     }
@@ -110,7 +119,9 @@ class GlobalExceptionHandler {
         return problem(
             status = HttpStatus.CONFLICT,
             title = "Request conflict",
-            detail = ex.message ?: "Request cannot be completed in the current state",
+            detail = PublicErrorSanitizer.sanitize(
+                ex.message ?: "Request cannot be completed in the current state",
+            ),
             request = request,
         )
     }
@@ -132,9 +143,12 @@ class GlobalExceptionHandler {
         request: HttpServletRequest
     ): ResponseEntity<ErrorResponse> {
         val traceId = traceId(request)
-        // CRITICAL: We log the full stack trace to the internal server console for developers,
-        // but we hide the dirty details from the API client so hackers can't see schema details.
-        log.error("Fatal unhandled internal server execution error [Trace: {}]", traceId, ex)
+        log.error(
+            "Fatal unhandled internal server execution error [Trace: {}] type={} detail={}",
+            traceId,
+            ex.javaClass.name,
+            PublicErrorSanitizer.sanitize(ex.message),
+        )
 
         val errorResponse = ErrorResponse(
             status = HttpStatus.INTERNAL_SERVER_ERROR.value(),

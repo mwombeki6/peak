@@ -1,6 +1,6 @@
 # Frontdesk Module
 
-Owns Phase 3 check-in, walk-in, stay, and checkout transitions.
+Owns check-in, walk-in, stay, and checkout transitions.
 
 ## Responsibilities
 

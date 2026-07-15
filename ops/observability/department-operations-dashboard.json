@@ -1,0 +1,62 @@
+{
+  "title": "Peak Department Operations",
+  "uid": "peak-department-operations",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Inventory low-stock crossings",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(peak_outbox_platform_events_published_total{event_type=\"inventory.low_stock\"}[5m]))"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "POS and kitchen command results",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (operation,result) (rate(peak_pos_command_total[5m]))"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Realtime KDS fanout",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (eventType) (rate(peak_realtime_events_fanned_out_total{eventType=~\"KITCHEN_.*\"}[5m]))"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Outbox delivery outcomes",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (destination) (rate(peak_outbox_worker_delivered_total[5m]))"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (destination) (rate(peak_outbox_worker_failed_total[5m]))"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 }
+    }
+  ]
+}

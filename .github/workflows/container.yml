@@ -1,83 +1,101 @@
-name: Container
+name: Container Release
 
 on:
-  pull_request:
   push:
-    branches:
-      - master
-    tags:
-      - "v*"
+    branches: [master]
+    tags: ["v*.*.*"]
   workflow_dispatch:
 
 permissions:
   contents: read
   packages: write
+  id-token: write
+  attestations: write
 
 concurrency:
-  group: container-${{ github.workflow }}-${{ github.ref }}
+  group: container-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build OCI image
+  publish:
+    name: Publish OCI image, SBOM, and provenance
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Java
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "25"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Validate semantic product tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          [[ "${{ github.ref_name }}" =~ ^v1\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Release tag must be v1.x.y" >&2
+            exit 1
+          }
       - name: Install Podman
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y podman
-
-      - name: Build jar
-        run: ./gradlew bootJar
-
+        run: sudo apt-get update && sudo apt-get install -y podman
+      - name: Build warning-free executable
+        run: ./gradlew clean bootJar
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
-        uses: redhat-actions/podman-login@v1
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build image
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build and scan image
         run: |
-          IMAGE=ghcr.io/${{ github.repository }}/peak:${{ github.sha }}
-          podman build -f Containerfile -t "$IMAGE" .
-          podman save "$IMAGE" -o peak-image.tar
-
-      - name: Scan image vulnerabilities
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          scan-type: image
-          input: peak-image.tar
-          format: table
-          exit-code: "1"
-          ignore-unfixed: true
-          severity: CRITICAL,HIGH
-
-      - name: Push image
-        if: github.event_name != 'pull_request'
+          mkdir -p build/release build/trivy-cache
+          image="ghcr.io/${{ github.repository }}/peak:${{ github.sha }}"
+          podman build -f Containerfile -t "$image" .
+          podman save --format docker-archive -o build/release/peak-image.tar "$image"
+          podman run --rm -v "$PWD:/workspace:ro,Z" -v "$PWD/build:/output:Z" \
+            docker.io/aquasec/trivy:0.69.2 fs --cache-dir /output/trivy-cache \
+            --timeout 20m --skip-version-check --scanners vuln,misconfig,secret \
+            --exit-code 1 --severity HIGH,CRITICAL \
+            --ignore-unfixed /workspace
+          podman run --rm -v "$PWD/build:/scan:Z" docker.io/aquasec/trivy:0.69.2 image \
+            --timeout 20m --skip-version-check --cache-dir /scan/trivy-cache \
+            --input /scan/release/peak-image.tar \
+            --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed
+          podman run --rm -v "$PWD/build:/scan:Z" docker.io/aquasec/trivy:0.69.2 image \
+            --timeout 20m --skip-version-check --cache-dir /scan/trivy-cache \
+            --input /scan/release/peak-image.tar \
+            --format cyclonedx --output /scan/release/peak.cdx.json
+      - name: Push immutable and release tags
+        id: push
         run: |
-          IMAGE=ghcr.io/${{ github.repository }}/peak:${{ github.sha }}
-          podman push "$IMAGE"
+          image="ghcr.io/${{ github.repository }}/peak:${{ github.sha }}"
+          podman push --digestfile build/release/sha.digest "$image"
           if [ "${{ github.ref }}" = "refs/heads/master" ]; then
-            podman tag "$IMAGE" ghcr.io/${{ github.repository }}/peak:latest
-            podman push ghcr.io/${{ github.repository }}/peak:latest
+            latest="ghcr.io/${{ github.repository }}/peak:latest"
+            podman tag "$image" "$latest"
+            podman push --digestfile build/release/latest.digest "$latest"
+            cmp build/release/sha.digest build/release/latest.digest
           fi
-          case "${{ github.ref }}" in
-            refs/tags/v*)
-              podman tag "$IMAGE" ghcr.io/${{ github.repository }}/peak:${{ github.ref_name }}
-              podman push ghcr.io/${{ github.repository }}/peak:${{ github.ref_name }}
-              ;;
-          esac
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            release="ghcr.io/${{ github.repository }}/peak:${{ github.ref_name }}"
+            podman tag "$image" "$release"
+            podman push --digestfile build/release/release.digest "$release"
+            cmp build/release/sha.digest build/release/release.digest
+          fi
+          digest="$(cat build/release/sha.digest)"
+          echo "digest=$digest" >>"$GITHUB_OUTPUT"
+          jq -n \
+            --arg repository "${{ github.repository }}" \
+            --arg commit "${{ github.sha }}" \
+            --arg digest "$digest" \
+            --arg workflow "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            '{repository:$repository,commit:$commit,manifestDigest:$digest,workflow:$workflow}' \
+            > build/release/provenance.json
+      - name: Attest published image provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-name: ghcr.io/${{ github.repository }}/peak
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+      - name: Upload release evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ github.sha }}
+          path: |
+            build/release/*.digest
+            build/release/peak.cdx.json
+            build/release/provenance.json

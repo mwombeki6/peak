@@ -3,8 +3,10 @@
         displayName = "Platform Governance",
         allowedDependencies = {
                 "shared::context",
+                "shared::exception",
                 "audit::api",
                 "reliability::api",
+                "tenantmanagement::api",
                 "usermanagement::api"
         }
 )

@@ -1,5 +1,6 @@
 package com.mwombeki.peak.shared.security
 
+import com.mwombeki.peak.shared.context.RequestContextHolder
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
@@ -8,7 +9,9 @@ import org.springframework.stereotype.Component
 
 @NamedInterface("security")
 @Component
-class SecurityProblemWriter {
+class SecurityProblemWriter(
+    private val requestContextHolder: RequestContextHolder? = null,
+) {
     fun write(
         response: HttpServletResponse,
         status: HttpStatus,
@@ -17,9 +20,12 @@ class SecurityProblemWriter {
     ) {
         response.status = status.value()
         response.contentType = MediaType.APPLICATION_PROBLEM_JSON_VALUE
+        val context = requestContextHolder?.currentOrNull()
+        val traceId = context?.correlationId.orEmpty().jsonEscaped()
+        val path = context?.requestPath.orEmpty().jsonEscaped()
         response.writer.write(
             """
-            {"type":"about:blank","title":"${title.jsonEscaped()}","status":${status.value()},"detail":"${detail.jsonEscaped()}"}
+            {"type":"about:blank","title":"${title.jsonEscaped()}","status":${status.value()},"detail":"${detail.jsonEscaped()}","traceId":"$traceId","path":"$path"}
             """.trimIndent(),
         )
     }

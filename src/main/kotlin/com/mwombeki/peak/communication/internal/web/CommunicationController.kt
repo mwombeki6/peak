@@ -1,5 +1,7 @@
 package com.mwombeki.peak.communication.internal.web
 
+import com.mwombeki.peak.shared.exception.ApiProblemFactory
+
 import com.mwombeki.peak.communication.api.ChannelVerificationReceipt
 import com.mwombeki.peak.communication.api.ChannelVerificationRequestReceipt
 import com.mwombeki.peak.communication.api.CommunicationPort
@@ -33,6 +35,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/v1/communication")
 class CommunicationController(
     private val communicationPort: CommunicationPort,
+    private val apiProblemFactory: ApiProblemFactory,
 ) {
 
     @PostMapping("/notifications")
@@ -141,9 +144,7 @@ class CommunicationController(
         title: String,
         detail: String,
     ): ResponseEntity<ProblemDetail> {
-        val problem = ProblemDetail.forStatusAndDetail(status, detail)
-        problem.title = title
-        return ResponseEntity.status(status).body(problem)
+        return apiProblemFactory.response(status, title, detail)
     }
 
     private fun RuntimeException.publicMessage(): String {

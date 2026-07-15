@@ -3,8 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches:
-      - master
+    branches: [master]
 
 permissions:
   contents: read
@@ -13,138 +12,244 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  JAVA_VERSION: "25"
+  TRIVY_IMAGE: docker.io/aquasec/trivy:0.69.2
+
 jobs:
-  test:
-    name: Test
+  architecture-contract:
+    name: Architecture and API contract
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Java
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "25"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Install Podman Compose
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y podman podman-compose python3-websocket
-
-      - name: Validate production compose
-        run: |
-          podman compose --env-file ops/production/.env.example -f ops/production/compose.yaml config >/tmp/peak-production-compose.yaml
-          podman compose --env-file ops/production/.env.example \
-            -f ops/production/compose.yaml \
-            -f ops/testing/compose.phase3-acceptance.yaml \
-            config >/tmp/peak-phase3-acceptance-compose.yaml
-          podman compose --env-file ops/production/.env.example \
-            -f ops/production/compose.yaml \
-            -f ops/testing/compose.phase4-acceptance.yaml \
-            config >/tmp/peak-phase4-acceptance-compose.yaml
-          podman compose --env-file ops/production/.env.example \
-            -f ops/production/compose.yaml \
-            -f ops/testing/compose.phase5-acceptance.yaml \
-            config >/tmp/peak-phase5-acceptance-compose.yaml
-
-      - name: Validate production environment contract
-        run: |
-          tmp="$RUNNER_TEMP/peak-production.env"
-          cp ops/production/.env.example "$tmp"
-          cat >>"$tmp" <<'EOF'
-          PEAK_IMAGE=ghcr.io/mwombeki6/peak/peak:ci
-          POSTGRES_MIGRATOR_PASSWORD=ci-migrator-password-1234
-          POSTGRES_APP_PASSWORD=ci-application-password-1234
-          POSTGRES_WORKER_PASSWORD=ci-worker-password-1234
-          POSTGRES_PLATFORM_SUPPORT_PASSWORD=ci-platform-support-password-1234
-          KEYCLOAK_ADMIN_PASSWORD=ci-keycloak-admin-password-1234
-          KEYCLOAK_DB_PASSWORD=ci-keycloak-db-password-1234
-          PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=ci-communication-provider-key-1234
-          PEAK_ENVELOPE_KEY_BASE64=cGVhay1jaS1lbnZlbG9wZS1rZXktMzItYnl0ZXMhISE=
-          PEAK_PAYMENT_GATEWAY_CREDENTIAL=ci-payment-gateway-credential-1234
-          PEAK_PAYMENT_WEBHOOK_SECRET=ci-payment-webhook-secret-1234
-          PEAK_CLICKPESA_API_KEY=ci-clickpesa-api-key-1234
-          PEAK_CLICKPESA_CHECKSUM_KEY=ci-clickpesa-checksum-key-1234
-          PEAK_FISCAL_GATEWAY_CREDENTIAL=ci-fiscal-gateway-credential-1234
-          PEAK_GUEST_IDENTITY_HASH_KEY=ci-guest-identity-hmac-key-1234567890
-          PEAK_REPORT_STORAGE_ACCESS_KEY=ci-report-storage-access-key
-          PEAK_REPORT_STORAGE_SECRET_KEY=ci-report-storage-secret-key-1234
-          EOF
-          sed -i 's/^          //' "$tmp"
-          ops/scripts/validate-production-env.sh "$tmp"
-
-      - name: Validate Keycloak realm JSON
-        run: python3 -m json.tool ops/keycloak/peak-realm.json >/dev/null
-
-      - name: Validate Postman collections
-        run: |
-          python3 -m json.tool ops/testing/Peak-Phase-2.postman_collection.json >/dev/null
-          python3 -m json.tool ops/testing/Peak-Phase-3-Guest-Identity.postman_collection.json >/dev/null
-          python3 -m json.tool ops/testing/Peak-Phase-3.postman_collection.json >/dev/null
-          python3 -m json.tool ops/testing/Peak-Phase-4.postman_collection.json >/dev/null
-          python3 -m json.tool ops/testing/Peak-Phase-5.postman_collection.json >/dev/null
-          python3 -m json.tool ops/observability/phase3-dashboard.json >/dev/null
-          python3 -m json.tool ops/observability/phase4-dashboard.json >/dev/null
-          python3 -m json.tool ops/observability/phase5-dashboard.json >/dev/null
-
-      - name: Validate ops scripts
-        run: |
-          sh -n ops/scripts/*.sh
-          bash -n ops/testing/run-phase2-acceptance.sh
-          bash -n ops/testing/run-phase3-acceptance.sh
-          bash -n ops/testing/run-phase4-acceptance.sh
-          bash -n ops/testing/run-phase5-acceptance.sh
-          bash -n ops/testing/run-clickpesa-sandbox-acceptance.sh
-
-      - name: Start Podman API socket for Testcontainers
+          java-version: ${{ env.JAVA_VERSION }}
+      - uses: gradle/actions/setup-gradle@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: api-client/package-lock.json
+      - name: Install Podman
+        run: sudo apt-get update && sudo apt-get install -y podman
+      - name: Start Podman API for Testcontainers
         run: |
           socket="$RUNNER_TEMP/podman.sock"
           podman system service --time=0 "unix://$socket" >/tmp/podman-service.log 2>&1 &
-          for attempt in $(seq 1 20); do
-            [ -S "$socket" ] && break
-            sleep 1
-          done
+          for attempt in $(seq 1 20); do [ -S "$socket" ] && break; sleep 1; done
           [ -S "$socket" ]
           echo "DOCKER_HOST=unix://$socket" >>"$GITHUB_ENV"
           echo "TESTCONTAINERS_RYUK_DISABLED=true" >>"$GITHUB_ENV"
+      - name: Verify module, ownership, route, and OpenAPI contracts
+        run: |
+          ./gradlew test \
+            --tests 'com.mwombeki.peak.ModulithArchitectureTests' \
+            --tests 'com.mwombeki.peak.ModulithDocumentationTests' \
+            --tests 'com.mwombeki.peak.DatabaseOwnershipArchitectureTests' \
+            --tests 'com.mwombeki.peak.contract.OpenApiContractIntegrationTests' \
+            --tests '*RouteAccessMatrixCoverageIntegrationTests'
+      - name: Lint OpenAPI and compile generated TypeScript client
+        working-directory: api-client
+        run: |
+          npm ci
+          npm run lint:openapi
+          npm run generate
+          git diff --exit-code -- src/peak-v1.ts
+          npm run typecheck
+      - name: Upload contract artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: peak-v1-contracts
+          path: |
+            build/contracts/openapi-v1.json
+            build/spring-modulith-docs
+            api-client/src/peak-v1.ts
 
-      - name: Run tests
-        run: ./gradlew test
-
+  unit-integration:
+    name: Unit and integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Install Podman
+        run: sudo apt-get update && sudo apt-get install -y podman
+      - name: Start Podman API for Testcontainers
+        run: |
+          socket="$RUNNER_TEMP/podman.sock"
+          podman system service --time=0 "unix://$socket" >/tmp/podman-service.log 2>&1 &
+          for attempt in $(seq 1 20); do [ -S "$socket" ] && break; sleep 1; done
+          [ -S "$socket" ]
+          echo "DOCKER_HOST=unix://$socket" >>"$GITHUB_ENV"
+          echo "TESTCONTAINERS_RYUK_DISABLED=true" >>"$GITHUB_ENV"
+      - name: Run warning-free test suite
+        run: ./gradlew clean test
       - name: Reject skipped required integration tests
         run: |
           if grep -R '<skipped' build/test-results/test/TEST-*IntegrationTests.xml; then
             echo "A required integration test was skipped" >&2
             exit 1
           fi
+      - name: Upload failed test report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-report
+          path: build/reports/tests/test
 
-      - name: Validate clean migrations
-        run: ./gradlew test --tests '*MigrationValidationIntegrationTests' --rerun-tasks
-
-      - name: Build executable jar
-        run: ./gradlew bootJar
-
-      - name: Build acceptance container
-        run: podman build -t localhost/peak:acceptance-ci .
-
-      - name: Scan acceptance container
+  migration-database:
+    name: PostgreSQL ${{ matrix.postgres }} migration matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ["16.14", "18.4"]
+    env:
+      PEAK_TEST_POSTGRES_IMAGE: postgres:${{ matrix.postgres }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Install Podman
+        run: sudo apt-get update && sudo apt-get install -y podman
+      - name: Start Podman API for Testcontainers
         run: |
-          mkdir -p build
-          podman save --format docker-archive \
-            -o build/peak-acceptance-image.tar localhost/peak:acceptance-ci
-          podman run --rm \
-            -v "$PWD/build:/scan:ro,Z" \
-            docker.io/aquasec/trivy:0.69.2 \
-            image --input /scan/peak-acceptance-image.tar \
+          socket="$RUNNER_TEMP/podman.sock"
+          podman system service --time=0 "unix://$socket" >/tmp/podman-service.log 2>&1 &
+          for attempt in $(seq 1 20); do [ -S "$socket" ] && break; sleep 1; done
+          [ -S "$socket" ]
+          echo "DOCKER_HOST=unix://$socket" >>"$GITHUB_ENV"
+          echo "TESTCONTAINERS_RYUK_DISABLED=true" >>"$GITHUB_ENV"
+      - name: Run clean and populated migration gates
+        run: |
+          ./gradlew test --rerun-tasks \
+            --tests '*MigrationValidationIntegrationTests' \
+            --tests '*MigrationUpgradeIntegrationTests' \
+            --tests '*PopulatedMigrationUpgradeIntegrationTests' \
+            --tests '*RuntimeDatabaseRoleIntegrationTests'
+
+  operations:
+    name: Runtime and operations contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman jq python3-venv python3-yaml
+          python3 -m venv "$RUNNER_TEMP/podman-compose"
+          "$RUNNER_TEMP/podman-compose/bin/pip" install --disable-pip-version-check podman-compose==1.5.0
+          echo "PODMAN_COMPOSE_PROVIDER=$RUNNER_TEMP/podman-compose/bin/podman-compose" >> "$GITHUB_ENV"
+      - name: Validate production topology
+        run: |
+          podman compose --env-file ops/production/.env.example -f ops/production/compose.yaml config >/tmp/peak-production-compose.yaml
+          podman compose --env-file ops/production/.env.example \
+            -f ops/production/compose.yaml -f ops/testing/compose.close-reporting.yaml \
+            config >/tmp/peak-acceptance-compose.yaml
+      - name: Validate production environment contract
+        run: |
+          tmp="$RUNNER_TEMP/peak-production.env"
+          cp ops/production/.env.example "$tmp"
+          sed -i \
+            -e 's|^PEAK_IMAGE=.*|PEAK_IMAGE=ghcr.io/mwombeki6/peak/peak:ci|' \
+            -e 's|^POSTGRES_MIGRATOR_PASSWORD=.*|POSTGRES_MIGRATOR_PASSWORD=ci-migrator-password-1234|' \
+            -e 's|^POSTGRES_APP_PASSWORD=.*|POSTGRES_APP_PASSWORD=ci-application-password-1234|' \
+            -e 's|^POSTGRES_WORKER_PASSWORD=.*|POSTGRES_WORKER_PASSWORD=ci-worker-password-1234|' \
+            -e 's|^POSTGRES_PLATFORM_SUPPORT_PASSWORD=.*|POSTGRES_PLATFORM_SUPPORT_PASSWORD=ci-support-password-1234|' \
+            -e 's|^KEYCLOAK_ADMIN_PASSWORD=.*|KEYCLOAK_ADMIN_PASSWORD=ci-keycloak-admin-password-1234|' \
+            -e 's|^KEYCLOAK_DB_PASSWORD=.*|KEYCLOAK_DB_PASSWORD=ci-keycloak-db-password-1234|' \
+            -e 's|^PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=.*|PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=ci-communication-key-1234|' \
+            -e 's|^PEAK_ENVELOPE_KEY_BASE64=.*|PEAK_ENVELOPE_KEY_BASE64=cGVhay1jaS1lbnZlbG9wZS1rZXktMzItYnl0ZXMhISE=|' \
+            -e 's|^PEAK_PAYMENT_GATEWAY_CREDENTIAL=.*|PEAK_PAYMENT_GATEWAY_CREDENTIAL=ci-payment-credential-1234|' \
+            -e 's|^PEAK_PAYMENT_WEBHOOK_SECRET=.*|PEAK_PAYMENT_WEBHOOK_SECRET=ci-webhook-secret-1234|' \
+            -e 's|^PEAK_CLICKPESA_API_KEY=.*|PEAK_CLICKPESA_API_KEY=ci-clickpesa-api-key-1234|' \
+            -e 's|^PEAK_CLICKPESA_CHECKSUM_KEY=.*|PEAK_CLICKPESA_CHECKSUM_KEY=ci-clickpesa-checksum-1234|' \
+            -e 's|^PEAK_FISCAL_GATEWAY_CREDENTIAL=.*|PEAK_FISCAL_GATEWAY_CREDENTIAL=ci-fiscal-credential-1234|' \
+            -e 's|^PEAK_GUEST_IDENTITY_HASH_KEY=.*|PEAK_GUEST_IDENTITY_HASH_KEY=ci-guest-identity-hmac-key-1234567890|' \
+            -e 's|^PEAK_REPORT_STORAGE_ACCESS_KEY=.*|PEAK_REPORT_STORAGE_ACCESS_KEY=ci-report-access-key|' \
+            -e 's|^PEAK_REPORT_STORAGE_SECRET_KEY=.*|PEAK_REPORT_STORAGE_SECRET_KEY=ci-report-secret-key-1234|' \
+            "$tmp"
+          ops/scripts/validate-production-env.sh "$tmp"
+      - name: Validate scripts and observability assets
+        run: |
+          sh -n ops/scripts/*.sh
+          bash -n ops/testing/*.sh
+          python3 -m json.tool ops/keycloak/peak-realm.json >/dev/null
+          find ops/testing ops/observability -name '*.json' -print0 | \
+            xargs -0 -n1 python3 -m json.tool >/dev/null
+          python3 -c 'import glob,yaml; [yaml.safe_load(open(path)) for path in glob.glob("ops/observability/*.yaml")]'
+          ! rg -i 'phase[[:space:]-]?[1-9]' ops/observability
+      - name: Check whitespace
+        run: git diff --check
+
+  container-security:
+    name: Container security and SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Install Podman
+        run: sudo apt-get update && sudo apt-get install -y podman
+      - name: Build executable and container
+        run: |
+          ./gradlew bootJar
+          podman build -t localhost/peak:security-ci .
+          podman save --format docker-archive -o build/peak-image.tar localhost/peak:security-ci
+      - name: Scan Java, OS, filesystem, configuration, and secrets
+        run: |
+          mkdir -p build/trivy-cache build/security
+          podman run --rm -v "$PWD:/workspace:ro,Z" -v "$PWD/build:/output:Z" \
+            "$TRIVY_IMAGE" fs --cache-dir /output/trivy-cache --scanners vuln,misconfig,secret \
+            --timeout 20m --skip-version-check \
+            --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed /workspace
+          podman run --rm -v "$PWD/build:/scan:Z" "$TRIVY_IMAGE" image \
+            --timeout 20m --skip-version-check --cache-dir /scan/trivy-cache \
+            --input /scan/peak-image.tar \
             --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed
+          podman run --rm -v "$PWD/build:/scan:Z" "$TRIVY_IMAGE" image \
+            --timeout 20m --skip-version-check --cache-dir /scan/trivy-cache \
+            --input /scan/peak-image.tar \
+            --format cyclonedx --output /scan/security/peak.cdx.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: container-sbom
+          path: build/security/peak.cdx.json
 
-      - name: Prepare close-reporting acceptance environment
+  acceptance:
+    name: Core hospitality and close-reporting acceptance
+    runs-on: ubuntu-latest
+    needs: [unit-integration, operations, container-security]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Install Podman acceptance tools
         run: |
-          cp ops/production/.env.example "$RUNNER_TEMP/peak-close-reporting-acceptance.env"
+          sudo apt-get update
+          sudo apt-get install -y podman python3-venv python3-websocket jq
+          python3 -m venv "$RUNNER_TEMP/podman-compose"
+          "$RUNNER_TEMP/podman-compose/bin/pip" install --disable-pip-version-check podman-compose==1.5.0
+          echo "PODMAN_COMPOSE_PROVIDER=$RUNNER_TEMP/podman-compose/bin/podman-compose" >> "$GITHUB_ENV"
+      - name: Build acceptance image
+        run: ./gradlew bootJar && podman build -t localhost/peak:acceptance-ci .
+      - name: Prepare acceptance environment
+        run: |
+          cp ops/production/.env.example "$RUNNER_TEMP/peak-acceptance.env"
           sed -i \
             -e 's|^PEAK_IMAGE=.*|PEAK_IMAGE=localhost/peak:acceptance-ci|' \
             -e 's|^KEYCLOAK_HOSTNAME=.*|KEYCLOAK_HOSTNAME=http://keycloak:8080|' \
@@ -153,58 +258,65 @@ jobs:
             -e 's|^PEAK_REALTIME_WEBSOCKET_ALLOWED_ORIGINS=.*|PEAK_REALTIME_WEBSOCKET_ALLOWED_ORIGINS=https://localhost:5173|' \
             -e 's|^PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_BASE_URL=.*|PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_BASE_URL=http://host.containers.internal:8090|' \
             -e 's|^PEAK_ACCEPTANCE_MODE=.*|PEAK_ACCEPTANCE_MODE=true|' \
-            -e 's|^POSTGRES_MIGRATOR_PASSWORD=.*|POSTGRES_MIGRATOR_PASSWORD=close-reporting-ci-migrator-password|' \
-            -e 's|^POSTGRES_APP_PASSWORD=.*|POSTGRES_APP_PASSWORD=close-reporting-ci-application-password|' \
-            -e 's|^POSTGRES_WORKER_PASSWORD=.*|POSTGRES_WORKER_PASSWORD=close-reporting-ci-worker-password|' \
-            -e 's|^POSTGRES_PLATFORM_SUPPORT_PASSWORD=.*|POSTGRES_PLATFORM_SUPPORT_PASSWORD=close-reporting-ci-platform-support-password|' \
-            -e 's|^KEYCLOAK_ADMIN_PASSWORD=.*|KEYCLOAK_ADMIN_PASSWORD=close-reporting-ci-keycloak-admin-password|' \
-            -e 's|^KEYCLOAK_DB_PASSWORD=.*|KEYCLOAK_DB_PASSWORD=close-reporting-ci-keycloak-db-password|' \
-            -e 's|^PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=.*|PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=close-reporting-ci-communication-provider-key|' \
+            -e 's|^POSTGRES_MIGRATOR_PASSWORD=.*|POSTGRES_MIGRATOR_PASSWORD=acceptance-migrator-password|' \
+            -e 's|^POSTGRES_APP_PASSWORD=.*|POSTGRES_APP_PASSWORD=acceptance-application-password|' \
+            -e 's|^POSTGRES_WORKER_PASSWORD=.*|POSTGRES_WORKER_PASSWORD=acceptance-worker-password|' \
+            -e 's|^POSTGRES_PLATFORM_SUPPORT_PASSWORD=.*|POSTGRES_PLATFORM_SUPPORT_PASSWORD=acceptance-support-password|' \
+            -e 's|^KEYCLOAK_ADMIN_PASSWORD=.*|KEYCLOAK_ADMIN_PASSWORD=acceptance-keycloak-admin-password|' \
+            -e 's|^KEYCLOAK_DB_PASSWORD=.*|KEYCLOAK_DB_PASSWORD=acceptance-keycloak-db-password|' \
+            -e 's|^PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=.*|PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=acceptance-communication-key|' \
             -e 's|^PEAK_ENVELOPE_KEY_BASE64=.*|PEAK_ENVELOPE_KEY_BASE64=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=|' \
-            -e 's|^PEAK_PAYMENT_GATEWAY_CREDENTIAL=.*|PEAK_PAYMENT_GATEWAY_CREDENTIAL=close-reporting-ci-payment-gateway-credential|' \
-            -e 's|^PEAK_PAYMENT_WEBHOOK_SECRET=.*|PEAK_PAYMENT_WEBHOOK_SECRET=close-reporting-ci-payment-webhook-secret|' \
-            -e 's|^PEAK_CLICKPESA_API_KEY=.*|PEAK_CLICKPESA_API_KEY=close-reporting-ci-clickpesa-api-key|' \
-            -e 's|^PEAK_CLICKPESA_CHECKSUM_KEY=.*|PEAK_CLICKPESA_CHECKSUM_KEY=close-reporting-ci-clickpesa-checksum-key|' \
-            -e 's|^PEAK_FISCAL_GATEWAY_CREDENTIAL=.*|PEAK_FISCAL_GATEWAY_CREDENTIAL=close-reporting-ci-fiscal-gateway-credential|' \
-            -e 's|^PEAK_GUEST_IDENTITY_HASH_KEY=.*|PEAK_GUEST_IDENTITY_HASH_KEY=close-reporting-ci-guest-identity-hmac-key-2026|' \
-            -e 's|^PEAK_REPORT_STORAGE_ACCESS_KEY=.*|PEAK_REPORT_STORAGE_ACCESS_KEY=close-reporting-ci-report-access-key|' \
-            -e 's|^PEAK_REPORT_STORAGE_SECRET_KEY=.*|PEAK_REPORT_STORAGE_SECRET_KEY=close-reporting-ci-report-secret-key|' \
-            "$RUNNER_TEMP/peak-close-reporting-acceptance.env"
-
-      - name: Run close-reporting acceptance
+            -e 's|^PEAK_PAYMENT_GATEWAY_CREDENTIAL=.*|PEAK_PAYMENT_GATEWAY_CREDENTIAL=acceptance-payment-credential|' \
+            -e 's|^PEAK_PAYMENT_WEBHOOK_SECRET=.*|PEAK_PAYMENT_WEBHOOK_SECRET=acceptance-webhook-secret|' \
+            -e 's|^PEAK_CLICKPESA_API_KEY=.*|PEAK_CLICKPESA_API_KEY=acceptance-clickpesa-api-key|' \
+            -e 's|^PEAK_CLICKPESA_CHECKSUM_KEY=.*|PEAK_CLICKPESA_CHECKSUM_KEY=acceptance-clickpesa-checksum-key|' \
+            -e 's|^PEAK_FISCAL_GATEWAY_CREDENTIAL=.*|PEAK_FISCAL_GATEWAY_CREDENTIAL=acceptance-fiscal-credential|' \
+            -e 's|^PEAK_GUEST_IDENTITY_HASH_KEY=.*|PEAK_GUEST_IDENTITY_HASH_KEY=acceptance-guest-identity-hmac-key-2026|' \
+            -e 's|^PEAK_REPORT_STORAGE_ACCESS_KEY=.*|PEAK_REPORT_STORAGE_ACCESS_KEY=acceptance-report-access-key|' \
+            -e 's|^PEAK_REPORT_STORAGE_SECRET_KEY=.*|PEAK_REPORT_STORAGE_SECRET_KEY=acceptance-report-secret-key|' \
+            "$RUNNER_TEMP/peak-acceptance.env"
+      - name: Run API-driven acceptance journey
         env:
-          COMPOSE_PROJECT_NAME: peak-close-reporting-ci
-          ENV_FILE: ${{ runner.temp }}/peak-close-reporting-acceptance.env
-          PHASE2_BUILD_IMAGE: "false"
-          PHASE2_RESET: "true"
-          PHASE5_TENANT_PASSWORD: CloseReporting-CI-Acceptance-2026
-        run: ops/testing/run-phase5-acceptance.sh
-
-      - name: Check whitespace
-        run: git diff --check
-
-      - name: Upload close-reporting acceptance evidence
+          COMPOSE_PROJECT_NAME: peak-acceptance-ci
+          ENV_FILE: ${{ runner.temp }}/peak-acceptance.env
+          TENANT_PROPERTY_BUILD_IMAGE: "false"
+          TENANT_PROPERTY_RESET: "true"
+          CLOSE_REPORTING_TENANT_PASSWORD: Acceptance-CI-2026
+        run: ops/testing/run-close-reporting-acceptance.sh
+      - name: Upload acceptance evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: close-reporting-acceptance-evidence
-          path: build/evidence/phase5
-
-      - name: Stop close-reporting acceptance stack
+          name: hospitality-acceptance-evidence
+          path: build/evidence/close-reporting
+      - name: Stop acceptance stack
         if: always()
         env:
-          COMPOSE_PROJECT_NAME: peak-close-reporting-ci
+          COMPOSE_PROJECT_NAME: peak-acceptance-ci
         run: |
-          podman compose \
-            -p "$COMPOSE_PROJECT_NAME" \
-            --env-file "$RUNNER_TEMP/peak-close-reporting-acceptance.env" \
+          podman compose -p "$COMPOSE_PROJECT_NAME" \
+            --env-file "$RUNNER_TEMP/peak-acceptance.env" \
             -f ops/production/compose.yaml \
-            -f ops/testing/compose.phase5-acceptance.yaml \
+            -f ops/testing/compose.close-reporting.yaml \
             down -v --remove-orphans || true
 
-      - name: Upload test report
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-report
-          path: build/reports/tests/test
+  release-gate:
+    name: Required release gate
+    if: always()
+    runs-on: ubuntu-latest
+    needs:
+      - architecture-contract
+      - unit-integration
+      - migration-database
+      - operations
+      - container-security
+      - acceptance
+    steps:
+      - name: Require every release job
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          jq -e 'all(.[]; .result == "success")' <<<"$RESULTS" || {
+            echo "Release gate failed: $RESULTS" >&2
+            exit 1
+          }

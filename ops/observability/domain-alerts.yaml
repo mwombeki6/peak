@@ -1,0 +1,69 @@
+groups:
+  - name: peak-api-database-reliability
+    rules:
+      - alert: PeakApiErrorRateHigh
+        expr: sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) / clamp_min(sum(rate(http_server_requests_seconds_count[5m])), 1) > 0.02
+        for: 10m
+        labels: {severity: critical, component: api}
+        annotations: {summary: Peak API error rate exceeds two percent}
+      - alert: PeakDatabasePoolSaturated
+        expr: hikaricp_connections_active / clamp_min(hikaricp_connections_max, 1) > 0.9
+        for: 10m
+        labels: {severity: warning, component: database}
+        annotations: {summary: Database connection pool is saturated}
+      - alert: PeakOutboxDeadLettersIncreasing
+        expr: increase(peak_outbox_worker_dead_lettered_total[15m]) > 0
+        for: 2m
+        labels: {severity: critical, component: outbox}
+        annotations: {summary: Outbox events are entering the dead-letter state}
+      - alert: PeakWorkerDeliveryFailures
+        expr: increase(peak_outbox_worker_failed_total[10m]) > 5
+        for: 5m
+        labels: {severity: warning, component: worker}
+        annotations: {summary: Worker delivery failures are elevated}
+
+  - name: peak-payments-fiscal-close
+    rules:
+      - alert: PeakPaymentPollingBacklog
+        expr: peak_payment_poll_backlog > 100
+        for: 15m
+        labels: {severity: warning, component: payments}
+        annotations: {summary: Mobile-money status polling backlog is elevated}
+      - alert: PeakPaymentWebhookFailures
+        expr: peak_payment_webhook_failures > 5
+        for: 5m
+        labels: {severity: critical, component: payments}
+        annotations: {summary: Signed payment webhook processing is failing}
+      - alert: PeakFiscalBacklog
+        expr: peak_fiscal_backlog > 20
+        for: 30m
+        labels: {severity: warning, component: fiscal}
+        annotations: {summary: Fiscal submissions or corrections are backlogged}
+      - alert: PeakNightAuditLag
+        expr: peak_night_audit_blockers > 0
+        for: 2h
+        labels: {severity: warning, component: night-audit}
+        annotations: {summary: Night-audit blockers remain unresolved}
+
+  - name: peak-realtime-inventory-reporting
+    rules:
+      - alert: PeakRealtimeDeliveryFailures
+        expr: increase(peak_realtime_events_delivery_failures_total[10m]) > 0
+        for: 2m
+        labels: {severity: critical, component: realtime}
+        annotations: {summary: Realtime fanout delivery is failing}
+      - alert: PeakReportStorageErrors
+        expr: increase(peak_reporting_storage_errors_total[10m]) > 0
+        for: 2m
+        labels: {severity: critical, component: reporting}
+        annotations: {summary: Private report object storage is failing}
+      - alert: PeakReportDeliveryFailures
+        expr: increase(peak_reporting_delivery_total{result="failed"}[15m]) > 3
+        for: 5m
+        labels: {severity: warning, component: reporting}
+        annotations: {summary: Report-link delivery failures are elevated}
+      - alert: PeakReportRetentionStalled
+        expr: increase(peak_reporting_artifacts_expired_total[24h]) == 0
+        for: 26h
+        labels: {severity: warning, component: reporting}
+        annotations: {summary: Report retention cleanup has no recent activity}

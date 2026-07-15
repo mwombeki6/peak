@@ -1,5 +1,7 @@
 package com.mwombeki.peak.usermanagement.internal.web
 
+import com.mwombeki.peak.shared.exception.ApiProblemFactory
+
 import com.mwombeki.peak.usermanagement.api.AcceptTenantUserInvitationCommand
 import com.mwombeki.peak.usermanagement.api.InviteTenantUserCommand
 import com.mwombeki.peak.usermanagement.api.TenantUserInvitationAcceptanceReceipt
@@ -36,6 +38,7 @@ import org.springframework.web.server.ResponseStatusException
 @RequestMapping("/api/v1")
 class TenantUserInvitationController(
     private val invitationPort: TenantUserInvitationPort,
+    private val apiProblemFactory: ApiProblemFactory,
 ) {
     @PostMapping("/tenants/{tenantId}/users/invitations")
     fun inviteTenantUser(
@@ -109,9 +112,7 @@ class TenantUserInvitationController(
         title: String,
         detail: String,
     ): ResponseEntity<ProblemDetail> {
-        val problem = ProblemDetail.forStatusAndDetail(status, detail)
-        problem.title = title
-        return ResponseEntity.status(status).body(problem)
+        return apiProblemFactory.response(status, title, detail)
     }
 
     private fun TenantUserInvitationException.publicMessage(): String {

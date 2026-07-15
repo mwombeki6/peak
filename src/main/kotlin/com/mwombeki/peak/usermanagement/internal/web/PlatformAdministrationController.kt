@@ -1,5 +1,7 @@
 package com.mwombeki.peak.usermanagement.internal.web
 
+import com.mwombeki.peak.shared.exception.ApiProblemFactory
+
 import com.mwombeki.peak.usermanagement.api.AssignPlatformAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.AssignPlatformUserRoleCommand
 import com.mwombeki.peak.usermanagement.api.CreatePlatformRoleCommand
@@ -53,6 +55,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/v1/platform")
 class PlatformAdministrationController(
     private val platformAdministrationPort: PlatformAdministrationPort,
+    private val apiProblemFactory: ApiProblemFactory,
 ) {
     @GetMapping("/users")
     fun listPlatformUsers(): List<PlatformUserHttpResponse> {
@@ -323,9 +326,7 @@ class PlatformAdministrationController(
         title: String,
         detail: String,
     ): ResponseEntity<ProblemDetail> {
-        val problem = ProblemDetail.forStatusAndDetail(status, detail)
-        problem.title = title
-        return ResponseEntity.status(status).body(problem)
+        return apiProblemFactory.response(status, title, detail)
     }
 
     private fun RuntimeException.publicMessage(): String {

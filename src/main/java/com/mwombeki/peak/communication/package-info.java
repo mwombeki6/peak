@@ -5,6 +5,7 @@
                 "audit::api",
                 "reliability::api",
                 "shared::context",
+                "shared::exception",
                 "shared::secrets"
         }
 )

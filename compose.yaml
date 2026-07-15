@@ -8,7 +8,7 @@ services:
       - '4317'
       - '4318'
   postgres:
-    image: 'postgres:18'
+    image: 'postgres:18.4@sha256:b913fd5699b8bd23fa4b06d72ecdd939fad43b80fb8651bac06caa0e6d135cac'
     environment:
       - 'POSTGRES_DB=peak'
       - 'POSTGRES_PASSWORD=peak_migrator'

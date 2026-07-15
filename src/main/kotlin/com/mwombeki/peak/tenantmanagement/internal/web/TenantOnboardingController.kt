@@ -1,5 +1,7 @@
 package com.mwombeki.peak.tenantmanagement.internal.web
 
+import com.mwombeki.peak.shared.exception.ApiProblemFactory
+
 import com.mwombeki.peak.tenantmanagement.api.TenantOnboardingPort
 import com.mwombeki.peak.tenantmanagement.api.TenantRegisterRequest
 import com.mwombeki.peak.tenantmanagement.api.TenantResponse
@@ -20,6 +22,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/v1/platform/tenants")
 class TenantOnboardingController(
     private val tenantOnboardingPort: TenantOnboardingPort,
+    private val apiProblemFactory: ApiProblemFactory,
 ) {
     @PostMapping
     fun registerTenant(
@@ -51,11 +54,6 @@ class TenantOnboardingController(
         title: String,
         detail: String?,
     ): ResponseEntity<ProblemDetail> {
-        val problem = ProblemDetail.forStatusAndDetail(
-            status,
-            detail ?: "Tenant request failed",
-        )
-        problem.title = title
-        return ResponseEntity.status(status).body(problem)
+        return apiProblemFactory.response(status, title, detail ?: "Tenant request failed")
     }
 }
