@@ -45,7 +45,7 @@ def main():
         )
         connection.send(
             "SUBSCRIBE\n"
-            "id:phase2-acceptance\n"
+            "id:realtime-acceptance\n"
             f"destination:{destination}\n"
             "ack:auto\n\n\x00"
         )

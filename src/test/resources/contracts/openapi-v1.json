@@ -17390,6 +17390,198 @@
         }
       }
     },
+    "/api/v1/properties/{propertyId}/financial-control/cases/{caseId}/resolve" : {
+      "post" : {
+        "tags" : [ "financial-control-controller" ],
+        "summary" : "Resolve Case",
+        "description" : "Resolve Case",
+        "operationId" : "resolveCase",
+        "parameters" : [ {
+          "name" : "propertyId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "caseId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ResolveFinancialControlCaseRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/FinancialControlCaseResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/properties/{propertyId}/financial-control/cases/{caseId}/assign" : {
+      "post" : {
+        "tags" : [ "financial-control-controller" ],
+        "summary" : "Assign Case",
+        "description" : "Assign Case",
+        "operationId" : "assignCase",
+        "parameters" : [ {
+          "name" : "propertyId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "caseId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/AssignFinancialControlCaseRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/FinancialControlCaseResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/properties/{propertyId}/departments" : {
       "get" : {
         "tags" : [ "property-management-controller" ],
@@ -23704,6 +23896,256 @@
         }
       }
     },
+    "/api/v1/properties/{propertyId}/financial-control/cases" : {
+      "get" : {
+        "tags" : [ "financial-control-controller" ],
+        "summary" : "List Cases",
+        "description" : "List Cases",
+        "operationId" : "listCases",
+        "parameters" : [ {
+          "name" : "propertyId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "businessDate",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }, {
+          "name" : "status",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 100
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/FinancialControlCaseResponse"
+                  }
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/properties/{propertyId}/financial-control/cases/{caseId}" : {
+      "get" : {
+        "tags" : [ "financial-control-controller" ],
+        "summary" : "Get Case",
+        "description" : "Get Case",
+        "operationId" : "getCase",
+        "parameters" : [ {
+          "name" : "propertyId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "caseId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/FinancialControlCaseResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/properties/{propertyId}/financial-control/briefs/{businessDate}" : {
+      "get" : {
+        "tags" : [ "financial-control-controller" ],
+        "summary" : "Daily Brief",
+        "description" : "Daily Brief",
+        "operationId" : "dailyBrief",
+        "parameters" : [ {
+          "name" : "propertyId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "businessDate",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DailyControlBriefResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/platform/tenants/{id}" : {
       "get" : {
         "tags" : [ "tenant-onboarding-controller" ],
@@ -28575,6 +29017,214 @@
           }
         }
       },
+      "ResolveFinancialControlCaseRequest" : {
+        "type" : "object",
+        "properties" : {
+          "resolutionType" : {
+            "type" : "string"
+          },
+          "note" : {
+            "type" : "string"
+          },
+          "valueRecovered" : {
+            "type" : "number"
+          },
+          "valueProtected" : {
+            "type" : "number"
+          }
+        }
+      },
+      "FinancialControlCaseEventResponse" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "eventType" : {
+            "type" : "string"
+          },
+          "actorId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "payload" : {
+            "type" : "object",
+            "additionalProperties" : { }
+          },
+          "occurredAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "FinancialControlCaseResponse" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "tenantId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "propertyId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "businessDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "sourceRunId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "sourceIssueId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "issueCode" : {
+            "type" : "string"
+          },
+          "category" : {
+            "type" : "string"
+          },
+          "severity" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "quantity" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "amountAtRisk" : {
+            "type" : "number"
+          },
+          "assignedTo" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "assignedBy" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "assignedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "dueAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "resolutionType" : {
+            "type" : "string"
+          },
+          "resolutionNote" : {
+            "type" : "string"
+          },
+          "valueRecovered" : {
+            "type" : "number"
+          },
+          "valueProtected" : {
+            "type" : "number"
+          },
+          "resolvedBy" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "resolvedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "firstDetectedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "lastDetectedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "occurrenceCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "version" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "evidence" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/FinancialControlEvidenceResponse"
+            }
+          },
+          "events" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/FinancialControlCaseEventResponse"
+            }
+          },
+          "replayed" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "FinancialControlEvidenceResponse" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "evidenceType" : {
+            "type" : "string"
+          },
+          "resourceType" : {
+            "type" : "string"
+          },
+          "resourceId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "amount" : {
+            "type" : "number"
+          },
+          "payload" : {
+            "type" : "object",
+            "additionalProperties" : { }
+          },
+          "recordedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "AssignFinancialControlCaseRequest" : {
+        "type" : "object",
+        "properties" : {
+          "assigneeId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "dueAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
       "CreateDepartmentRequest" : {
         "type" : "object",
         "properties" : {
@@ -30256,6 +30906,157 @@
           "capacity" : {
             "type" : "integer",
             "format" : "int32"
+          }
+        }
+      },
+      "DailyCloseCertification" : {
+        "type" : "object",
+        "properties" : {
+          "status" : {
+            "type" : "string"
+          },
+          "runId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "snapshotId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "snapshotHash" : {
+            "type" : "string"
+          },
+          "capturedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "cleanClose" : {
+            "type" : "boolean"
+          },
+          "closeWithAcceptedExceptions" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "DailyControlBriefResponse" : {
+        "type" : "object",
+        "properties" : {
+          "propertyId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "businessDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "generatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "close" : {
+            "$ref" : "#/components/schemas/DailyCloseCertification"
+          },
+          "financialTruth" : {
+            "$ref" : "#/components/schemas/DailyFinancialTruth"
+          },
+          "revenueAssurance" : {
+            "$ref" : "#/components/schemas/DailyRevenueAssurance"
+          },
+          "actions" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/FinancialControlCaseResponse"
+            }
+          }
+        }
+      },
+      "DailyFinancialTruth" : {
+        "type" : "object",
+        "properties" : {
+          "currency" : {
+            "type" : "string"
+          },
+          "revenueRecognized" : {
+            "type" : "number"
+          },
+          "grossSales" : {
+            "type" : "number"
+          },
+          "taxTotal" : {
+            "type" : "number"
+          },
+          "roomRevenue" : {
+            "type" : "number"
+          },
+          "posRevenue" : {
+            "type" : "number"
+          },
+          "cashAndDigitalCollected" : {
+            "type" : "number"
+          },
+          "paymentsByMethod" : {
+            "type" : "object",
+            "additionalProperties" : {
+              "type" : "number"
+            }
+          },
+          "cashVariance" : {
+            "type" : "number"
+          },
+          "providerReconciliationVariance" : {
+            "type" : "number"
+          },
+          "refunds" : {
+            "type" : "number"
+          },
+          "reversals" : {
+            "type" : "number"
+          },
+          "revenueJournalDifference" : {
+            "type" : "number"
+          },
+          "paymentAllocationDifference" : {
+            "type" : "number"
+          },
+          "actualProfitCalculated" : {
+            "type" : "boolean"
+          },
+          "profitQualification" : {
+            "type" : "string"
+          }
+        }
+      },
+      "DailyRevenueAssurance" : {
+        "type" : "object",
+        "properties" : {
+          "totalCases" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "openCases" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "assignedCases" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "resolvedCases" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "acceptedCases" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "quantifiedAmountAtRisk" : {
+            "type" : "number"
+          },
+          "recordedValueRecovered" : {
+            "type" : "number"
+          },
+          "recordedValueProtected" : {
+            "type" : "number"
           }
         }
       },

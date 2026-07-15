@@ -82,7 +82,7 @@ access_token="$(
     -H "Content-Type: application/x-www-form-urlencoded" \
     --data-urlencode "grant_type=password" \
     --data-urlencode "client_id=peak-acceptance" \
-    --data-urlencode "username=phase2-tenant-admin" \
+    --data-urlencode "username=acceptance-tenant-admin" \
     --data-urlencode "password=$tenant_password" |
     jq -er '.access_token'
 )"
@@ -157,6 +157,15 @@ api POST \
 jq -e '.status == "completed" and .reportGenerationQueued == true' \
   <<<"$API_BODY" >/dev/null
 audit_date="$(jq -er '.auditDate' <<<"$API_BODY")"
+api GET "/api/v1/properties/$property_id/financial-control/briefs/$audit_date" 200
+jq -e '
+  .close.status == "certified"
+  and .close.cleanClose == true
+  and .financialTruth.actualProfitCalculated == false
+  and .revenueAssurance.openCases == 0
+  and (.actions | length) == 0
+' <<<"$API_BODY" >/dev/null
+daily_control_snapshot_hash="$(jq -er '.close.snapshotHash' <<<"$API_BODY")"
 
 daily_report_run_id=""
 close_report_run_id=""
@@ -240,6 +249,7 @@ jq -n \
   --arg closeReportRunId "$close_report_run_id" \
   --arg deliveryId "$delivery_id" \
   --arg contentHash "$daily_content_hash" \
+  --arg dailyControlSnapshotHash "$daily_control_snapshot_hash" \
   --argjson requests "$(jq '.run.stats.requests' "$NEWMAN_REPORT")" \
   --argjson assertions "$(jq '.run.stats.assertions' "$NEWMAN_REPORT")" \
   '{
@@ -253,6 +263,9 @@ jq -n \
     closeReportRunId: $closeReportRunId,
     deliveryId: $deliveryId,
     contentHash: $contentHash,
+    dailyControlSnapshotHash: $dailyControlSnapshotHash,
+    dailyFinancialTruthCertified: true,
+    actualProfitClaimed: false,
     privateObjectRetrieved: true,
     pdfMagicValidated: true,
     contentHashValidated: true,

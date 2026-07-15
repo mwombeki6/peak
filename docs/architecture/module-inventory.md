@@ -17,7 +17,7 @@ written under `build/spring-modulith-docs` by `ModulithDocumentationTests`.
 | `integrations` | provider adapters only | No active business table mutations; deferred channel/edge tables are dormant | consumes provider events | payment, fiscal, reservation and reporting SPIs |
 | `inventory` | `InventoryPort`, close snapshot port | Items, locations, stock, movements, recipes and low-stock crossings | `inventory.*` / `internal`, `realtime` | property API and POS-owned menu reads by documented recipe contract |
 | `maintenance` | `MaintenancePort`, close snapshot port | Requests, work orders, room blocks and windows | `maintenance.*` / `internal`, `realtime` | property API |
-| `nightaudit` | `NightAuditPort`, close snapshot port | Runs, issues and immutable close snapshots | `night_audit.*`, `report.generation.requested` / `internal`, `reporting`, `realtime` | published close snapshot ports only |
+| `nightaudit` | `NightAuditPort`, close snapshot port, `FinancialControlPort` | Runs, issues, immutable close snapshots, financial-control cases, evidence and events | `night_audit.*`, `financial_control.*`, `report.generation.requested` / `internal`, `reporting`, `realtime` | module close-summary APIs and user-management staff directory |
 | `payment` | `PaymentPort`, status/webhook ports, provider SPI | Cash sessions, provider accounts, transactions, webhooks and reconciliation | `payment.*` / `payment`, `internal`, `realtime` | billing API |
 | `platformgovernance` | `TenantGovernancePort` | Platform operations, health, incident and support tables | `platform.tenant.*` / `platform` | tenant lifecycle and platform authorization APIs |
 | `pos` | POS status/configuration ports | Outlets, menus, sessions, orders, tickets and settlement snapshots | `pos.*` / `internal`, `realtime` | billing, payment, inventory and property APIs |
@@ -29,7 +29,7 @@ written under `build/spring-modulith-docs` by `ModulithDocumentationTests`.
 | `reservations` | reservation, guest identity and close snapshot ports | Guests, reservations, room nights, policies, rate and availability state | `reservations.*` / `internal`, `realtime` | billing API |
 | `shared` | `context`, `exception`, `outbound`, `secrets`, `security`, `time` | Shared catalogs and generic workflow metadata only | none | no module dependencies |
 | `tenantmanagement` | onboarding, administration, lifecycle mutation and module configuration ports | Tenants, profiles, plans, modules, lifecycle and verification | `tenant.*`, `platform.tenants.*` / `platform`, `internal` | user-management authorization API |
-| `usermanagement` | authorization, platform/tenant/property RBAC, invitation and lifecycle ports | Users, identities, RBAC, access matrix, sessions and break-glass grants | administration and identity events / `platform`, `internal`, `communication` | audit and reliability APIs |
+| `usermanagement` | authorization, platform/tenant/property RBAC, invitation, lifecycle and property staff-directory ports | Users, identities, RBAC, access matrix, sessions and break-glass grants | administration and identity events / `platform`, `internal`, `communication` | audit and reliability APIs |
 
 Runtime modes are deliberately separate: `api` serves HTTP and never claims
 outbox work; `worker` claims outbox work and never runs Flyway; `migration` runs

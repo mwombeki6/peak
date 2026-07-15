@@ -46,7 +46,7 @@ access_token="$(
     -H "Content-Type: application/x-www-form-urlencoded" \
     --data-urlencode "grant_type=password" \
     --data-urlencode "client_id=peak-acceptance" \
-    --data-urlencode "username=phase2-tenant-admin" \
+    --data-urlencode "username=acceptance-tenant-admin" \
     --data-urlencode "password=$tenant_password" |
     jq -er '.access_token'
 )"

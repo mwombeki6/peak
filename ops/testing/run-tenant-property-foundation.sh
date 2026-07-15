@@ -217,14 +217,14 @@ fi
 root_password="${TENANT_PROPERTY_ROOT_PASSWORD:-$(random_password)}"
 tenant_password="${TENANT_PROPERTY_TENANT_PASSWORD:-$(random_password)}"
 other_password="${TENANT_PROPERTY_OTHER_PASSWORD:-$(random_password)}"
-root_subject="$(ensure_keycloak_user "phase2-platform-root" "phase2.root@example.com" "$root_password")"
-tenant_subject="$(ensure_keycloak_user "phase2-tenant-admin" "phase2.tenant@example.com" "$tenant_password")"
-other_subject="$(ensure_keycloak_user "phase2-other-admin" "phase2.other@example.com" "$other_password")"
+root_subject="$(ensure_keycloak_user "acceptance-platform-root" "acceptance.root@example.com" "$root_password")"
+tenant_subject="$(ensure_keycloak_user "acceptance-tenant-admin" "acceptance.tenant@example.com" "$tenant_password")"
+other_subject="$(ensure_keycloak_user "acceptance-other-admin" "acceptance.other@example.com" "$other_password")"
 
 "${compose[@]}" --profile bootstrap run --rm --no-deps \
   -e PEAK_PLATFORM_BOOTSTRAP_ENABLED=true \
   -e PEAK_PLATFORM_BOOTSTRAP_FULL_NAME="Foundation Platform Root" \
-  -e PEAK_PLATFORM_BOOTSTRAP_EMAIL="phase2.root@example.com" \
+  -e PEAK_PLATFORM_BOOTSTRAP_EMAIL="acceptance.root@example.com" \
   -e PEAK_PLATFORM_BOOTSTRAP_ISSUER="$PEAK_SECURITY_JWT_ISSUER_URI" \
   -e PEAK_PLATFORM_BOOTSTRAP_SUBJECT="$root_subject" \
   peak-bootstrap
@@ -239,9 +239,9 @@ fi
 "${compose[@]}" up -d peak-api peak-worker
 wait_http "$BASE_URL/actuator/health"
 
-platform_token="$(token_for "phase2-platform-root" "$root_password")"
-tenant_token_unlinked="$(token_for "phase2-tenant-admin" "$tenant_password")"
-other_token_unlinked="$(token_for "phase2-other-admin" "$other_password")"
+platform_token="$(token_for "acceptance-platform-root" "$root_password")"
+tenant_token_unlinked="$(token_for "acceptance-tenant-admin" "$tenant_password")"
+other_token_unlinked="$(token_for "acceptance-other-admin" "$other_password")"
 
 api GET "/api/v1/platform/permissions" "$platform_token" 200
 jq -e 'map(.code) | index("platform.security.manage") != null' <<<"$API_BODY" >/dev/null
@@ -249,13 +249,13 @@ jq -e 'map(.code) | index("platform.security.manage") != null' <<<"$API_BODY" >/
 tenant_payload="$(
   jq -nc '{
     name: "Foundation Acceptance Hotel Group",
-    slug: "phase2-acceptance-group",
+    slug: "tenant-property-acceptance-group",
     planId: "20202020-0000-0000-0000-000000000001",
     legalName: "Foundation Acceptance Hotel Group Limited",
     tradingName: "Foundation Acceptance",
     entityType: "limited_company",
     businessRegistrationNumber: "P2-ACCEPTANCE-001",
-    businessEmail: "business.phase2@example.com",
+    businessEmail: "business.acceptance@example.com",
     businessPhone: "+255712345678",
     registeredAddress: {
       line1: "Foundation Road",
@@ -280,13 +280,13 @@ api POST "/api/v1/platform/tenants/$tenant_id/administrators" "$platform_token" 
       --arg subject "$tenant_subject" \
       '{
         fullName: "Foundation Tenant Administrator",
-        email: "phase2.tenant@example.com",
+        email: "acceptance.tenant@example.com",
         issuer: $issuer,
         subject: $subject
       }'
   )"
 tenant_user_id="$(jq -r '.tenantUserId' <<<"$API_BODY")"
-tenant_token="$(token_for "phase2-tenant-admin" "$tenant_password")"
+tenant_token="$(token_for "acceptance-tenant-admin" "$tenant_password")"
 
 api POST "/api/v1/platform/tenants/$tenant_id/profile/verify" "$platform_token" 200 \
   "tenant-profile-verify"
@@ -361,7 +361,7 @@ api POST "/api/v1/properties/$property_id/rates" "$tenant_token" 200 \
       '{roomTypeId:$roomType,amount:175000,currency:"TZS"}'
   )"
 
-contact_email="director.phase2@example.com"
+contact_email="director.acceptance@example.com"
 api POST "/api/v1/communication/contacts" "$tenant_token" 200 \
   "contact-create" "$(
     jq -nc --arg email "$contact_email" \
@@ -398,7 +398,7 @@ api POST "/api/v1/communication/contacts/$contact_id/roles" "$tenant_token" 200 
 api POST "/api/v1/communication/contacts/$contact_id/channels/$channel_id/consents" \
   "$tenant_token" 200 "contact-consent" '{
     "purpose":"operational_reports",
-    "policyVersion":"phase2-v1",
+    "policyVersion":"acceptance-v1",
     "status":"active"
   }'
 api POST "/api/v1/communication/report-recipients" "$tenant_token" 200 \
@@ -449,7 +449,7 @@ python3 "$ROOT_DIR/ops/testing/websocket-acceptance.py" \
   --url "ws://localhost:8080/ws-connect" \
   --token "$tenant_token" \
   --origin "$ORIGIN" \
-  --correlation-id "phase2-websocket-authorized" \
+  --correlation-id "tenant-property-websocket-authorized" \
   --tenant-id "$tenant_id" \
   --property-id "$property_id" >/dev/null
 
@@ -469,11 +469,11 @@ rm -f "$sse_output"
 other_payload="$(
   jq -nc '{
     name:"Foundation Other Tenant",
-    slug:"phase2-other-tenant",
+    slug:"acceptance-other-tenant",
     planId:"20202020-0000-0000-0000-000000000001",
     legalName:"Foundation Other Tenant Limited",
     entityType:"limited_company",
-    businessEmail:"business.other.phase2@example.com",
+    businessEmail:"business.other.acceptance@example.com",
     businessPhone:"+255713456789",
     countryCode:"TZ",
     currencyCode:"TZS"
@@ -489,12 +489,12 @@ api POST "/api/v1/platform/tenants/$other_tenant_id/administrators" \
       --arg subject "$other_subject" \
       '{
         fullName:"Other Tenant Administrator",
-        email:"phase2.other@example.com",
+        email:"acceptance.other@example.com",
         issuer:$issuer,
         subject:$subject
       }'
   )"
-other_token="$(token_for "phase2-other-admin" "$other_password")"
+other_token="$(token_for "acceptance-other-admin" "$other_password")"
 
 api GET "/api/v1/properties/$property_id" "$other_token" 403
 api GET "/api/v1/platform/permissions" "$tenant_token" 403
@@ -502,7 +502,7 @@ python3 "$ROOT_DIR/ops/testing/websocket-acceptance.py" \
   --url "ws://localhost:8080/ws-connect" \
   --token "$other_token" \
   --origin "$ORIGIN" \
-  --correlation-id "phase2-websocket-cross-tenant-denied" \
+  --correlation-id "tenant-property-websocket-cross-tenant-denied" \
   --tenant-id "$tenant_id" \
   --property-id "$property_id" \
   --expect-denied >/dev/null
@@ -516,7 +516,7 @@ realtime_denial_audit_count="$(
         SELECT count(*)
         FROM audit_logs
         WHERE action = 'realtime.subscription_denied'
-          AND correlation_id = 'phase2-websocket-cross-tenant-denied'
+          AND correlation_id = 'tenant-property-websocket-cross-tenant-denied'
           AND tenant_id = '$other_tenant_id'::uuid
           AND new_values ->> 'target_tenant_id' = '$tenant_id';
       " |

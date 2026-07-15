@@ -21,7 +21,7 @@
       "script": {
         "type": "text/javascript",
         "exec": [
-          "pm.variables.set('correlationId', pm.variables.replaceIn('phase2-postman-{{$guid}}'));"
+          "pm.variables.set('correlationId', pm.variables.replaceIn('tenant-property-postman-{{$guid}}'));"
         ]
       }
     }
@@ -31,9 +31,9 @@
     { "key": "keycloakUrl", "value": "http://localhost:8081" },
     { "key": "realm", "value": "peak" },
     { "key": "clientId", "value": "peak-acceptance" },
-    { "key": "platformUsername", "value": "phase2-platform-root" },
+    { "key": "platformUsername", "value": "acceptance-platform-root" },
     { "key": "platformPassword", "value": "" },
-    { "key": "tenantUsername", "value": "phase2-tenant-admin" },
+    { "key": "tenantUsername", "value": "acceptance-tenant-admin" },
     { "key": "tenantPassword", "value": "" },
     { "key": "platformToken", "value": "" },
     { "key": "tenantToken", "value": "" },
@@ -174,7 +174,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"fullName\": \"Postman Tenant Administrator\",\n  \"email\": \"phase2.tenant@example.com\",\n  \"issuer\": \"http://keycloak:8080/realms/peak\",\n  \"subject\": \"{{tenantSubject}}\"\n}"
+              "raw": "{\n  \"fullName\": \"Postman Tenant Administrator\",\n  \"email\": \"acceptance.tenant@example.com\",\n  \"issuer\": \"http://keycloak:8080/realms/peak\",\n  \"subject\": \"{{tenantSubject}}\"\n}"
             },
             "url": "{{baseUrl}}/api/v1/platform/tenants/{{tenantId}}/administrators"
           }
@@ -493,7 +493,7 @@
               { "key": "X-Correlation-Id", "value": "{{correlationId}}" },
               { "key": "Idempotency-Key", "value": "postman-consent-001" }
             ],
-            "body": { "mode": "raw", "raw": "{\"purpose\":\"operational_reports\",\"policyVersion\":\"phase2-v1\",\"status\":\"active\"}" },
+            "body": { "mode": "raw", "raw": "{\"purpose\":\"operational_reports\",\"policyVersion\":\"acceptance-v1\",\"status\":\"active\"}" },
             "url": "{{baseUrl}}/api/v1/communication/contacts/{{contactId}}/channels/{{channelId}}/consents"
           }
         },

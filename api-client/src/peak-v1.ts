@@ -3080,6 +3080,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/properties/{propertyId}/financial-control/cases/{caseId}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve Case
+         * @description Resolve Case
+         */
+        post: operations["resolveCase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/properties/{propertyId}/financial-control/cases/{caseId}/assign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Assign Case
+         * @description Assign Case
+         */
+        post: operations["assignCase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/properties/{propertyId}/departments": {
         parameters: {
             query?: never;
@@ -4530,6 +4570,66 @@ export interface paths {
          * @description Get Receipt
          */
         get: operations["getReceipt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/properties/{propertyId}/financial-control/cases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Cases
+         * @description List Cases
+         */
+        get: operations["listCases"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/properties/{propertyId}/financial-control/cases/{caseId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Case
+         * @description Get Case
+         */
+        get: operations["getCase"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/properties/{propertyId}/financial-control/briefs/{businessDate}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Daily Brief
+         * @description Daily Brief
+         */
+        get: operations["dailyBrief"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6337,6 +6437,95 @@ export interface components {
             default?: boolean;
             active?: boolean;
         };
+        ResolveFinancialControlCaseRequest: {
+            resolutionType?: string;
+            note?: string;
+            valueRecovered?: number;
+            valueProtected?: number;
+        };
+        FinancialControlCaseEventResponse: {
+            /** Format: uuid */
+            id?: string;
+            eventType?: string;
+            /** Format: uuid */
+            actorId?: string;
+            payload?: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            occurredAt?: string;
+        };
+        FinancialControlCaseResponse: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            tenantId?: string;
+            /** Format: uuid */
+            propertyId?: string;
+            /** Format: date */
+            businessDate?: string;
+            /** Format: uuid */
+            sourceRunId?: string;
+            /** Format: uuid */
+            sourceIssueId?: string;
+            issueCode?: string;
+            category?: string;
+            severity?: string;
+            title?: string;
+            description?: string;
+            status?: string;
+            currency?: string;
+            /** Format: int32 */
+            quantity?: number;
+            amountAtRisk?: number;
+            /** Format: uuid */
+            assignedTo?: string;
+            /** Format: uuid */
+            assignedBy?: string;
+            /** Format: date-time */
+            assignedAt?: string;
+            /** Format: date-time */
+            dueAt?: string;
+            resolutionType?: string;
+            resolutionNote?: string;
+            valueRecovered?: number;
+            valueProtected?: number;
+            /** Format: uuid */
+            resolvedBy?: string;
+            /** Format: date-time */
+            resolvedAt?: string;
+            /** Format: date-time */
+            firstDetectedAt?: string;
+            /** Format: date-time */
+            lastDetectedAt?: string;
+            /** Format: int32 */
+            occurrenceCount?: number;
+            /** Format: int32 */
+            version?: number;
+            evidence?: components["schemas"]["FinancialControlEvidenceResponse"][];
+            events?: components["schemas"]["FinancialControlCaseEventResponse"][];
+            replayed?: boolean;
+        };
+        FinancialControlEvidenceResponse: {
+            /** Format: uuid */
+            id?: string;
+            evidenceType?: string;
+            resourceType?: string;
+            /** Format: uuid */
+            resourceId?: string;
+            amount?: number;
+            payload?: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            recordedAt?: string;
+        };
+        AssignFinancialControlCaseRequest: {
+            /** Format: uuid */
+            assigneeId?: string;
+            /** Format: date-time */
+            dueAt?: string;
+        };
         CreateDepartmentRequest: {
             name?: string;
             code?: string;
@@ -7003,6 +7192,65 @@ export interface components {
             name?: string;
             /** Format: int32 */
             capacity?: number;
+        };
+        DailyCloseCertification: {
+            status?: string;
+            /** Format: uuid */
+            runId?: string;
+            /** Format: uuid */
+            snapshotId?: string;
+            snapshotHash?: string;
+            /** Format: date-time */
+            capturedAt?: string;
+            cleanClose?: boolean;
+            closeWithAcceptedExceptions?: boolean;
+        };
+        DailyControlBriefResponse: {
+            /** Format: uuid */
+            propertyId?: string;
+            /** Format: date */
+            businessDate?: string;
+            /** Format: date-time */
+            generatedAt?: string;
+            close?: components["schemas"]["DailyCloseCertification"];
+            financialTruth?: components["schemas"]["DailyFinancialTruth"];
+            revenueAssurance?: components["schemas"]["DailyRevenueAssurance"];
+            actions?: components["schemas"]["FinancialControlCaseResponse"][];
+        };
+        DailyFinancialTruth: {
+            currency?: string;
+            revenueRecognized?: number;
+            grossSales?: number;
+            taxTotal?: number;
+            roomRevenue?: number;
+            posRevenue?: number;
+            cashAndDigitalCollected?: number;
+            paymentsByMethod?: {
+                [key: string]: number;
+            };
+            cashVariance?: number;
+            providerReconciliationVariance?: number;
+            refunds?: number;
+            reversals?: number;
+            revenueJournalDifference?: number;
+            paymentAllocationDifference?: number;
+            actualProfitCalculated?: boolean;
+            profitQualification?: string;
+        };
+        DailyRevenueAssurance: {
+            /** Format: int32 */
+            totalCases?: number;
+            /** Format: int32 */
+            openCases?: number;
+            /** Format: int32 */
+            assignedCases?: number;
+            /** Format: int32 */
+            resolvedCases?: number;
+            /** Format: int32 */
+            acceptedCases?: number;
+            quantifiedAmountAtRisk?: number;
+            recordedValueRecovered?: number;
+            recordedValueProtected?: number;
         };
         DepartmentResponse: {
             /** Format: uuid */
@@ -19868,6 +20116,138 @@ export interface operations {
             };
         };
     };
+    resolveCase: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                propertyId: string;
+                caseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveFinancialControlCaseRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["FinancialControlCaseResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    assignCase: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                propertyId: string;
+                caseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignFinancialControlCaseRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["FinancialControlCaseResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
     listDepartments: {
         parameters: {
             query?: never;
@@ -24691,6 +25071,186 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["FiscalReceiptResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    listCases: {
+        parameters: {
+            query?: {
+                businessDate?: string;
+                status?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                propertyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["FinancialControlCaseResponse"][];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    getCase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                propertyId: string;
+                caseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["FinancialControlCaseResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    dailyBrief: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                propertyId: string;
+                businessDate: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["DailyControlBriefResponse"];
                 };
             };
             /** @description Invalid request */

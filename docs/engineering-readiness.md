@@ -1,17 +1,17 @@
 # Engineering Readiness Record
 
 This record consolidates the six independently releasable hardening slices for
-the existing V1 backend. Applied migrations `V1–V67` were not modified. No
-unverified database change was introduced; future schema changes begin at
-`V68`.
+the existing V1 backend. Applied migrations `V1–V67` were not modified. The
+additive `V68` migration introduces the Daily Control financial-control case,
+evidence, permission, and route contracts.
 
 ## Slice closure
 
 | Slice | Implemented closure | Authoritative gate |
 |---|---|---|
-| Architecture and boundaries | Canonical 22-module inventory, 227-table ownership catalog, SQL mutation ownership enforcement, named tenant lifecycle/module mutation ports, audit bootstrap port, generated Modulith canvases | `ModulithArchitectureTests`, `ModulithDocumentationTests`, `DatabaseOwnershipArchitectureTests` |
-| Core hospitality journey | Product-named tenant/property, stay/finance, core-hospitality, and close/reporting runners; API/worker-only business transitions; signed simulators; deterministic evidence | `run-core-hospitality-journey.sh`, `run-close-reporting-acceptance.sh` |
-| Data integrity and migrations | Immutable `V1–V67`, clean/current validation, populated V49/V53/V67 paths, PostgreSQL 16/18 CI matrix, runtime-role and RLS gates | migration/database CI matrix and integration tests |
+| Architecture and boundaries | Canonical 22-module inventory, 230-table ownership catalog, SQL mutation ownership enforcement, named tenant lifecycle/module mutation and property staff-directory ports, audit bootstrap port, generated Modulith canvases | `ModulithArchitectureTests`, `ModulithDocumentationTests`, `DatabaseOwnershipArchitectureTests` |
+| Core hospitality journey | Product-named tenant/property, stay/finance, core-hospitality, and close/reporting runners; API/worker-only business transitions; Daily Control Brief; accountable leakage cases; signed simulators; deterministic evidence | `run-core-hospitality-journey.sh`, `run-close-reporting-acceptance.sh` |
+| Data integrity and migrations | Immutable `V1–V67`, additive V68, clean/current validation, populated V49/V53/V67 paths, PostgreSQL 16/18 CI matrix, runtime-role and RLS gates | migration/database CI matrix and integration tests |
 | Operational readiness | Separate migration/API/worker/bootstrap topology, pinned production images, domain dashboards/alerts, backup/restore drill, recovery/degradation/rotation procedures | operations CI job and `run-backup-restore-drill.sh` |
 | API and contracts | Checked-in OpenAPI V1 baseline, additive compatibility test, effective bearer/webhook security assertions, linting, generated TypeScript client, RFC 9457 problem correlation and redaction | architecture/contract CI job |
 | Release and supply chain | Parallel required CI jobs, Node 24-compatible actions, direct Podman GHCR login, Trivy filesystem/JAR/OS/config/secret gates, SBOM, provenance attestation, digest equality checks, semantic `v1.x.y` releases | required release gate and container release workflow |
@@ -22,7 +22,7 @@ unverified database change was introduced; future schema changes begin at
   runtime operations now use the owning module's named API. No open critical
   finding remains in the reviewed local scope.
 - High: populated migration upgrades, runtime role boundaries, outbox/replay,
-  recovery, and canonical acceptance gates are release requirements. No open
+  recovery, financial-control recurrence, and canonical acceptance gates are release requirements. No open
   high finding remains in the reviewed local scope.
 - Medium: module/table documentation, API lint/client generation, problem-detail
   sanitization, domain observability, product naming, and test gaps were closed.
@@ -41,3 +41,8 @@ workflow URL, merge commit, and GHCR manifest digest. PR/merge identifiers and
 the published digest are populated by GitHub after these local changes are
 committed, reviewed, merged, and published; they are intentionally not
 fabricated in this local record.
+
+The Daily Control Brief deliberately reports certified revenue, collections,
+variance, leakage exposure, and recorded recovery/protection outcomes. It sets
+`actualProfitCalculated=false` until complete operating-cost coverage can
+support an honest profit calculation.

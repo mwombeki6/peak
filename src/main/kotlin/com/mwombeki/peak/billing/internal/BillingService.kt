@@ -169,9 +169,13 @@ class BillingService(
         propertyId: UUID,
     ): BillingNightAuditSummary {
         requireActiveContext(tenantId, propertyId)
-        val openUnpaid = count(
+        val openUnpaid = jdbcTemplate.query(
             """
-            SELECT COUNT(*)
+            SELECT COUNT(*) AS unpaid_count,
+                   round(COALESCE(sum(total_amount - total_paid), 0), 2)
+                       AS unpaid_balance,
+                   COALESCE(array_agg(id ORDER BY id), ARRAY[]::uuid[])
+                       AS folio_ids
             FROM folios
             WHERE tenant_id = ?
               AND property_id = ?
@@ -179,9 +183,17 @@ class BillingService(
               AND total_amount > total_paid
               AND deleted_at IS NULL
             """.trimIndent(),
+            { rs, _ ->
+                Triple(
+                    rs.getInt("unpaid_count"),
+                    rs.getBigDecimal("unpaid_balance").money(),
+                    (rs.getArray("folio_ids").array as Array<*>)
+                        .map { it as UUID },
+                )
+            },
             tenantId,
             propertyId,
-        )
+        ).single()
         val missingInvoice = count(
             """
             SELECT COUNT(*)
@@ -231,7 +243,9 @@ class BillingService(
             propertyId,
         )
         return BillingNightAuditSummary(
-            openUnpaidFolios = openUnpaid,
+            openUnpaidFolios = openUnpaid.first,
+            openUnpaidBalance = openUnpaid.second,
+            openUnpaidFolioIds = openUnpaid.third,
             foliosMissingIssuedInvoice = missingInvoice,
             pendingFolioPayments = pendingPayments,
             issuedInvoiceIds = issuedInvoiceIds,

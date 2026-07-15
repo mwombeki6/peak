@@ -51,6 +51,9 @@ event_packages,deferred,dormant,no-runtime-writes
 event_spaces,deferred,dormant,no-runtime-writes
 events,deferred,dormant,no-runtime-writes
 feature_flags,deferred,dormant,no-runtime-writes
+financial_control_case_events,nightaudit,active,nightaudit::api-or-internal-owner
+financial_control_cases,nightaudit,active,nightaudit::api-or-internal-owner
+financial_control_evidence,nightaudit,active,nightaudit::api-or-internal-owner
 fiscal_corrections,fiscal,active,fiscal::api-or-internal-owner
 fiscal_document_mappings,fiscal,active,fiscal::api-or-internal-owner
 fiscal_provider_configs,fiscal,active,fiscal::api-or-internal-owner

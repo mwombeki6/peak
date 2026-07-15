@@ -9,16 +9,21 @@ import java.time.Instant
 import java.nio.charset.StandardCharsets
 import java.util.HexFormat
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import kotlin.test.AfterTest
 import kotlin.test.Test
+import kotlin.test.assertFailsWith
 import org.hamcrest.Matchers.hasItem
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.annotation.Import
 import org.springframework.http.MediaType
+import org.springframework.dao.DataAccessException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
@@ -56,6 +61,90 @@ class Phase3StayLifecycleIntegrationTests {
             jdbcTemplate.update("DELETE FROM outbox_events WHERE tenant_id = ?", tenantId)
         }
         createdTenantIds.clear()
+    }
+
+    @Test
+    fun concurrentNightAuditAttemptsShareOneDailyControlCase() {
+        val fixture = phase3Fixture()
+        insertAuthorizedFixture(fixture)
+        jdbcTemplate.update(
+            """
+            INSERT INTO folios (
+                id, tenant_id, property_id, folio_type, status,
+                currency_code, total_amount, total_paid
+            ) VALUES (?, ?, ?, 'guest', 'open', 'TZS', 75.00, 0.00)
+            """.trimIndent(),
+            UUID.randomUUID(),
+            fixture.tenantId,
+            fixture.propertyId,
+        )
+        val ready = CountDownLatch(2)
+        val start = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val results = (1..2).map { attempt ->
+                executor.submit<Int> {
+                    ready.countDown()
+                    check(start.await(10, TimeUnit.SECONDS))
+                    mockMvc.perform(
+                        post(
+                            "/api/v1/properties/${fixture.propertyId}/night-audit",
+                        )
+                            .secureJson(
+                                """{"auditDate":"${LocalDate.now()}"}""",
+                            )
+                            .headersFor(
+                                fixture,
+                                "corr-concurrent-night-audit-$attempt",
+                                "idem-concurrent-night-audit-" +
+                                    "${fixture.tenantId}-$attempt",
+                            ),
+                    ).andReturn().response.status
+                }
+            }
+            check(ready.await(10, TimeUnit.SECONDS))
+            start.countDown()
+            kotlin.test.assertEquals(
+                listOf(200, 200),
+                results.map { it.get(30, TimeUnit.SECONDS) }.sorted(),
+            )
+        } finally {
+            executor.shutdownNow()
+        }
+        kotlin.test.assertEquals(
+            1,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*)
+                FROM financial_control_cases
+                WHERE tenant_id = ?
+                  AND property_id = ?
+                  AND business_date = ?
+                  AND issue_code = 'open_unpaid_folios'
+                """.trimIndent(),
+                Int::class.java,
+                fixture.tenantId,
+                fixture.propertyId,
+                LocalDate.now(),
+            ),
+        )
+        kotlin.test.assertEquals(
+            2,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT occurrence_count
+                FROM financial_control_cases
+                WHERE tenant_id = ?
+                  AND property_id = ?
+                  AND business_date = ?
+                  AND issue_code = 'open_unpaid_folios'
+                """.trimIndent(),
+                Int::class.java,
+                fixture.tenantId,
+                fixture.propertyId,
+                LocalDate.now(),
+            ),
+        )
     }
 
     @Test
@@ -354,6 +443,22 @@ class Phase3StayLifecycleIntegrationTests {
             .andExpect(jsonPath("$.payloadHash").isString)
             .andExpect(jsonPath("$.revenueJournalDifference").value(0.0))
             .andExpect(jsonPath("$.paymentAllocationDifference").value(0.0))
+        mockMvc.perform(
+            get(
+                "/api/v1/properties/${fixture.propertyId}/financial-control/" +
+                    "briefs/$today",
+            ).headersFor(fixture, "corr-daily-control-brief"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.close.status").value("certified"))
+            .andExpect(jsonPath("$.close.snapshotHash").isString)
+            .andExpect(jsonPath("$.close.cleanClose").value(true))
+            .andExpect(
+                jsonPath("$.financialTruth.actualProfitCalculated")
+                    .value(false),
+            )
+            .andExpect(jsonPath("$.revenueAssurance.totalCases").value(0))
+            .andExpect(jsonPath("$.actions.length()").value(0))
     }
 
     @Test
@@ -1276,6 +1381,144 @@ class Phase3StayLifecycleIntegrationTests {
                 runId,
             ),
         )
+        val controlCases = mockMvc.perform(
+            get(
+                "/api/v1/properties/${fixture.propertyId}/financial-control/" +
+                    "cases?businessDate=$today",
+            ).headersFor(fixture, "corr-unpaid-control-cases"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(
+                jsonPath("$[?(@.issueCode == 'open_unpaid_folios')]")
+                    .exists(),
+            )
+            .andExpect(
+                jsonPath(
+                    "$[?(@.issueCode == 'open_unpaid_folios')].amountAtRisk",
+                ).value(hasItem(118.0)),
+            )
+            .andReturn()
+        val controlCaseId = UUID.fromString(
+            Regex(
+                """"id"\s*:\s*"([^"]+)"[^}]*"issueCode"\s*:\s*"open_unpaid_folios"""",
+            ).find(controlCases.response.contentAsString)!!
+                .groupValues[1],
+        )
+        mockMvc.perform(
+            post(
+                "/api/v1/properties/${fixture.propertyId}/financial-control/" +
+                    "cases/$controlCaseId/assign",
+            )
+                .secureJson("""{"assigneeId":"${fixture.tenantUserId}"}""")
+                .headersFor(
+                    fixture,
+                    "corr-unpaid-case-assign",
+                    "idem-unpaid-case-assign-${fixture.tenantId}",
+                ),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.status").value("assigned"))
+            .andExpect(
+                jsonPath("$.assignedTo")
+                    .value(fixture.tenantUserId.toString()),
+            )
+        mockMvc.perform(
+            post(
+                "/api/v1/properties/${fixture.propertyId}/financial-control/" +
+                    "cases/$controlCaseId/resolve",
+            )
+                .secureJson(
+                    """
+                    {
+                      "resolutionType": "source_corrected",
+                      "note": "Operator reports that the unpaid folio was corrected"
+                    }
+                    """.trimIndent(),
+                )
+                .headersFor(
+                    fixture,
+                    "corr-unpaid-case-resolve",
+                    "idem-unpaid-case-resolve-${fixture.tenantId}",
+                ),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.status").value("resolved"))
+        mockMvc.perform(
+            post("/api/v1/properties/${fixture.propertyId}/night-audit")
+                .secureJson("""{"auditDate":"$today"}""")
+                .headersFor(
+                    fixture,
+                    "corr-unpaid-night-audit-recheck",
+                    "idem-unpaid-night-audit-recheck-${fixture.tenantId}",
+                ),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.status").value("blocked"))
+        mockMvc.perform(
+            get(
+                "/api/v1/properties/${fixture.propertyId}/financial-control/" +
+                    "cases/$controlCaseId",
+            ).headersFor(fixture, "corr-unpaid-control-case-detail"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.status").value("open"))
+            .andExpect(jsonPath("$.occurrenceCount").value(2))
+            .andExpect(jsonPath("$.evidence.length()").value(4))
+            .andExpect(jsonPath("$.events.length()").value(4))
+        val evidenceId = requireNotNull(
+            jdbcTemplate.queryForObject(
+                """
+                SELECT id FROM financial_control_evidence
+                WHERE tenant_id = ? AND case_id = ?
+                ORDER BY recorded_at, id LIMIT 1
+                """.trimIndent(),
+                UUID::class.java,
+                fixture.tenantId,
+                controlCaseId,
+            ),
+        )
+        assertFailsWith<DataAccessException> {
+            jdbcTemplate.update(
+                "UPDATE financial_control_evidence SET payload = '{}' WHERE id = ?",
+                evidenceId,
+            )
+        }
+        val secondPropertyId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO properties (id, tenant_id, name, status, is_active)
+            VALUES (?, ?, 'Control Isolation Property', 'active', true)
+            """.trimIndent(),
+            secondPropertyId,
+            fixture.tenantId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO property_modules (
+                tenant_id, property_id, module_id, is_enabled, is_configured
+            ) VALUES (?, ?, 'night_audit', true, true)
+            """.trimIndent(),
+            fixture.tenantId,
+            secondPropertyId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO user_property_roles (
+                user_id, property_id, role_id, tenant_id
+            ) VALUES (?, ?, ?, ?)
+            """.trimIndent(),
+            fixture.tenantUserId,
+            secondPropertyId,
+            fixture.propertyRoleId,
+            fixture.tenantId,
+        )
+        mockMvc.perform(
+            get(
+                "/api/v1/properties/$secondPropertyId/financial-control/" +
+                    "cases/$controlCaseId",
+            ).headersFor(fixture, "corr-control-case-property-isolation"),
+        )
+            .andExpect(status().isNotFound)
         mockMvc.perform(
             post(
                 "/api/v1/properties/${fixture.propertyId}/night-audit/" +
@@ -1680,6 +1923,8 @@ class Phase3StayLifecycleIntegrationTests {
             "night_audit.override",
             "night_audit.complete",
             "night_audit.close_snapshot.view",
+            "financial_control.view",
+            "financial_control.manage",
         )
     }
 }

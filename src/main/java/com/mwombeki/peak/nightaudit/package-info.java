@@ -14,7 +14,8 @@
                 "pos::api",
                 "housekeeping::api",
                 "maintenance::api",
-                "inventory::api"
+                "inventory::api",
+                "usermanagement::api"
         }
 )
 package com.mwombeki.peak.nightaudit;
