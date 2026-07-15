@@ -236,7 +236,14 @@ if ! curl -fsS http://localhost:8090/health >/dev/null 2>&1; then
   wait_http "http://localhost:8090/health" 30
 fi
 
-"${compose[@]}" up -d peak-api peak-worker
+if "${compose[@]}" config --services | grep -Fxq minio-init; then
+  "${compose[@]}" up -d minio
+  wait_http "http://localhost:9000/minio/health/live"
+  "${compose[@]}" run --rm --no-deps minio-init
+fi
+
+# Dependencies are already ready; do not re-traverse removed one-shot containers.
+"${compose[@]}" up -d --no-deps peak-api peak-worker
 wait_http "$BASE_URL/actuator/health"
 
 platform_token="$(token_for "acceptance-platform-root" "$root_password")"
