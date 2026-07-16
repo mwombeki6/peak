@@ -159,7 +159,7 @@ jobs:
       - name: Record protected live-provider certification boundary
         run: |
           test -x ops/testing/run-clickpesa-sandbox-acceptance.sh
-          rg -q 'workflow_dispatch:' .github/workflows/clickpesa-sandbox.yml
+          grep -q 'workflow_dispatch:' .github/workflows/clickpesa-sandbox.yml
           mkdir -p build/evidence/providers
           jq -n \
             --arg commit "$GITHUB_SHA" \
