@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
 import org.springframework.http.ResponseEntity
 import org.springframework.http.converter.HttpMessageNotReadableException
+import org.springframework.web.HttpMediaTypeNotAcceptableException
 import org.springframework.web.HttpMediaTypeNotSupportedException
 import org.springframework.web.HttpRequestMethodNotSupportedException
 import org.springframework.web.bind.MethodArgumentNotValidException
@@ -92,6 +93,18 @@ class GlobalExceptionHandler {
             status = HttpStatus.UNSUPPORTED_MEDIA_TYPE,
             title = "Unsupported media type",
             detail = "Request Content-Type is not supported",
+            request = request,
+        )
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotAcceptableException::class)
+    fun handleNotAcceptableMediaType(
+        request: HttpServletRequest,
+    ): ResponseEntity<ProblemDetail> {
+        return problem(
+            status = HttpStatus.NOT_ACCEPTABLE,
+            title = "Not acceptable",
+            detail = "Requested response media type is not supported",
             request = request,
         )
     }

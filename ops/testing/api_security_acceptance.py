@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import sys
 import time
@@ -129,6 +130,14 @@ def main() -> int:
         args.base_url, "GET", f"/api/v1/properties/{property_id}", token=".".join([parts[0], parts[1], tampered_signature])
     )
     expect("tampered-jwt-rejected", tampered, 401, checks)
+    unsigned_header = base64.urlsafe_b64encode(b'{"alg":"none","typ":"JWT"}').decode().rstrip("=")
+    unsigned = send(
+        args.base_url,
+        "GET",
+        f"/api/v1/properties/{property_id}",
+        token=f"{unsigned_header}.{parts[1]}.",
+    )
+    expect("unsigned-jwt-rejected", unsigned, 401, checks)
 
     cross_tenant = send(args.base_url, "GET", f"/api/v1/properties/{property_id}", token=other_token)
     expect("cross-tenant-bola-rejected", cross_tenant, 403, checks)
@@ -225,6 +234,7 @@ def main() -> int:
         "checks": checks,
         "assertions": {
             "jwtSignatureValidated": True,
+            "unsignedJwtRejected": True,
             "tenantAndHeaderSpoofingRejected": True,
             "corsRestricted": True,
             "rfc9457ProblemsWithoutSensitiveDetails": True,

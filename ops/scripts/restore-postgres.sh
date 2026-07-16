@@ -25,5 +25,10 @@ set -a
 . "$ENV_FILE"
 set +a
 
+# Plain pg_dump archives reference the runtime grant roles but do not include
+# PostgreSQL globals. Recreate those roles idempotently before applying grants.
+COMPOSE_FILE="$COMPOSE_FILE" ENV_FILE="$ENV_FILE" \
+  "$ROOT_DIR/ops/scripts/bootstrap-db-roles.sh" >/dev/null
+
 gunzip -c "$BACKUP_FILE" | podman compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T postgres \
-  psql -U "$POSTGRES_MIGRATOR_USER" "$POSTGRES_DB"
+  psql -X --set ON_ERROR_STOP=1 --quiet -U "$POSTGRES_MIGRATOR_USER" "$POSTGRES_DB"

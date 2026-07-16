@@ -70,8 +70,10 @@ podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
   exec -T postgres pg_isready -U "$POSTGRES_MIGRATOR_USER" -d "$POSTGRES_DB" >/dev/null
 podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
   exec -T keycloak-db pg_isready -U "$KEYCLOAK_DB_USER" -d "$KEYCLOAK_DB" >/dev/null
-$ROOT_DIR/ops/scripts/restore-postgres.sh "$postgres_backup"
-$ROOT_DIR/ops/scripts/restore-keycloak.sh "$keycloak_backup"
+$ROOT_DIR/ops/scripts/restore-postgres.sh "$postgres_backup" \
+  > "$EVIDENCE_DIR/postgres-restore.log"
+$ROOT_DIR/ops/scripts/restore-keycloak.sh "$keycloak_backup" \
+  > "$EVIDENCE_DIR/keycloak-restore.log"
 
 assert_same() {
   local name="$1" expected="$2" actual="$3"
@@ -88,6 +90,40 @@ restored_reports="$(restored_db "SELECT count(*) FROM report_artifacts")"
 restored_realms="$(restored_keycloak_db "SELECT count(*) FROM realm")"
 restored_clients="$(restored_keycloak_db "SELECT count(*) FROM client")"
 restored_users="$(restored_keycloak_db "SELECT count(*) FROM user_entity")"
+restored_runtime_roles="$(restored_db "
+  SELECT count(*)
+  FROM pg_roles
+  WHERE rolname IN (
+    'pms_app', 'pms_platform', 'pms_worker', 'pms_readonly_support',
+    'peak_app', 'peak_worker', 'peak_platform_support'
+  )
+    AND rolsuper = false
+    AND rolcreatedb = false
+    AND rolcreaterole = false
+    AND rolbypassrls = false
+")"
+restored_runtime_memberships="$(restored_db "
+  SELECT count(*)
+  FROM pg_auth_members memberships
+  JOIN pg_roles granted_role ON granted_role.oid = memberships.roleid
+  JOIN pg_roles member_role ON member_role.oid = memberships.member
+  WHERE (member_role.rolname, granted_role.rolname) IN (
+    ('peak_app', 'pms_app'),
+    ('peak_app', 'pms_platform'),
+    ('peak_worker', 'pms_worker'),
+    ('peak_platform_support', 'pms_readonly_support')
+  )
+")"
+restored_runtime_owned_relations="$(restored_db "
+  SELECT count(*)
+  FROM pg_class relation
+  JOIN pg_roles owner_role ON owner_role.oid = relation.relowner
+  WHERE relation.relkind IN ('r', 'p', 'v', 'm', 'S')
+    AND owner_role.rolname IN (
+      'pms_app', 'pms_platform', 'pms_worker', 'pms_readonly_support',
+      'peak_app', 'peak_worker', 'peak_platform_support'
+    )
+")"
 
 KEYCLOAK_BIND_ADDRESS=127.0.0.2 \
 KEYCLOAK_HOSTNAME=http://127.0.0.2:8081 \
@@ -124,6 +160,9 @@ assert_same reportArtifacts "$source_reports" "$restored_reports"
 assert_same keycloakRealms "$source_realms" "$restored_realms"
 assert_same keycloakClients "$source_clients" "$restored_clients"
 assert_same keycloakUsers "$source_users" "$restored_users"
+assert_same hardenedRuntimeRoles 7 "$restored_runtime_roles"
+assert_same runtimeRoleMemberships 4 "$restored_runtime_memberships"
+assert_same runtimeOwnedRelations 0 "$restored_runtime_owned_relations"
 
 jq -n \
   --arg schema "$restored_schema" \
@@ -133,6 +172,9 @@ jq -n \
   --arg keycloakRealms "$restored_realms" \
   --arg keycloakClients "$restored_clients" \
   --arg keycloakUsers "$restored_users" \
+  --arg runtimeRoles "$restored_runtime_roles" \
+  --arg runtimeMemberships "$restored_runtime_memberships" \
+  --arg runtimeOwnedRelations "$restored_runtime_owned_relations" \
   --argjson keycloakAuthentication "$restored_authentication" \
   --arg postgresBackup "$(sha256sum "$postgres_backup" | cut -d' ' -f1)" \
   --arg keycloakBackup "$(sha256sum "$keycloak_backup" | cut -d' ' -f1)" \
@@ -140,6 +182,8 @@ jq -n \
     reportArtifacts:($reportArtifacts|tonumber), keycloak:{realms:($keycloakRealms|tonumber),
     clients:($keycloakClients|tonumber), users:($keycloakUsers|tonumber),
     authenticationVerified:$keycloakAuthentication},
+    runtimeRoles:{hardened:($runtimeRoles|tonumber), memberships:($runtimeMemberships|tonumber),
+    ownedRelations:($runtimeOwnedRelations|tonumber), verified:true},
     backupSha256:{postgres:$postgresBackup,keycloak:$keycloakBackup}}' \
   > "$EVIDENCE_DIR/backup-restore-drill.json"
 

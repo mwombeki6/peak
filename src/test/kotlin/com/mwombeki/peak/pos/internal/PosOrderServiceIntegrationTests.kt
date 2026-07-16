@@ -381,6 +381,96 @@ class PosOrderServiceIntegrationTests {
         assertEquals(BigDecimal("23.60"), result.totalAmount)
     }
 
+    @Test
+    fun `serializes concurrent cash settlement without duplicating money`() {
+        val fixture = insertFixture()
+        bind(fixture, "parallel-settle-open")
+        val session = posSessionService.openSession(
+            fixture.propertyId,
+            OpenPosSessionRequest(
+                fixture.outletId,
+                openingFloat = BigDecimal("100.00"),
+            ),
+        )
+        bind(fixture, "parallel-settle-order")
+        val order = posOrderService.createOrder(
+            fixture.propertyId,
+            CreatePosOrderRequest(
+                session.id,
+                "takeaway",
+                clientOperationId = "parallel-settle-order",
+            ),
+        )
+        bind(fixture, "parallel-settle-item")
+        val priced = posOrderService.addItem(
+            fixture.propertyId,
+            order.id,
+            AddPosOrderItemRequest(
+                fixture.menuItemId,
+                clientOperationId = "parallel-settle-item",
+            ),
+        )
+        assertEquals(BigDecimal("11.80"), priced.totalAmount)
+
+        val ready = CountDownLatch(2)
+        val start = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val results = (1..2).map { attempt ->
+                executor.submit<Boolean> {
+                    bind(fixture, "parallel-settle-$attempt")
+                    ready.countDown()
+                    check(start.await(10, TimeUnit.SECONDS))
+                    try {
+                        posOrderService.settleOrder(
+                            fixture.propertyId,
+                            order.id,
+                            SettlePosOrderRequest(paymentMethod = "cash"),
+                        )
+                        true
+                    } catch (_: IllegalArgumentException) {
+                        false
+                    }
+                }
+            }
+            check(ready.await(10, TimeUnit.SECONDS))
+            start.countDown()
+            assertEquals(
+                listOf(false, true),
+                results.map { it.get(30, TimeUnit.SECONDS) }.sorted(),
+            )
+        } finally {
+            executor.shutdownNow()
+        }
+
+        bind(fixture, "parallel-settle-read")
+        val settled = posOrderService.getOrder(fixture.propertyId, order.id)
+        assertEquals("closed", settled.status)
+        assertEquals("confirmed", settled.settlementStatus)
+        assertEquals(
+            1,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*) FROM payment_transactions
+                WHERE tenant_id = ? AND pos_order_id = ?
+                  AND transaction_type = 'collection' AND status = 'posted'
+                """.trimIndent(),
+                Int::class.java,
+                fixture.tenantId,
+                order.id,
+            ),
+        )
+        assertEquals(
+            BigDecimal("111.80"),
+            jdbcTemplate.queryForObject(
+                "SELECT expected_cash FROM pos_sessions WHERE tenant_id = ? AND id = ?",
+                BigDecimal::class.java,
+                fixture.tenantId,
+                session.id,
+            ),
+        )
+    }
+
     private fun insertFixture(): PosFixture {
         val fixture = PosFixture(
             planId = UUID.randomUUID(),

@@ -83,6 +83,7 @@ class GlobalExceptionHandlerTests {
 
         val responses = listOf(
             handler.handleUnsupportedMediaType(request) to HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+            handler.handleNotAcceptableMediaType(request) to HttpStatus.NOT_ACCEPTABLE,
             handler.handleUnreadableMessage(request) to HttpStatus.BAD_REQUEST,
             handler.handleArgumentTypeMismatch(request) to HttpStatus.BAD_REQUEST,
             handler.handleUnsupportedMethod(request) to HttpStatus.METHOD_NOT_ALLOWED,

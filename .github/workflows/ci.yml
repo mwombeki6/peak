@@ -136,6 +136,42 @@ jobs:
             --tests '*PopulatedMigrationUpgradeIntegrationTests' \
             --tests '*RuntimeDatabaseRoleIntegrationTests'
 
+  provider-contract:
+    name: External provider contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Verify signed provider adapters and simulators
+        run: |
+          ./gradlew test \
+            --tests 'com.mwombeki.peak.communication.internal.HttpNotificationDeliveryProviderTests' \
+            --tests 'com.mwombeki.peak.fiscal.internal.HttpFiscalProviderAdapterTests' \
+            --tests 'com.mwombeki.peak.integrations.internal.ClickPesaChecksumTests' \
+            --tests 'com.mwombeki.peak.integrations.internal.NidaGuestIdentityVerificationAdapterTests' \
+            --tests 'com.mwombeki.peak.integrations.internal.S3ReportObjectStorageAdapterTests' \
+            --tests 'com.mwombeki.peak.integrations.internal.SignedSimulatorFiscalProviderTests' \
+            --tests 'com.mwombeki.peak.payment.internal.HttpPaymentProviderAdapterTests'
+      - name: Record protected live-provider certification boundary
+        run: |
+          test -x ops/testing/run-clickpesa-sandbox-acceptance.sh
+          grep -q 'workflow_dispatch:' .github/workflows/clickpesa-sandbox.yml
+          mkdir -p build/evidence/providers
+          jq -n \
+            --arg commit "$GITHUB_SHA" \
+            '{result:"passed",commit:$commit,
+              deterministicContracts:{payment:true,fiscal:true,identity:true,communication:true,storage:true},
+              protectedCertification:{clickPesa:{workflow:"clickpesa-sandbox.yml",status:"credential-gated",owner:"release-operator"}}}' \
+            > build/evidence/providers/provider-contracts.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: provider-contract-evidence
+          path: build/evidence/providers/provider-contracts.json
+
   operations:
     name: Runtime and operations contracts
     runs-on: ubuntu-latest
@@ -314,6 +350,7 @@ jobs:
       - architecture-contract
       - unit-integration
       - migration-database
+      - provider-contract
       - operations
       - container-security
       - acceptance
