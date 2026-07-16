@@ -1,0 +1,107 @@
+name: Hospitality resilience soak
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_seconds:
+        description: Minimum write-heavy soak duration
+        required: false
+        default: "3600"
+      write_orders:
+        description: Minimum financially settled orders
+        required: false
+        default: "1000"
+      read_requests:
+        description: Mixed departmental read requests
+        required: false
+        default: "100000"
+  schedule:
+    - cron: "0 1 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hospitality-resilience-soak
+  cancel-in-progress: false
+
+jobs:
+  populated-hotel-soak:
+    name: Populated hotel write, load, penetration, and recovery soak
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Install Podman acceptance tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman python3-venv python3-websocket jq
+          python3 -m venv "$RUNNER_TEMP/podman-compose"
+          "$RUNNER_TEMP/podman-compose/bin/pip" install --disable-pip-version-check podman-compose==1.5.0
+          echo "PODMAN_COMPOSE_PROVIDER=$RUNNER_TEMP/podman-compose/bin/podman-compose" >> "$GITHUB_ENV"
+      - name: Build soak image
+        run: ./gradlew bootJar && podman build -t localhost/peak:resilience-soak .
+      - name: Prepare disposable production environment
+        run: |
+          cp ops/production/.env.example "$RUNNER_TEMP/peak-soak.env"
+          sed -i \
+            -e 's|^PEAK_IMAGE=.*|PEAK_IMAGE=localhost/peak:resilience-soak|' \
+            -e 's|^KEYCLOAK_HOSTNAME=.*|KEYCLOAK_HOSTNAME=http://keycloak:8080|' \
+            -e 's|^PEAK_SECURITY_JWT_ISSUER_URI=.*|PEAK_SECURITY_JWT_ISSUER_URI=http://keycloak:8080/realms/peak|' \
+            -e 's|^PEAK_CORS_ALLOWED_ORIGINS=.*|PEAK_CORS_ALLOWED_ORIGINS=https://localhost:5173|' \
+            -e 's|^PEAK_REALTIME_WEBSOCKET_ALLOWED_ORIGINS=.*|PEAK_REALTIME_WEBSOCKET_ALLOWED_ORIGINS=https://localhost:5173|' \
+            -e 's|^PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_BASE_URL=.*|PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_BASE_URL=http://host.containers.internal:8090|' \
+            -e 's|^PEAK_ACCEPTANCE_MODE=.*|PEAK_ACCEPTANCE_MODE=true|' \
+            -e 's|^POSTGRES_MIGRATOR_PASSWORD=.*|POSTGRES_MIGRATOR_PASSWORD=soak-migrator-password|' \
+            -e 's|^POSTGRES_APP_PASSWORD=.*|POSTGRES_APP_PASSWORD=soak-application-password|' \
+            -e 's|^POSTGRES_WORKER_PASSWORD=.*|POSTGRES_WORKER_PASSWORD=soak-worker-password|' \
+            -e 's|^POSTGRES_PLATFORM_SUPPORT_PASSWORD=.*|POSTGRES_PLATFORM_SUPPORT_PASSWORD=soak-support-password|' \
+            -e 's|^KEYCLOAK_ADMIN_PASSWORD=.*|KEYCLOAK_ADMIN_PASSWORD=soak-keycloak-admin-password|' \
+            -e 's|^KEYCLOAK_DB_PASSWORD=.*|KEYCLOAK_DB_PASSWORD=soak-keycloak-db-password|' \
+            -e 's|^PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=.*|PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=soak-communication-key|' \
+            -e 's|^PEAK_ENVELOPE_KEY_BASE64=.*|PEAK_ENVELOPE_KEY_BASE64=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=|' \
+            -e 's|^PEAK_PAYMENT_GATEWAY_CREDENTIAL=.*|PEAK_PAYMENT_GATEWAY_CREDENTIAL=soak-payment-credential|' \
+            -e 's|^PEAK_PAYMENT_WEBHOOK_SECRET=.*|PEAK_PAYMENT_WEBHOOK_SECRET=soak-webhook-secret|' \
+            -e 's|^PEAK_CLICKPESA_API_KEY=.*|PEAK_CLICKPESA_API_KEY=soak-clickpesa-api-key|' \
+            -e 's|^PEAK_CLICKPESA_CHECKSUM_KEY=.*|PEAK_CLICKPESA_CHECKSUM_KEY=soak-clickpesa-checksum-key|' \
+            -e 's|^PEAK_FISCAL_GATEWAY_CREDENTIAL=.*|PEAK_FISCAL_GATEWAY_CREDENTIAL=soak-fiscal-credential|' \
+            -e 's|^PEAK_GUEST_IDENTITY_HASH_KEY=.*|PEAK_GUEST_IDENTITY_HASH_KEY=soak-guest-identity-hmac-key-2026|' \
+            -e 's|^PEAK_REPORT_STORAGE_ACCESS_KEY=.*|PEAK_REPORT_STORAGE_ACCESS_KEY=soak-report-access-key|' \
+            -e 's|^PEAK_REPORT_STORAGE_SECRET_KEY=.*|PEAK_REPORT_STORAGE_SECRET_KEY=soak-report-secret-key|' \
+            "$RUNNER_TEMP/peak-soak.env"
+          ops/scripts/validate-production-env.sh "$RUNNER_TEMP/peak-soak.env"
+      - name: Run endurance profile and recovery drill
+        env:
+          COMPOSE_PROJECT_NAME: peak-resilience-soak
+          ENV_FILE: ${{ runner.temp }}/peak-soak.env
+          TENANT_PROPERTY_BUILD_IMAGE: "false"
+          TENANT_PROPERTY_RESET: "true"
+          REAL_HOTEL_TENANT_PASSWORD: Soak-Tenant-2026
+          REAL_HOTEL_OTHER_PASSWORD: Soak-Other-2026
+          REAL_HOTEL_STAFF_PASSWORD: Soak-Staff-2026
+          REAL_HOTEL_ROOT_PASSWORD: Soak-Root-2026
+          REAL_HOTEL_WRITE_DURATION_SECONDS: ${{ inputs.duration_seconds || '3600' }}
+          REAL_HOTEL_WRITE_ORDERS: ${{ inputs.write_orders || '1000' }}
+          REAL_HOTEL_LOAD_REQUESTS: ${{ inputs.read_requests || '100000' }}
+        run: ops/testing/run-staging-soak.sh
+      - name: Upload soak and recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hospitality-resilience-soak-evidence
+          path: build/evidence/real-hotel
+      - name: Stop soak topology
+        if: always()
+        env:
+          COMPOSE_PROJECT_NAME: peak-resilience-soak
+        run: |
+          podman compose -p "$COMPOSE_PROJECT_NAME" \
+            --env-file "$RUNNER_TEMP/peak-soak.env" \
+            -f ops/production/compose.yaml \
+            -f ops/testing/compose.close-reporting.yaml \
+            down -v --remove-orphans || true

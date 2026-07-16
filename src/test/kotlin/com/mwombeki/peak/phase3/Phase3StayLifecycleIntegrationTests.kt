@@ -1011,6 +1011,150 @@ class Phase3StayLifecycleIntegrationTests {
     }
 
     @Test
+    fun concurrentRefundsCannotExceedTheCollectedPayment() {
+        val fixture = phase3Fixture()
+        insertAuthorizedFixture(fixture)
+        val folioId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO folios (
+                id, tenant_id, property_id, folio_type, status,
+                currency_code, total_amount, total_paid
+            ) VALUES (?, ?, ?, 'guest', 'open', 'TZS', 100.00, 0.00)
+            """.trimIndent(),
+            folioId,
+            fixture.tenantId,
+            fixture.propertyId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO folio_charges (
+                id, tenant_id, property_id, folio_id, charge_type,
+                description, quantity, unit_price, subtotal, tax_rate,
+                tax_amount, amount, posted_by, status
+            ) VALUES (?, ?, ?, ?, 'MISC', 'Concurrent refund control',
+                      1, 100.00, 100.00, 0, 0, 100.00, ?, 'POSTED')
+            """.trimIndent(),
+            UUID.randomUUID(),
+            fixture.tenantId,
+            fixture.propertyId,
+            folioId,
+            fixture.tenantUserId,
+        )
+        jdbcTemplate.queryForList("SELECT recalculate_folio_totals(?)", folioId)
+        val cashSessionId = postForId(
+            fixture,
+            "/api/v1/properties/${fixture.propertyId}/payments/cash-sessions",
+            "concurrent-refund-session-${fixture.tenantId}",
+            "id",
+            """{"openingFloat":100.00}""",
+        )
+        val paymentId = postForId(
+            fixture,
+            "/api/v1/properties/${fixture.propertyId}/payments/cash",
+            "concurrent-refund-payment-${fixture.tenantId}",
+            "id",
+            """
+            {
+              "folioId":"$folioId",
+              "cashSessionId":"$cashSessionId",
+              "amount":100.00
+            }
+            """.trimIndent(),
+        )
+
+        val ready = CountDownLatch(2)
+        val start = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val statuses = (1..2).map { attempt ->
+                executor.submit<Int> {
+                    ready.countDown()
+                    check(start.await(10, TimeUnit.SECONDS))
+                    mockMvc.perform(
+                        post(
+                            "/api/v1/properties/${fixture.propertyId}/payments/" +
+                                "transactions/$paymentId/refund",
+                        )
+                            .secureJson(
+                                """
+                                {
+                                  "amount":60.00,
+                                  "reason":"Concurrent partial refund attempt $attempt",
+                                  "cashSessionId":"$cashSessionId"
+                                }
+                                """.trimIndent(),
+                            )
+                            .headersFor(
+                                fixture,
+                                "corr-concurrent-refund-$attempt",
+                                "idem-concurrent-refund-${fixture.tenantId}-$attempt",
+                            ),
+                    ).andReturn().response.status
+                }
+            }
+            check(ready.await(10, TimeUnit.SECONDS))
+            start.countDown()
+            kotlin.test.assertEquals(
+                listOf(200, 400),
+                statuses.map { it.get(30, TimeUnit.SECONDS) }.sorted(),
+            )
+        } finally {
+            executor.shutdownNow()
+        }
+
+        kotlin.test.assertEquals(
+            mapOf(
+                "status" to "partially_refunded",
+                "refunded_amount" to java.math.BigDecimal("60.00"),
+            ),
+            jdbcTemplate.queryForMap(
+                """
+                SELECT status, refunded_amount
+                FROM payment_transactions
+                WHERE tenant_id = ? AND id = ?
+                """.trimIndent(),
+                fixture.tenantId,
+                paymentId,
+            ),
+        )
+        kotlin.test.assertEquals(
+            mapOf(
+                "refund_count" to 1L,
+                "refund_total" to java.math.BigDecimal("60.00"),
+            ),
+            jdbcTemplate.queryForMap(
+                """
+                SELECT count(*) AS refund_count,
+                       COALESCE(sum(amount), 0) AS refund_total
+                FROM payment_transactions
+                WHERE tenant_id = ? AND refund_of_transaction_id = ?
+                """.trimIndent(),
+                fixture.tenantId,
+                paymentId,
+            ),
+        )
+        kotlin.test.assertEquals(
+            java.math.BigDecimal("40.00"),
+            jdbcTemplate.queryForObject(
+                "SELECT total_paid FROM folios WHERE tenant_id = ? AND id = ?",
+                java.math.BigDecimal::class.java,
+                fixture.tenantId,
+                folioId,
+            ),
+        )
+        kotlin.test.assertEquals(
+            java.math.BigDecimal("140.00"),
+            jdbcTemplate.queryForObject(
+                "SELECT expected_cash FROM cash_sessions WHERE tenant_id = ? AND id = ?",
+                java.math.BigDecimal::class.java,
+                fixture.tenantId,
+                cashSessionId,
+            ),
+        )
+    }
+
+    @Test
     fun blocksCheckInUntilEveryAdultOccupantIsVerifiedWithoutPersistingRawIdentity() {
         val fixture = phase3Fixture()
         insertAuthorizedFixture(fixture)

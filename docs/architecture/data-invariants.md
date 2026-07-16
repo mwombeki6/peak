@@ -16,7 +16,7 @@
 | Retention | Idempotency, realtime, reports and provider evidence | Bounded claim/cleanup functions with provenance and replay-safe state |
 | Soft delete | Mutable master data | `deleted_at` plus uniqueness/read predicates; financial/audit history is never soft-deleted |
 
-Applied migrations `V1–V68` are immutable. `V69` is the additive operational staff
-reference alignment migration; `V68` introduced the Daily Control
-schema. Any later remediation starts at `V70`; application-only boundary fixes
-do not create empty migrations.
+Applied migrations `V1–V69` are immutable. `V70` adds the verified property-payment
+timeline index; `V69` aligned operational staff references and `V68` introduced
+the Daily Control schema. Any later remediation starts at `V71`; application-only
+boundary fixes do not create empty migrations.

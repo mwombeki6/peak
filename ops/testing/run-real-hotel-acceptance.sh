@@ -88,6 +88,28 @@ python3 "$ROOT_DIR/ops/testing/api_security_acceptance.py" \
   --tenant-password "$tenant_password" \
   --other-password "$other_password"
 
+python3 "$ROOT_DIR/ops/testing/api_penetration_test.py" \
+  --base-url "$BASE_URL" \
+  --keycloak-url "$KEYCLOAK_URL" \
+  --evidence-dir "$EVIDENCE_DIR" \
+  --openapi "$ROOT_DIR/src/test/resources/contracts/openapi-v1.json" \
+  --tenant-password "$tenant_password"
+
+write_load_args=(
+  --base-url "$BASE_URL"
+  --keycloak-url "$KEYCLOAK_URL"
+  --evidence-dir "$EVIDENCE_DIR"
+  --staff-password "$staff_password"
+  --orders "${REAL_HOTEL_WRITE_ORDERS:-40}"
+  --concurrency "${REAL_HOTEL_WRITE_CONCURRENCY:-8}"
+  --max-error-rate "${REAL_HOTEL_WRITE_MAX_ERROR_RATE:-0}"
+  --max-p95-ms "${REAL_HOTEL_WRITE_MAX_P95_MS:-3000}"
+)
+if [[ "${REAL_HOTEL_WRITE_DURATION_SECONDS:-0}" -gt 0 ]]; then
+  write_load_args+=(--duration-seconds "$REAL_HOTEL_WRITE_DURATION_SECONDS")
+fi
+python3 "$ROOT_DIR/ops/testing/api_write_load_test.py" "${write_load_args[@]}"
+
 python3 "$ROOT_DIR/ops/testing/api_load_test.py" \
   --base-url "$BASE_URL" \
   --keycloak-url "$KEYCLOAK_URL" \
@@ -103,6 +125,14 @@ python3 "$ROOT_DIR/ops/testing/api_load_test.py" \
 
 export CLOSE_REPORTING_REUSE_FOUNDATION=true
 "$ROOT_DIR/ops/testing/run-close-reporting-acceptance.sh"
+
+CHAOS_TENANT_PASSWORD="$tenant_password" \
+  "$ROOT_DIR/ops/testing/run-chaos-recovery-acceptance.sh"
+
+SOURCE_PROJECT="$PROJECT" \
+RESTORE_PROJECT="${PROJECT}-restore" \
+EVIDENCE_DIR="$EVIDENCE_DIR/backup-restore" \
+  "$ROOT_DIR/ops/testing/run-backup-restore-drill.sh"
 
 tenant_id="$(jq -er '.tenantId' "$EVIDENCE_DIR/tenant-property-foundation.json")"
 compose=(
@@ -144,8 +174,12 @@ jq -n \
   --argjson reportRuns "$report_count" \
   --slurpfile departments "$EVIDENCE_DIR/real-hotel-departments.json" \
   --slurpfile security "$EVIDENCE_DIR/api-security.json" \
+  --slurpfile penetration "$EVIDENCE_DIR/api-penetration.json" \
+  --slurpfile writeLoad "$EVIDENCE_DIR/api-write-load.json" \
   --slurpfile load "$EVIDENCE_DIR/api-load.json" \
   --slurpfile close "$EVIDENCE_DIR/close-reporting.json" \
+  --slurpfile chaos "$EVIDENCE_DIR/chaos-recovery.json" \
+  --slurpfile restore "$EVIDENCE_DIR/backup-restore/backup-restore-drill.json" \
   '{
     suite: "real-hotel-end-to-end",
     result: "passed",
@@ -159,7 +193,9 @@ jq -n \
       apiSecurityAttacks: true,
       mixedDepartmentLoad: true,
       closeReportingAndPdf: true,
-      databaseInvariantAssertions: true
+      databaseInvariantAssertions: true,
+      serviceFailureRecovery: true,
+      populatedBackupRestore: true
     },
     databaseEvidence: {
       auditRecords: $auditRecords,
@@ -171,17 +207,27 @@ jq -n \
     },
     departmentRequestCount: $departments[0].requestCount,
     securityCheckCount: ($security[0].checks | length),
+    penetrationProbeCount: $penetration[0].probeCount,
+    writeLoad: $writeLoad[0].workload,
+    writeLoadFinancial: $writeLoad[0].financial,
+    writeLoadLatency: $writeLoad[0].latency,
     load: $load[0].workload,
     loadLatency: $load[0].latency,
     certifiedBusinessDate: $close[0].generatedAt,
+    chaosRecovery: $chaos[0].recovery,
+    backupRestore: $restore[0],
     evidenceFiles: [
       "tenant-property-foundation.json",
       "stay-finance-foundation.json",
       "core-hospitality-journey.json",
       "real-hotel-departments.json",
       "api-security.json",
+      "api-penetration.json",
+      "api-write-load.json",
       "api-load.json",
       "close-reporting.json",
+      "chaos-recovery.json",
+      "backup-restore/backup-restore-drill.json",
       "daily-management-summary.pdf"
     ]
   }' | tee "$EVIDENCE_DIR/real-hotel-acceptance.json"
