@@ -109,8 +109,8 @@ security_expectations = {
 for field, expected in security_expectations.items():
     if realm.get(field) is not expected:
         raise SystemExit(f"Keycloak realm must set {field}={expected!r}")
-if realm.get("maxFailure", 999) > 5:
-    raise SystemExit("Keycloak brute-force maxFailure must be at most 5")
+if realm.get("failureFactor", 999) > 5:
+    raise SystemExit("Keycloak brute-force failureFactor must be at most 5")
 if realm.get("accessTokenLifespan", 999999) > 300:
     raise SystemExit("Keycloak access tokens must expire within five minutes")
 if realm.get("otpPolicyAlgorithm") not in {"HmacSHA256", "HmacSHA512"}:
