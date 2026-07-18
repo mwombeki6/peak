@@ -4,6 +4,12 @@ services:
     environment:
       PEAK_REPORT_STORAGE_ENABLED: "false"
 
+  peak-platform:
+    environment:
+      SPRING_PROFILES_ACTIVE: acceptance,platform
+      PEAK_RUNTIME_MODE: platform
+      PEAK_REPORT_STORAGE_ENABLED: "false"
+
   peak-worker:
     environment:
       SPRING_PROFILES_ACTIVE: prod,worker,acceptance

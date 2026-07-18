@@ -1,0 +1,360 @@
+package com.mwombeki.peak.usermanagement.internal.application
+
+import com.mwombeki.peak.audit.api.AuditPort
+import com.mwombeki.peak.audit.api.AuditResource
+import com.mwombeki.peak.audit.api.PlatformAuditEvent
+import com.mwombeki.peak.reliability.api.IdempotencyCommand
+import com.mwombeki.peak.reliability.api.IdempotencyPort
+import com.mwombeki.peak.reliability.api.IdempotencyReservation
+import com.mwombeki.peak.reliability.api.OutboxDestination
+import com.mwombeki.peak.reliability.api.OutboxEventCommand
+import com.mwombeki.peak.reliability.api.OutboxPort
+import com.mwombeki.peak.shared.context.RequestContextHolder
+import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.usermanagement.api.BreakGlassAccessPort
+import com.mwombeki.peak.usermanagement.api.BreakGlassAccessSummary
+import com.mwombeki.peak.usermanagement.api.BreakGlassConflictException
+import com.mwombeki.peak.usermanagement.api.BreakGlassDecision
+import com.mwombeki.peak.usermanagement.api.BreakGlassNotFoundException
+import com.mwombeki.peak.usermanagement.api.DecideBreakGlassAccessCommand
+import com.mwombeki.peak.usermanagement.api.PlatformAccessPort
+import com.mwombeki.peak.usermanagement.api.PlatformAccessRequest
+import com.mwombeki.peak.usermanagement.api.RequestBreakGlassAccessCommand
+import com.mwombeki.peak.usermanagement.api.SupportPrivilegedAccessEventCommand
+import com.mwombeki.peak.usermanagement.api.SupportPrivilegedAccessEvidencePort
+import java.sql.ResultSet
+import java.sql.Timestamp
+import java.time.Instant
+import java.time.temporal.ChronoUnit
+import java.util.UUID
+import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
+import tools.jackson.databind.ObjectMapper
+
+@Service
+class BreakGlassAccessService(
+    private val jdbcTemplate: JdbcTemplate,
+    private val requestContextHolder: RequestContextHolder,
+    private val platformAccess: PlatformAccessPort,
+    private val supportEvidence: SupportPrivilegedAccessEvidencePort,
+    private val idempotencyPort: IdempotencyPort,
+    private val auditPort: AuditPort,
+    private val outboxPort: OutboxPort,
+    private val objectMapper: ObjectMapper,
+) : BreakGlassAccessPort {
+
+    @Transactional(readOnly = true)
+    override fun listAccess(
+        tenantId: UUID?,
+        status: String?,
+        limit: Int,
+    ): List<BreakGlassAccessSummary> {
+        require(limit in 1..200) { "Access request limit must be between 1 and 200" }
+        requirePlatform(tenantId, "platform.support.impersonate", "platform.support.access.list")
+        val clauses = mutableListOf<String>()
+        val args = mutableListOf<Any>()
+        tenantId?.let { clauses += "access.tenant_id = ?"; args += it }
+        status?.let {
+            val normalized = it.normalizedStatus()
+            clauses += "access.status = ?"; args += normalized
+        }
+        val where = clauses.takeIf { it.isNotEmpty() }?.joinToString(" AND ", "WHERE ").orEmpty()
+        args += limit
+        return jdbcTemplate.query(
+            "$ACCESS_SELECT $where ORDER BY access.requested_at DESC, access.id DESC LIMIT ?",
+            { rs, _ -> mapAccess(rs) }, *args.toTypedArray(),
+        )
+    }
+
+    @Transactional
+    override fun requestAccess(command: RequestBreakGlassAccessCommand): BreakGlassAccessSummary {
+        requirePlatform(
+            command.tenantId, "platform.support.impersonate", "platform.support.access.request",
+        )
+        requirePlatform(command.tenantId, command.actionCode, "platform.support.target_permission")
+        require(command.reason.isNotBlank() && command.reason.length <= 1000) {
+            "Privileged access reason must be between 1 and 1000 characters"
+        }
+        require(command.durationMinutes in 1..120) {
+            "Privileged access duration must be between 1 and 120 minutes"
+        }
+        require(command.maxUses in 1..1000) { "Privileged access max uses must be between 1 and 1000" }
+        require(command.actionCode.matches(PERMISSION_CODE)) { "Invalid privileged access action code" }
+        val assurance = command.assuranceLevel.trim().lowercase().also {
+            require(it in ASSURANCE_LEVELS) { "Invalid assurance level" }
+        }
+        val platformUserId = currentPlatformUser()
+        requireMfa(platformUserId)
+        return mutate(
+            "platform.support.access.request", command, BreakGlassAccessSummary::class.java,
+        ) { reservationId ->
+            val ticketExists = jdbcTemplate.queryForObject(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM support_tickets
+                    WHERE id = ? AND tenant_id = ? AND status NOT IN ('resolved', 'closed')
+                )
+                """.trimIndent(),
+                Boolean::class.java, command.supportTicketId, command.tenantId,
+            ) == true
+            if (!ticketExists) throw BreakGlassConflictException(
+                "An open support ticket for the target tenant is required",
+            )
+            val accessId = UUID.randomUUID()
+            val startsAt = Instant.now().truncatedTo(ChronoUnit.MILLIS)
+            val expiresAt = startsAt.plus(command.durationMinutes, ChronoUnit.MINUTES)
+            jdbcTemplate.update(
+                """
+                INSERT INTO platform_break_glass_access (
+                    id, platform_user_id, tenant_id, support_ticket_id, action_code,
+                    reason, status, starts_at, expires_at, max_uses, assurance_level
+                ) VALUES (?, ?, ?, ?, ?, ?, 'requested', ?, ?, ?, ?)
+                """.trimIndent(),
+                accessId, platformUserId, command.tenantId, command.supportTicketId,
+                command.actionCode, command.reason.trim(), Timestamp.from(startsAt),
+                Timestamp.from(expiresAt),
+                command.maxUses, assurance,
+            )
+            supportEvidence.recordPrivilegedAccessEvent(SupportPrivilegedAccessEventCommand(
+                command.tenantId, command.supportTicketId, "access_requested", accessId,
+                platformUserId, command.actionCode, command.reason.trim(),
+            ))
+            access(accessId).also {
+                record(it, "platform.support.access.requested", command.reason, reservationId)
+            }
+        }
+    }
+
+    @Transactional
+    override fun decideAccess(command: DecideBreakGlassAccessCommand): BreakGlassAccessSummary {
+        require(command.reason.isNotBlank()) { "Privileged access decision reason is required" }
+        val candidate = access(command.accessId)
+        requirePlatform(
+            candidate.tenantId, "platform.support.impersonate", "platform.support.access.decide",
+        )
+        val approver = currentPlatformUser()
+        requireMfa(approver)
+        if (approver == candidate.platformUserId) {
+            throw BreakGlassConflictException("Privileged access cannot be self-approved")
+        }
+        return mutate(
+            "platform.support.access.decide", command, BreakGlassAccessSummary::class.java,
+        ) { reservationId ->
+            val locked = lockedAccess(command.accessId)
+            if (locked.status != "requested") {
+                throw BreakGlassConflictException("Only requested access can be decided")
+            }
+            when (command.decision) {
+                BreakGlassDecision.APPROVE -> jdbcTemplate.update(
+                    """
+                    UPDATE platform_break_glass_access
+                    SET status = 'approved', approved_by = ?, approved_at = now(),
+                        starts_at = now(), expires_at = now() + (expires_at - starts_at),
+                        decision_reason = ?
+                    WHERE id = ?
+                    """.trimIndent(),
+                    approver, command.reason.trim(), command.accessId,
+                )
+                BreakGlassDecision.DENY -> jdbcTemplate.update(
+                    """
+                    UPDATE platform_break_glass_access
+                    SET status = 'denied', denied_at = now(), decision_reason = ?
+                    WHERE id = ?
+                    """.trimIndent(),
+                    command.reason.trim(), command.accessId,
+                )
+            }
+            val event = if (command.decision == BreakGlassDecision.APPROVE) {
+                "access_approved"
+            } else {
+                "access_revoked"
+            }
+            supportEvidence.recordPrivilegedAccessEvent(SupportPrivilegedAccessEventCommand(
+                locked.tenantId, locked.supportTicketId, event, locked.accessId,
+                approver, locked.actionCode, command.reason.trim(),
+            ))
+            access(command.accessId).also {
+                record(it, "platform.support.access.${command.decision.name.lowercase()}",
+                    command.reason, reservationId)
+            }
+        }
+    }
+
+    @Transactional
+    override fun activateAccess(accessId: UUID): BreakGlassAccessSummary {
+        val candidate = access(accessId)
+        requirePlatform(
+            candidate.tenantId, "platform.support.impersonate", "platform.support.access.activate",
+        )
+        val actor = currentPlatformUser()
+        require(actor == candidate.platformUserId) {
+            "Only the requesting operator can activate privileged access"
+        }
+        requireMfa(actor)
+        return mutate(
+            "platform.support.access.activate", mapOf("accessId" to accessId),
+            BreakGlassAccessSummary::class.java,
+        ) { reservationId ->
+            val locked = lockedAccess(accessId)
+            if (locked.status != "approved") {
+                throw BreakGlassConflictException("Only approved access can be activated")
+            }
+            if (!locked.expiresAt.isAfter(Instant.now())) {
+                jdbcTemplate.update(
+                    "UPDATE platform_break_glass_access SET status = 'expired' WHERE id = ?", accessId,
+                )
+                throw BreakGlassConflictException("Approved access has expired")
+            }
+            jdbcTemplate.update(
+                """
+                UPDATE platform_break_glass_access
+                SET status = 'active', activated_at = now(), activated_by = ?
+                WHERE id = ?
+                """.trimIndent(), actor, accessId,
+            )
+            supportEvidence.recordPrivilegedAccessEvent(SupportPrivilegedAccessEventCommand(
+                locked.tenantId, locked.supportTicketId, "access_activated", accessId,
+                actor, locked.actionCode, "Approved access activated",
+            ))
+            access(accessId).also {
+                record(it, "platform.support.access.activated", "Approved access activated", reservationId)
+            }
+        }
+    }
+
+    @Transactional
+    override fun revokeAccess(accessId: UUID, reason: String): BreakGlassAccessSummary {
+        require(reason.isNotBlank()) { "Privileged access revocation reason is required" }
+        val candidate = access(accessId)
+        requirePlatform(
+            candidate.tenantId, "platform.support.impersonate", "platform.support.access.revoke",
+        )
+        return mutate(
+            "platform.support.access.revoke", mapOf("accessId" to accessId, "reason" to reason),
+            BreakGlassAccessSummary::class.java,
+        ) { reservationId ->
+            val locked = lockedAccess(accessId)
+            if (locked.status !in setOf("requested", "approved", "active")) {
+                throw BreakGlassConflictException("Access is already terminal")
+            }
+            jdbcTemplate.update(
+                """
+                UPDATE platform_break_glass_access
+                SET status = 'revoked', revoked_at = now(), decision_reason = ?
+                WHERE id = ?
+                """.trimIndent(), reason.trim(), accessId,
+            )
+            val actor = currentPlatformUser()
+            supportEvidence.recordPrivilegedAccessEvent(SupportPrivilegedAccessEventCommand(
+                locked.tenantId, locked.supportTicketId, "access_revoked", accessId,
+                actor, locked.actionCode, reason.trim(),
+            ))
+            access(accessId).also {
+                record(it, "platform.support.access.revoked", reason, reservationId)
+            }
+        }
+    }
+
+    private fun access(id: UUID): BreakGlassAccessSummary = jdbcTemplate.query(
+        "$ACCESS_SELECT WHERE access.id = ?", { rs, _ -> mapAccess(rs) }, id,
+    ).singleOrNull() ?: throw BreakGlassNotFoundException("Privileged access request was not found")
+
+    private fun lockedAccess(id: UUID): BreakGlassAccessSummary = jdbcTemplate.query(
+        "$ACCESS_SELECT WHERE access.id = ? FOR UPDATE", { rs, _ -> mapAccess(rs) }, id,
+    ).singleOrNull() ?: throw BreakGlassNotFoundException("Privileged access request was not found")
+
+    private fun mapAccess(rs: ResultSet) = BreakGlassAccessSummary(
+        rs.getObject("id", UUID::class.java), rs.getObject("platform_user_id", UUID::class.java),
+        rs.getObject("tenant_id", UUID::class.java), rs.getObject("support_ticket_id", UUID::class.java),
+        rs.getString("action_code"), rs.getString("reason"), rs.getString("status"),
+        rs.getTimestamp("requested_at").toInstant(), rs.getObject("approved_by", UUID::class.java),
+        rs.getTimestamp("approved_at")?.toInstant(), rs.getTimestamp("activated_at")?.toInstant(),
+        rs.getTimestamp("starts_at").toInstant(), rs.getTimestamp("expires_at").toInstant(),
+        rs.getTimestamp("revoked_at")?.toInstant(), rs.getInt("max_uses"), rs.getInt("use_count"),
+        rs.getTimestamp("last_used_at")?.toInstant(), rs.getString("assurance_level"),
+        rs.getString("decision_reason"),
+    )
+
+    private fun record(
+        access: BreakGlassAccessSummary, action: String, reason: String, reservationId: UUID,
+    ) {
+        val payload = mapOf(
+            "tenantId" to access.tenantId, "supportTicketId" to access.supportTicketId,
+            "actionCode" to access.actionCode, "status" to access.status,
+            "expiresAt" to access.expiresAt, "reason" to reason.trim().take(1000),
+        )
+        auditPort.recordPlatformEvent(PlatformAuditEvent(
+            action = action,
+            resource = AuditResource("platform_break_glass_access", access.accessId),
+            targetTenantId = access.tenantId,
+            after = payload,
+        ))
+        outboxPort.enqueue(OutboxEventCommand(
+            aggregateType = "platform_break_glass_access", aggregateId = access.accessId,
+            tenantId = null, eventType = action,
+            destination = OutboxDestination.PLATFORM, payload = payload,
+            idempotencyKeyId = reservationId, priority = 4,
+        ))
+    }
+
+    private fun <T : Any> mutate(
+        operation: String, payload: Any, responseType: Class<T>, block: (UUID) -> T,
+    ): T = when (val reservation = idempotencyPort.reserve(
+        IdempotencyCommand(operation, payload, "platform_break_glass_access"),
+    )) {
+        is IdempotencyReservation.Started -> block(reservation.recordId).also {
+            idempotencyPort.markSucceeded(reservation.recordId, 200, it,
+                (it as? BreakGlassAccessSummary)?.accessId)
+        }
+        is IdempotencyReservation.Replay -> objectMapper.readValue(
+            requireNotNull(reservation.responseBody) { "Stored privileged access response is missing" },
+            responseType,
+        )
+        is IdempotencyReservation.InProgress -> throw BreakGlassConflictException(
+            "Privileged access command is already in progress",
+        )
+        is IdempotencyReservation.Conflict -> throw BreakGlassConflictException(
+            "Idempotency key was used for another privileged access command",
+        )
+    }
+
+    private fun requirePlatform(tenantId: UUID?, permission: String, operation: String) {
+        platformAccess.requireAuthorized(PlatformAccessRequest(tenantId, permission, operation))
+    }
+
+    private fun requireMfa(platformUserId: UUID) {
+        val enabled = jdbcTemplate.queryForObject(
+            "SELECT mfa_enabled FROM platform_users WHERE id = ? AND status = 'active' AND deleted_at IS NULL",
+            Boolean::class.java, platformUserId,
+        ) == true
+        if (!enabled) throw BreakGlassConflictException(
+            "Active multi-factor authentication is required for privileged support access",
+        )
+    }
+
+    private fun currentPlatformUser(): UUID = when (val identity = requestContextHolder.current().identity) {
+        is RequestIdentity.Platform -> identity.platformUserId
+        else -> throw IllegalStateException("A direct platform identity is required")
+    }
+
+    private fun String.normalizedStatus() = trim().lowercase().also {
+        require(it in ACCESS_STATUSES) { "Invalid privileged access status" }
+    }
+
+    private companion object {
+        val ACCESS_STATUSES = setOf("requested", "approved", "active", "denied", "revoked", "expired")
+        val ASSURANCE_LEVELS = setOf("mfa", "phishing_resistant")
+        val PERMISSION_CODE = Regex("[a-z][a-z0-9_.-]{2,99}")
+        val ACCESS_SELECT = """
+            SELECT access.id, access.platform_user_id, access.tenant_id,
+                   access.support_ticket_id, access.action_code, access.reason,
+                   access.status, access.requested_at, access.approved_by,
+                   access.approved_at, access.activated_at, access.starts_at,
+                   access.expires_at, access.revoked_at, access.max_uses,
+                   access.use_count, access.last_used_at, access.assurance_level,
+                   access.decision_reason
+            FROM platform_break_glass_access access
+        """.trimIndent()
+    }
+}

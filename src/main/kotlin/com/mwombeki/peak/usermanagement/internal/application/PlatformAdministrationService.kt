@@ -11,12 +11,14 @@ import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.shared.secrets.SecretEnvelopeService
 import com.mwombeki.peak.usermanagement.api.AssignPlatformAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.AssignPlatformUserRoleCommand
 import com.mwombeki.peak.usermanagement.api.CreatePlatformRoleCommand
 import com.mwombeki.peak.usermanagement.api.CreatePlatformUserCommand
 import com.mwombeki.peak.usermanagement.api.DeactivatePlatformRoleCommand
 import com.mwombeki.peak.usermanagement.api.LinkPlatformOidcIdentityCommand
+import com.mwombeki.peak.usermanagement.api.InviteTenantAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.PlatformAdministrationConflictException
 import com.mwombeki.peak.usermanagement.api.PlatformAdministrationInProgressException
 import com.mwombeki.peak.usermanagement.api.PlatformAdministrationNotFoundException
@@ -37,6 +39,7 @@ import com.mwombeki.peak.usermanagement.api.RevokePlatformAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.RevokePlatformOidcIdentityCommand
 import com.mwombeki.peak.usermanagement.api.RevokePlatformUserRoleCommand
 import com.mwombeki.peak.usermanagement.api.TenantAdministratorProvisioningReceipt
+import com.mwombeki.peak.usermanagement.api.TenantUserInvitationReceipt
 import com.mwombeki.peak.usermanagement.api.TenantProfileVerificationReceipt
 import com.mwombeki.peak.usermanagement.api.UpdatePlatformRoleCommand
 import com.mwombeki.peak.usermanagement.api.UpdatePlatformUserCommand
@@ -46,6 +49,8 @@ import java.sql.Array
 import java.sql.ResultSet
 import java.sql.Timestamp
 import java.time.Instant
+import java.time.Clock
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.JdbcTemplate
@@ -64,6 +69,9 @@ class PlatformAdministrationService(
     private val transactionTemplate: TransactionTemplate,
     private val objectMapper: ObjectMapper,
     private val meterRegistry: MeterRegistry,
+    private val secretEnvelopeService: SecretEnvelopeService,
+    private val invitationSecurityProperties: TenantInvitationSecurityProperties,
+    private val clock: Clock = Clock.systemUTC(),
 ) : PlatformAdministrationPort {
 
     override fun listPlatformUsers(): List<PlatformUserSummary> {
@@ -919,6 +927,129 @@ class PlatformAdministrationService(
         }
     }
 
+    override fun inviteTenantAdministrator(
+        command: InviteTenantAdministratorCommand,
+    ): TenantUserInvitationReceipt {
+        return mutate(
+            operationType = "platform.tenant.administrator.invite",
+            permissionCode = PLATFORM_SECURITY_MANAGE_PERMISSION,
+            targetTenantId = command.tenantId,
+            requestPayload = command,
+            resourceType = "tenant_user_invitations",
+            replayType = TenantUserInvitationReceipt::class.java,
+        ) { reservationId ->
+            requireCurrentPlatformPermission(
+                "platform.tenants.manage",
+                "Tenant administrator invitation requires tenant management permission",
+            )
+            val email = command.email.normalizedEmail()
+            val fullName = command.fullName.normalizedRequired("fullName")
+            require(command.expiresInHours in 1..168) {
+                "Tenant administrator invitation expiry must be between 1 and 168 hours"
+            }
+            val activeTenant = jdbcTemplate.queryForObject(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM tenants
+                    WHERE id = ? AND deleted_at IS NULL AND status IN ('trial', 'active')
+                )
+                """.trimIndent(),
+                Boolean::class.java,
+                command.tenantId,
+            ) == true
+            if (!activeTenant) throw PlatformAdministrationNotFoundException(
+                "Active or trial tenant was not found",
+            )
+            val existingUser = jdbcTemplate.queryForObject(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM users
+                    WHERE tenant_id = ? AND lower(email) = ? AND deleted_at IS NULL
+                )
+                """.trimIndent(),
+                Boolean::class.java,
+                command.tenantId,
+                email,
+            ) == true
+            if (existingUser) throw PlatformAdministrationConflictException(
+                "A tenant user already exists for this email",
+            )
+            val tenantRoleId = jdbcTemplate.query(
+                """
+                SELECT id FROM tenant_roles
+                WHERE tenant_id = ? AND code = 'tenant_admin'
+                  AND is_system = true AND is_active = true
+                """.trimIndent(),
+                { rs, _ -> rs.getObject("id", UUID::class.java) },
+                command.tenantId,
+            ).singleOrNull() ?: throw PlatformAdministrationNotFoundException(
+                "Tenant Administrator role was not found",
+            )
+            jdbcTemplate.queryForList(
+                "SELECT assert_tenant_capacity(?, 'limit.users')",
+                command.tenantId,
+            )
+            val invitationId = UUID.randomUUID()
+            val token = InvitationTokens.newToken()
+            val expiresAt = clock.instant().plus(command.expiresInHours, ChronoUnit.HOURS)
+            try {
+                jdbcTemplate.update(
+                    """
+                    INSERT INTO tenant_user_invitations (
+                        id, tenant_id, email, full_name, tenant_role_id, token_hash,
+                        invited_by_platform_user_id, expires_at, metadata
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, jsonb_build_object('source', 'platform_onboarding'))
+                    """.trimIndent(),
+                    invitationId, command.tenantId, email, fullName, tenantRoleId,
+                    InvitationTokens.hash(token), currentPlatformActorId(),
+                    Timestamp.from(expiresAt),
+                )
+            } catch (ex: DuplicateKeyException) {
+                throw PlatformAdministrationConflictException(
+                    "A pending administrator invitation already exists for this email",
+                )
+            }
+            recordPlatformSideEffects(
+                action = "platform.tenants.administrator.invited",
+                resourceType = "tenant_user_invitations",
+                resourceId = invitationId,
+                payload = mapOf(
+                    "tenantId" to command.tenantId,
+                    "tenantRoleId" to tenantRoleId,
+                    "expiresAt" to expiresAt,
+                ),
+                idempotencyKeyId = reservationId,
+            )
+            outboxPort.enqueue(
+                OutboxEventCommand(
+                    aggregateType = "tenant_user_invitations",
+                    aggregateId = invitationId,
+                    tenantId = command.tenantId,
+                    eventType = "tenant.administrator.invited",
+                    destination = OutboxDestination.EMAIL,
+                    payload = mapOf(
+                        "invitationId" to invitationId,
+                        "tenantId" to command.tenantId,
+                        "email" to email,
+                        "fullName" to fullName,
+                        "expiresAt" to expiresAt,
+                        "tokenEnvelope" to secretEnvelopeService.encrypt(
+                            plaintext = token,
+                            associatedData = invitationId.toString(),
+                        ),
+                    ),
+                    idempotencyKeyId = null,
+                    priority = 5,
+                ),
+            )
+            TenantUserInvitationReceipt(
+                invitationId, command.tenantId, email, tenantRoleId, expiresAt,
+                token.takeIf { invitationSecurityProperties.exposeTokenInResponse },
+                replayed = false,
+            )
+        }
+    }
+
     override fun verifyTenantBusinessProfile(
         command: VerifyTenantBusinessProfileCommand,
     ): TenantProfileVerificationReceipt {
@@ -1047,6 +1178,7 @@ class PlatformAdministrationService(
             is PlatformIdentityLinkReceipt -> receipt.identityLinkId
             is TenantAdministratorProvisioningReceipt -> receipt.tenantUserId
             is TenantProfileVerificationReceipt -> receipt.tenantId
+            is TenantUserInvitationReceipt -> receipt.invitationId
             else -> null
         }
     }
@@ -1060,6 +1192,7 @@ class PlatformAdministrationService(
             is PlatformIdentityLinkReceipt -> copy(replayed = true) as T
             is TenantAdministratorProvisioningReceipt -> copy(replayed = true) as T
             is TenantProfileVerificationReceipt -> copy(replayed = true) as T
+            is TenantUserInvitationReceipt -> copy(invitationToken = null, replayed = true) as T
             else -> this
         }
     }

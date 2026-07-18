@@ -27,6 +27,7 @@ interface PlatformAdministrationPort {
     fun linkPlatformOidcIdentity(command: LinkPlatformOidcIdentityCommand): PlatformIdentityLinkReceipt
     fun revokePlatformOidcIdentity(command: RevokePlatformOidcIdentityCommand): PlatformIdentityLinkReceipt
     fun provisionTenantAdministrator(command: ProvisionTenantAdministratorCommand): TenantAdministratorProvisioningReceipt
+    fun inviteTenantAdministrator(command: InviteTenantAdministratorCommand): TenantUserInvitationReceipt
     fun verifyTenantBusinessProfile(command: VerifyTenantBusinessProfileCommand): TenantProfileVerificationReceipt
 }
 
@@ -107,6 +108,13 @@ data class ProvisionTenantAdministratorCommand(
     val email: String,
     val issuer: String,
     val subject: String,
+)
+
+data class InviteTenantAdministratorCommand(
+    val tenantId: UUID,
+    val fullName: String,
+    val email: String,
+    val expiresInHours: Long = 72,
 )
 
 data class VerifyTenantBusinessProfileCommand(

@@ -379,6 +379,7 @@ class PropertyManagementService(
             resourceType = "properties",
             replayType = PropertyMutationReceipt::class.java,
         ) { identity, reservationId ->
+            requireTenantCapacity(identity.tenantId, "limit.properties")
             val propertyId = UUID.randomUUID()
             try {
                 jdbcTemplate.update(
@@ -763,6 +764,7 @@ class PropertyManagementService(
             eventType = "property.floor.created",
             replayType = PropertyChildMutationReceipt::class.java,
         ) { identity ->
+            requireTenantCapacity(identity.tenantId, "limit.rooms")
             requireBuildingBelongsToProperty(identity.tenantId, propertyId, request.buildingId)
             val floorId = UUID.randomUUID()
             try {
@@ -2757,6 +2759,14 @@ class PropertyManagementService(
             isCompound = rs.getBoolean("is_compound"),
             isInclusive = rs.getBoolean("is_inclusive"),
             isActive = rs.getBoolean("is_active"),
+        )
+    }
+
+    private fun requireTenantCapacity(tenantId: UUID, entitlementCode: String) {
+        jdbcTemplate.queryForList(
+            "SELECT assert_tenant_capacity(?, ?)",
+            tenantId,
+            entitlementCode,
         )
     }
 

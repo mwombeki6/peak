@@ -198,6 +198,7 @@ jobs:
             -e 's|^PEAK_IMAGE=.*|PEAK_IMAGE=ghcr.io/mwombeki6/peak/peak:ci|' \
             -e 's|^POSTGRES_MIGRATOR_PASSWORD=.*|POSTGRES_MIGRATOR_PASSWORD=ci-migrator-password-1234|' \
             -e 's|^POSTGRES_APP_PASSWORD=.*|POSTGRES_APP_PASSWORD=ci-application-password-1234|' \
+            -e 's|^POSTGRES_PLATFORM_PASSWORD=.*|POSTGRES_PLATFORM_PASSWORD=ci-platform-password-1234|' \
             -e 's|^POSTGRES_WORKER_PASSWORD=.*|POSTGRES_WORKER_PASSWORD=ci-worker-password-1234|' \
             -e 's|^POSTGRES_PLATFORM_SUPPORT_PASSWORD=.*|POSTGRES_PLATFORM_SUPPORT_PASSWORD=ci-support-password-1234|' \
             -e 's|^KEYCLOAK_ADMIN_PASSWORD=.*|KEYCLOAK_ADMIN_PASSWORD=ci-keycloak-admin-password-1234|' \
@@ -297,6 +298,7 @@ jobs:
             -e 's|^PEAK_ACCEPTANCE_MODE=.*|PEAK_ACCEPTANCE_MODE=true|' \
             -e 's|^POSTGRES_MIGRATOR_PASSWORD=.*|POSTGRES_MIGRATOR_PASSWORD=acceptance-migrator-password|' \
             -e 's|^POSTGRES_APP_PASSWORD=.*|POSTGRES_APP_PASSWORD=acceptance-application-password|' \
+            -e 's|^POSTGRES_PLATFORM_PASSWORD=.*|POSTGRES_PLATFORM_PASSWORD=acceptance-platform-password|' \
             -e 's|^POSTGRES_WORKER_PASSWORD=.*|POSTGRES_WORKER_PASSWORD=acceptance-worker-password|' \
             -e 's|^POSTGRES_PLATFORM_SUPPORT_PASSWORD=.*|POSTGRES_PLATFORM_SUPPORT_PASSWORD=acceptance-support-password|' \
             -e 's|^KEYCLOAK_ADMIN_PASSWORD=.*|KEYCLOAK_ADMIN_PASSWORD=acceptance-keycloak-admin-password|' \

@@ -21,7 +21,7 @@ This directory contains the Podman Compose deployment baseline for Peak.
 7. Start PostgreSQL and wait for its health check, then run Flyway through the migration profile: `podman compose --env-file ops/production/.env -f ops/production/compose.yaml --profile migration run --rm --no-deps peak-migration`. The `--no-deps` flag is required with Podman Compose so a one-shot migration does not reconcile or replace already-running services.
 8. On the first installation only, create the initial operator in Keycloak, set `PEAK_PLATFORM_BOOTSTRAP_ENABLED=true` plus the operator name, email, exact issuer, and Keycloak subject, then run `ops/scripts/bootstrap-platform.sh`. Immediately set the flag back to `false` and clear the four bootstrap identity values. The command refuses to create a different root after platform initialization.
 9. If every platform root has lost effective access, use the audited offline recovery procedure: configure the replacement Keycloak identity, set both `PEAK_PLATFORM_BOOTSTRAP_ENABLED=true` and `PEAK_PLATFORM_RECOVERY_ENABLED=true`, then run `ops/scripts/recover-platform-root.sh`. Recovery refuses to run if any effective root remains. Immediately disable both flags and clear the identity values after success.
-10. Start API and worker: `podman compose --env-file ops/production/.env -f ops/production/compose.yaml up -d peak-api peak-worker`.
+10. Start tenant API, isolated platform API, and worker: `podman compose --env-file ops/production/.env -f ops/production/compose.yaml up -d peak-api peak-platform peak-worker`.
 11. Configure a host reverse proxy to terminate TLS for `PEAK_PUBLIC_HOST` and
     `KEYCLOAK_HOSTNAME`, forwarding only to `127.0.0.1:8080` and
     `127.0.0.1:8081`. Preserve `X-Forwarded-For`, `X-Forwarded-Proto`, and
@@ -99,7 +99,8 @@ ops/scripts/deploy.sh
 ## Database Roles
 
 - `peak_migrator`: Flyway migrations only.
-- `peak_app`: API runtime, member of `pms_app` and `pms_platform`.
+- `peak_app`: tenant/public API runtime, member only of `pms_app`.
+- `peak_platform`: isolated control-plane API runtime, member only of `pms_platform`.
 - `peak_worker`: outbox worker runtime, member of `pms_worker`.
 - `peak_platform_support`: optional readonly support login, member of `pms_readonly_support`.
 
@@ -135,8 +136,9 @@ Dry-run restore into a disposable environment before every production restore:
 1. Start a disposable PostgreSQL container or a separate Podman Compose project.
 2. Set `COMPOSE_FILE`, `ENV_FILE`, and `POSTGRES_DB` to the disposable target.
 3. Run `ops/scripts/restore-postgres.sh backups/<backup>.sql.gz`. The restore
-   idempotently recreates the non-superuser runtime roles before applying the
-   dump and aborts on the first SQL error.
+   idempotently recreates the non-superuser runtime roles and the dedicated
+   non-login tenant-continuity function owner before applying the dump, then
+   aborts on the first SQL error.
 4. Restore the Keycloak backup with
    `ops/scripts/restore-keycloak.sh backups/<keycloak-backup>.sql.gz` against a
    disposable Keycloak database when identity recovery is in scope.
@@ -150,7 +152,7 @@ Never test restore against the live production database.
 1. Set `PEAK_IMAGE` in `ops/production/.env` to the previous known-good SHA or release tag.
 2. Run `ops/scripts/validate-production-env.sh ops/production/.env`.
 3. If the failed release already ran irreversible migrations, stop and follow the migration failure procedure before starting old application code.
-4. Run `podman compose --env-file ops/production/.env -f ops/production/compose.yaml up -d peak-api peak-worker`.
+4. Run `podman compose --env-file ops/production/.env -f ops/production/compose.yaml up -d peak-api peak-platform peak-worker`.
 5. Run `ops/scripts/smoke-test.sh`.
 
 Prefer forward fixes for schema changes. Restore from backup only when data integrity is compromised and the business accepts the recovery point.

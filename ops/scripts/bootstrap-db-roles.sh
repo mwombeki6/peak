@@ -21,7 +21,8 @@ podman compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T postgres \
   psql \
     -v "peak_app_password=$POSTGRES_APP_PASSWORD" \
     -v "peak_worker_password=$POSTGRES_WORKER_PASSWORD" \
-    -v "peak_platform_password=${POSTGRES_PLATFORM_SUPPORT_PASSWORD:-$POSTGRES_APP_PASSWORD}" \
+    -v "peak_platform_password=$POSTGRES_PLATFORM_PASSWORD" \
+    -v "peak_platform_support_password=${POSTGRES_PLATFORM_SUPPORT_PASSWORD:-$POSTGRES_PLATFORM_PASSWORD}" \
     -U "$POSTGRES_MIGRATOR_USER" \
     "$POSTGRES_DB" \
   < "$BOOTSTRAP_SQL"

@@ -1,8 +1,8 @@
 package com.mwombeki.peak.integrations.internal
 
-import com.mwombeki.peak.reporting.api.ObjectStoragePort
-import com.mwombeki.peak.reporting.api.StoreReportObject
-import com.mwombeki.peak.reporting.api.StoredReportObject
+import com.mwombeki.peak.shared.outbound.ObjectStoragePort
+import com.mwombeki.peak.shared.outbound.StoreObject
+import com.mwombeki.peak.shared.outbound.StoredObject
 import io.minio.BucketExistsArgs
 import io.minio.GetBucketEncryptionArgs
 import io.minio.GetBucketPolicyArgs
@@ -88,8 +88,8 @@ class S3ReportObjectStorageAdapter(
     }
 
     override fun putIfAbsent(
-        command: StoreReportObject,
-    ): StoredReportObject {
+        command: StoreObject,
+    ): StoredObject {
         val existing = statOrNull(command.objectKey)
         if (existing != null) {
             val existingHash = existing.userMetadata().caseInsensitiveValue(
@@ -100,7 +100,7 @@ class S3ReportObjectStorageAdapter(
             check(existingHash == command.sha256) {
                 "Object key already contains different report content"
             }
-            return StoredReportObject(
+            return StoredObject(
                 objectKey = command.objectKey,
                 etag = existing.etag(),
                 contentLength = existing.size(),
@@ -122,7 +122,7 @@ class S3ReportObjectStorageAdapter(
                 .sse(ServerSideEncryption.S3())
                 .build(),
         )
-        return StoredReportObject(
+        return StoredObject(
             objectKey = command.objectKey,
             etag = response.etag(),
             contentLength = command.bytes.size.toLong(),
@@ -202,7 +202,7 @@ class DisabledReportObjectStorageAdapter(
     override fun validatePrivateEncryptedBucket() =
         error("Report object storage is disabled")
     override fun isHealthy() = false
-    override fun putIfAbsent(command: StoreReportObject): StoredReportObject =
+    override fun putIfAbsent(command: StoreObject): StoredObject =
         error("Report object storage is disabled")
     override fun presignedGet(objectKey: String, expiry: Duration): String =
         error("Report object storage is disabled")

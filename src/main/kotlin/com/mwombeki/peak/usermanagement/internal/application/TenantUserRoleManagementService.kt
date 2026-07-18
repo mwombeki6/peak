@@ -780,18 +780,12 @@ class TenantUserRoleManagementService(
     }
 
     private fun lockTenantForAdministratorContinuity(tenantId: UUID) {
-        val lockedTenantId = jdbcTemplate.query(
-            """
-            SELECT id
-            FROM tenants
-            WHERE id = ?
-              AND deleted_at IS NULL
-            FOR UPDATE
-            """.trimIndent(),
-            { rs, _ -> rs.getObject("id", UUID::class.java) },
+        val locked = jdbcTemplate.queryForObject(
+            "SELECT public.lock_tenant_administrator_continuity(?)",
+            Boolean::class.java,
             tenantId,
-        ).singleOrNull()
-        if (lockedTenantId == null) {
+        ) == true
+        if (!locked) {
             throw TenantUserRoleManagementNotFoundException("Tenant was not found")
         }
     }

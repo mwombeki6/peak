@@ -137,6 +137,13 @@ class TenantAdministrationService(
                 requireTenantPermission(command.tenantId, MODULE_MANAGE_PERMISSION)
                 val moduleId = command.moduleId.normalizedModuleId()
                 requireManageableModule(moduleId)
+                if (enabled) {
+                    jdbcTemplate.queryForList(
+                        "SELECT assert_tenant_entitlement_enabled(?, ?)",
+                        command.tenantId,
+                        "module.$moduleId",
+                    )
+                }
                 val reservation = idempotencyPort.reserve(
                     IdempotencyCommand(
                         operationType = operationType,

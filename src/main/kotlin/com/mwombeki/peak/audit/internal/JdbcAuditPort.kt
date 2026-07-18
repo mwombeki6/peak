@@ -2,6 +2,8 @@ package com.mwombeki.peak.audit.internal
 
 import com.mwombeki.peak.audit.api.AuditPort
 import com.mwombeki.peak.audit.api.PlatformAuditEvent
+import com.mwombeki.peak.audit.api.PlatformAuditQueryPort
+import com.mwombeki.peak.audit.api.PlatformAuditTimelineEntry
 import com.mwombeki.peak.audit.api.SystemPlatformAuditEvent
 import com.mwombeki.peak.audit.api.TenantAuditEvent
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
@@ -15,6 +17,7 @@ import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.ObjectMapper
+import java.util.UUID
 
 @Component
 class JdbcAuditPort(
@@ -25,7 +28,35 @@ class JdbcAuditPort(
     private val payloadSanitizer: AuditPayloadSanitizer,
     private val objectMapper: ObjectMapper,
     private val meterRegistry: MeterRegistry,
-) : AuditPort {
+) : AuditPort, PlatformAuditQueryPort {
+    override fun tenantTimeline(tenantId: UUID, limit: Int): List<PlatformAuditTimelineEntry> {
+        require(limit in 1..500) { "Audit timeline limit must be between 1 and 500" }
+        return jdbcTemplate.query(
+            """
+            SELECT id, platform_user_id, action, entity_type, entity_id,
+                   outcome, correlation_id, created_at
+            FROM platform_audit_logs
+            WHERE tenant_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            """.trimIndent(),
+            { rs, _ ->
+                PlatformAuditTimelineEntry(
+                    id = rs.getObject("id", UUID::class.java),
+                    platformUserId = rs.getObject("platform_user_id", UUID::class.java),
+                    action = rs.getString("action"),
+                    entityType = rs.getString("entity_type"),
+                    entityId = rs.getObject("entity_id", UUID::class.java),
+                    outcome = rs.getString("outcome"),
+                    correlationId = rs.getString("correlation_id"),
+                    createdAt = rs.getTimestamp("created_at").toInstant(),
+                )
+            },
+            tenantId,
+            limit,
+        )
+    }
+
     override fun recordTenantEvent(event: TenantAuditEvent) {
         requireActiveTransaction()
 

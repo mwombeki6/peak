@@ -196,6 +196,14 @@ class TenantAdministrationControllerIntegrationTests {
         )
         jdbcTemplate.update(
             """
+            INSERT INTO plan_entitlements (
+                plan_id, entitlement_code, entitlement_value, is_enabled
+            ) VALUES (?, 'module.property', '{"moduleId":"property"}'::jsonb, true)
+            """.trimIndent(),
+            fixture.planId,
+        )
+        jdbcTemplate.update(
+            """
             INSERT INTO tenant_modules (tenant_id, module_id, is_enabled, is_configured)
             VALUES (?, 'tenant_admin', true, true)
             """.trimIndent(),

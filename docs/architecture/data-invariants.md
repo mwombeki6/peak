@@ -15,8 +15,11 @@
 | Document sequences | Invoice, credit and operational numbers | Locked database allocator with uniqueness constraints |
 | Retention | Idempotency, realtime, reports and provider evidence | Bounded claim/cleanup functions with provenance and replay-safe state |
 | Soft delete | Mutable master data | `deleted_at` plus uniqueness/read predicates; financial/audit history is never soft-deleted |
+| Tenant control | SaaS lifecycle | Desired/actual state, optimistic versions and durable workflows; commercial restriction never interrupts an in-house stay |
+| Privileged support | Tenant support access | Open ticket, exact permission, MFA, separate approver, bounded duration/uses, exact session selector and immutable evidence |
+| Commercial capacity | Properties, rooms, users, outlets | Database advisory lock plus effective plan/override entitlement assertion in the owning write transaction |
+| Configuration rollout | Portfolio and feature control | Immutable hashed revisions, deterministic precedence, canary/apply/rollback states and attributable approvals |
 
-Applied migrations `V1–V69` are immutable. `V70` adds the verified property-payment
-timeline index; `V69` aligned operational staff references and `V68` introduced
-the Daily Control schema. Any later remediation starts at `V71`; application-only
-boundary fixes do not create empty migrations.
+Applied migrations `V1–V70` are immutable. `V71` adds the hospitality platform
+control plane. Any later remediation starts at `V72`; application-only boundary
+fixes do not create empty migrations.

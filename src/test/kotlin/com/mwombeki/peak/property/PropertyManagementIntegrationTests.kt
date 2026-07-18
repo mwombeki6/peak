@@ -445,6 +445,18 @@ class PropertyManagementIntegrationTests {
             "tenant_${fixture.tenantId}".replace("-", "_"),
             fixture.planId,
         )
+        listOf("property", "communications").forEach { moduleId ->
+            jdbcTemplate.update(
+                """
+                INSERT INTO plan_entitlements (
+                    plan_id, entitlement_code, entitlement_value, is_enabled
+                ) VALUES (?, ?, jsonb_build_object('moduleId', ?), true)
+                """.trimIndent(),
+                fixture.planId,
+                "module.$moduleId",
+                moduleId,
+            )
+        }
         jdbcTemplate.update(
             """
             INSERT INTO tenant_modules (tenant_id, module_id, is_enabled, is_configured)

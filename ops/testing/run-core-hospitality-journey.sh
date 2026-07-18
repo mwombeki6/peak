@@ -95,7 +95,7 @@ podman run --rm \
   --delay-request 250 \
   --reporters cli,json \
   --reporter-json-export /etc/newman/evidence/newman-private.json \
-  --env-var "baseUrl=http://127.0.0.1:8080" \
+  --env-var "baseUrl=$BASE_URL" \
   --env-var "accessToken=$access_token" \
   --env-var "runId=$run_id" \
   --env-var "tenantId=$tenant_id" \

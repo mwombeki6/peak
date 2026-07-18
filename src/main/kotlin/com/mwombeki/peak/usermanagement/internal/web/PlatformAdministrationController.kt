@@ -8,6 +8,7 @@ import com.mwombeki.peak.usermanagement.api.CreatePlatformRoleCommand
 import com.mwombeki.peak.usermanagement.api.CreatePlatformUserCommand
 import com.mwombeki.peak.usermanagement.api.DeactivatePlatformRoleCommand
 import com.mwombeki.peak.usermanagement.api.LinkPlatformOidcIdentityCommand
+import com.mwombeki.peak.usermanagement.api.InviteTenantAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.PlatformAdministrationConflictException
 import com.mwombeki.peak.usermanagement.api.PlatformAdministrationInProgressException
 import com.mwombeki.peak.usermanagement.api.PlatformAdministrationNotFoundException
@@ -35,6 +36,8 @@ import jakarta.validation.Valid
 import jakarta.validation.constraints.Email
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotEmpty
+import jakarta.validation.constraints.Max
+import jakarta.validation.constraints.Min
 import java.net.URI
 import java.time.Instant
 import java.util.UUID
@@ -286,6 +289,18 @@ class PlatformAdministrationController(
             .body(receipt.toHttpResponse())
     }
 
+    @PostMapping("/tenants/{tenantId}/administrator-invitations")
+    fun inviteTenantAdministrator(
+        @PathVariable tenantId: UUID,
+        @Valid @RequestBody request: InviteTenantAdministratorHttpRequest,
+    ) = ResponseEntity.status(HttpStatus.CREATED).body(
+        platformAdministrationPort.inviteTenantAdministrator(
+            InviteTenantAdministratorCommand(
+                tenantId, request.fullName, request.email, request.expiresInHours,
+            ),
+        ),
+    )
+
     @PostMapping("/tenants/{tenantId}/profile/verify")
     fun verifyTenantBusinessProfile(
         @PathVariable tenantId: UUID,
@@ -497,6 +512,12 @@ data class ProvisionTenantAdministratorHttpRequest(
     val issuer: String,
     @field:NotBlank
     val subject: String,
+)
+
+data class InviteTenantAdministratorHttpRequest(
+    @field:NotBlank val fullName: String,
+    @field:NotBlank @field:Email val email: String,
+    @field:Min(1) @field:Max(168) val expiresInHours: Long = 72,
 )
 
 data class PlatformUserHttpResponse(

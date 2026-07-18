@@ -1,6 +1,6 @@
 package com.mwombeki.peak.integrations.internal
 
-import com.mwombeki.peak.reporting.api.ObjectStoragePort
+import com.mwombeki.peak.shared.outbound.ObjectStoragePort
 import jakarta.annotation.PostConstruct
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Component

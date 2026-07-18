@@ -95,7 +95,8 @@ restored_runtime_roles="$(restored_db "
   FROM pg_roles
   WHERE rolname IN (
     'pms_app', 'pms_platform', 'pms_worker', 'pms_readonly_support',
-    'peak_app', 'peak_worker', 'peak_platform_support'
+    'pms_tenant_continuity_owner', 'peak_app', 'peak_worker',
+    'peak_platform', 'peak_platform_support'
   )
     AND rolsuper = false
     AND rolcreatedb = false
@@ -109,7 +110,7 @@ restored_runtime_memberships="$(restored_db "
   JOIN pg_roles member_role ON member_role.oid = memberships.member
   WHERE (member_role.rolname, granted_role.rolname) IN (
     ('peak_app', 'pms_app'),
-    ('peak_app', 'pms_platform'),
+    ('peak_platform', 'pms_platform'),
     ('peak_worker', 'pms_worker'),
     ('peak_platform_support', 'pms_readonly_support')
   )
@@ -121,8 +122,31 @@ restored_runtime_owned_relations="$(restored_db "
   WHERE relation.relkind IN ('r', 'p', 'v', 'm', 'S')
     AND owner_role.rolname IN (
       'pms_app', 'pms_platform', 'pms_worker', 'pms_readonly_support',
-      'peak_app', 'peak_worker', 'peak_platform_support'
+      'pms_tenant_continuity_owner', 'peak_app', 'peak_worker',
+      'peak_platform', 'peak_platform_support'
     )
+")"
+restored_continuity_owner="$(restored_db "
+  SELECT owner_role.rolname
+  FROM pg_catalog.pg_proc AS function
+  JOIN pg_catalog.pg_namespace AS namespace
+    ON namespace.oid = function.pronamespace
+  JOIN pg_catalog.pg_roles AS owner_role
+    ON owner_role.oid = function.proowner
+  WHERE namespace.nspname = 'public'
+    AND function.proname = 'lock_tenant_administrator_continuity'
+    AND function.pronargs = 1
+")"
+restored_continuity_owner_hardened="$(restored_db "
+  SELECT count(*)
+  FROM pg_catalog.pg_roles
+  WHERE rolname = 'pms_tenant_continuity_owner'
+    AND rolcanlogin = false
+    AND rolinherit = false
+    AND rolsuper = false
+    AND rolcreatedb = false
+    AND rolcreaterole = false
+    AND rolbypassrls = false
 ")"
 
 KEYCLOAK_BIND_ADDRESS=127.0.0.2 \
@@ -160,9 +184,11 @@ assert_same reportArtifacts "$source_reports" "$restored_reports"
 assert_same keycloakRealms "$source_realms" "$restored_realms"
 assert_same keycloakClients "$source_clients" "$restored_clients"
 assert_same keycloakUsers "$source_users" "$restored_users"
-assert_same hardenedRuntimeRoles 7 "$restored_runtime_roles"
+assert_same hardenedRuntimeRoles 9 "$restored_runtime_roles"
 assert_same runtimeRoleMemberships 4 "$restored_runtime_memberships"
 assert_same runtimeOwnedRelations 0 "$restored_runtime_owned_relations"
+assert_same continuityFunctionOwner pms_tenant_continuity_owner "$restored_continuity_owner"
+assert_same hardenedContinuityOwner 1 "$restored_continuity_owner_hardened"
 
 jq -n \
   --arg schema "$restored_schema" \
@@ -175,6 +201,8 @@ jq -n \
   --arg runtimeRoles "$restored_runtime_roles" \
   --arg runtimeMemberships "$restored_runtime_memberships" \
   --arg runtimeOwnedRelations "$restored_runtime_owned_relations" \
+  --arg continuityFunctionOwner "$restored_continuity_owner" \
+  --arg continuityOwnerHardened "$restored_continuity_owner_hardened" \
   --argjson keycloakAuthentication "$restored_authentication" \
   --arg postgresBackup "$(sha256sum "$postgres_backup" | cut -d' ' -f1)" \
   --arg keycloakBackup "$(sha256sum "$keycloak_backup" | cut -d' ' -f1)" \
@@ -183,7 +211,9 @@ jq -n \
     clients:($keycloakClients|tonumber), users:($keycloakUsers|tonumber),
     authenticationVerified:$keycloakAuthentication},
     runtimeRoles:{hardened:($runtimeRoles|tonumber), memberships:($runtimeMemberships|tonumber),
-    ownedRelations:($runtimeOwnedRelations|tonumber), verified:true},
+    ownedRelations:($runtimeOwnedRelations|tonumber),
+    continuityFunctionOwner:$continuityFunctionOwner,
+    continuityOwnerHardened:($continuityOwnerHardened|tonumber), verified:true},
     backupSha256:{postgres:$postgresBackup,keycloak:$keycloakBackup}}' \
   > "$EVIDENCE_DIR/backup-restore-drill.json"
 

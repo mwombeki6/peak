@@ -1,9 +1,15 @@
 package com.mwombeki.peak.shared.database
 
 import com.mwombeki.peak.TestcontainersConfiguration
+import java.sql.Connection
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import javax.sql.DataSource
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import org.springframework.beans.factory.annotation.Autowired
@@ -24,6 +30,9 @@ class RuntimeDatabaseRoleIntegrationTests {
 
     @Autowired
     private lateinit var transactionTemplate: TransactionTemplate
+
+    @Autowired
+    private lateinit var dataSource: DataSource
 
     @Test
     fun apiRoleCannotReadMigrationHistoryOrRunWorkerClaims() {
@@ -186,6 +195,156 @@ class RuntimeDatabaseRoleIntegrationTests {
     }
 
     @Test
+    fun tenantContinuityLockIsNarrowlyOwnedAndCallableOnlyByApiRole() {
+        val tenant = insertTenantFixture(status = "active")
+        val otherTenant = insertTenantFixture(status = "active")
+
+        val functionSecurity = jdbcTemplate.queryForMap(
+            """
+            SELECT owner.rolname AS owner_name,
+                   owner.rolcanlogin AS owner_can_login,
+                   owner.rolinherit AS owner_inherits,
+                   owner.rolsuper AS owner_is_superuser,
+                   owner.rolbypassrls AS owner_bypasses_rls,
+                   function.prosecdef AS security_definer,
+                   COALESCE(
+                       'search_path=pg_catalog, pg_temp' = ANY(function.proconfig),
+                       false
+                   ) AS safe_search_path
+            FROM pg_catalog.pg_proc AS function
+            JOIN pg_catalog.pg_namespace AS namespace
+              ON namespace.oid = function.pronamespace
+            JOIN pg_catalog.pg_roles AS owner
+              ON owner.oid = function.proowner
+            WHERE namespace.nspname = 'public'
+              AND function.proname = 'lock_tenant_administrator_continuity'
+              AND function.pronargs = 1
+            """.trimIndent(),
+        )
+        assertEquals(CONTINUITY_OWNER_ROLE, functionSecurity["owner_name"])
+        assertEquals(false, functionSecurity["owner_can_login"])
+        assertEquals(false, functionSecurity["owner_inherits"])
+        assertEquals(false, functionSecurity["owner_is_superuser"])
+        assertEquals(false, functionSecurity["owner_bypasses_rls"])
+        assertEquals(true, functionSecurity["security_definer"])
+        assertEquals(true, functionSecurity["safe_search_path"])
+
+        assertTrue(roleCanExecuteContinuityLock(API_ROLE))
+        listOf(PLATFORM_ROLE, WORKER_ROLE, SUPPORT_ROLE).forEach { role ->
+            assertFalse(roleCanExecuteContinuityLock(role))
+            assertFailsWith<DataAccessException> {
+                inTransaction {
+                    setRole(role)
+                    jdbcTemplate.queryForObject(
+                        "SELECT public.lock_tenant_administrator_continuity(?)",
+                        Boolean::class.java,
+                        tenant.tenantId,
+                    )
+                }
+            }
+        }
+
+        val locked = inTransaction {
+            setRole(API_ROLE)
+            bindTenant(tenant.tenantId)
+            jdbcTemplate.queryForObject(
+                "SELECT public.lock_tenant_administrator_continuity(?)",
+                Boolean::class.java,
+                tenant.tenantId,
+            )
+        }
+        assertEquals(true, locked)
+
+        assertFailsWith<DataAccessException> {
+            inTransaction {
+                setRole(API_ROLE)
+                bindTenant(tenant.tenantId)
+                jdbcTemplate.queryForObject(
+                    "SELECT public.lock_tenant_administrator_continuity(?)",
+                    Boolean::class.java,
+                    otherTenant.tenantId,
+                )
+            }
+        }
+
+        assertFalse(roleHasTenantPrivilege(API_ROLE, "INSERT"))
+        assertFalse(roleHasTenantPrivilege(API_ROLE, "UPDATE"))
+        assertFalse(roleHasTenantPrivilege(API_ROLE, "DELETE"))
+        assertFalse(roleHasTenantColumnPrivilege(API_ROLE, "id", "UPDATE"))
+        assertFalse(roleHasTenantPrivilege(CONTINUITY_OWNER_ROLE, "UPDATE"))
+        assertFalse(roleHasTenantPrivilege(CONTINUITY_OWNER_ROLE, "INSERT"))
+        assertFalse(roleHasTenantPrivilege(CONTINUITY_OWNER_ROLE, "DELETE"))
+        assertTrue(roleHasTenantColumnPrivilege(CONTINUITY_OWNER_ROLE, "id", "UPDATE"))
+        assertFalse(
+            roleHasTenantColumnPrivilege(CONTINUITY_OWNER_ROLE, "deleted_at", "UPDATE"),
+        )
+        assertEquals(
+            0,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*)
+                FROM pg_catalog.pg_auth_members AS membership
+                JOIN pg_catalog.pg_roles AS granted_role
+                  ON granted_role.oid = membership.roleid
+                JOIN pg_catalog.pg_roles AS member_role
+                  ON member_role.oid = membership.member
+                WHERE granted_role.rolname = ?
+                   OR member_role.rolname = ?
+                """.trimIndent(),
+                Int::class.java,
+                CONTINUITY_OWNER_ROLE,
+                CONTINUITY_OWNER_ROLE,
+            ),
+        )
+    }
+
+    @Test
+    fun apiRoleContinuityLockSerializesConcurrentBootstrapTransactions() {
+        val tenant = insertTenantFixture(status = "active")
+        val firstConnection = dataSource.connection
+        val secondAttempting = CountDownLatch(1)
+        val executor = Executors.newSingleThreadExecutor()
+
+        try {
+            firstConnection.autoCommit = false
+            bindTenantRuntimeConnection(firstConnection, tenant.tenantId)
+            assertTrue(acquireTenantContinuityLock(firstConnection, tenant.tenantId))
+
+            val secondLock = executor.submit<Boolean> {
+                dataSource.connection.use { secondConnection ->
+                    secondConnection.autoCommit = false
+                    try {
+                        bindTenantRuntimeConnection(secondConnection, tenant.tenantId)
+                        secondAttempting.countDown()
+                        val acquired = acquireTenantContinuityLock(
+                            secondConnection,
+                            tenant.tenantId,
+                        )
+                        secondConnection.commit()
+                        acquired
+                    } catch (ex: Exception) {
+                        secondConnection.rollback()
+                        throw ex
+                    }
+                }
+            }
+
+            assertTrue(secondAttempting.await(5, TimeUnit.SECONDS))
+            Thread.sleep(250)
+            assertFalse(secondLock.isDone, "Second bootstrap must wait for the first transaction")
+
+            firstConnection.commit()
+            assertTrue(secondLock.get(5, TimeUnit.SECONDS))
+        } finally {
+            if (!firstConnection.isClosed) {
+                runCatching { firstConnection.rollback() }
+                firstConnection.close()
+            }
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
     fun onlyPlatformRuntimeCanEvaluateExactSupportSessionGrant() {
         val platformFixture = insertPlatformFixture()
         val tenantFixture = insertTenantFixture(status = "active")
@@ -220,6 +379,34 @@ class RuntimeDatabaseRoleIntegrationTests {
                     supportSessionId,
                     tenantFixture.tenantId,
                     "platform.tenants.manage",
+                )
+            }
+        }
+    }
+
+    @Test
+    fun tenantAndPlatformRuntimeRolesCannotCrossControlPlaneWriteBoundaries() {
+        val platformFixture = insertPlatformFixture()
+        val tenantFixture = insertTenantFixture(status = "active")
+
+        assertFailsWith<DataAccessException> {
+            inTransaction {
+                setRole(API_ROLE)
+                bindTenant(tenantFixture.tenantId)
+                jdbcTemplate.queryForObject(
+                    "SELECT count(*) FROM platform_releases",
+                    Int::class.java,
+                )
+            }
+        }
+
+        assertFailsWith<DataAccessException> {
+            inTransaction {
+                setRole(PLATFORM_ROLE)
+                bindPlatform(platformFixture.platformUserId)
+                jdbcTemplate.update(
+                    "INSERT INTO properties (tenant_id, name, code) VALUES (?, 'Forbidden', 'NOPE')",
+                    tenantFixture.tenantId,
                 )
             }
         }
@@ -477,10 +664,71 @@ class RuntimeDatabaseRoleIntegrationTests {
     }
 
     private fun setRole(role: String) {
-        require(role in setOf(API_ROLE, PLATFORM_ROLE, WORKER_ROLE)) {
+        require(role in setOf(API_ROLE, PLATFORM_ROLE, WORKER_ROLE, SUPPORT_ROLE)) {
             "Unexpected test role: $role"
         }
         jdbcTemplate.execute("SET LOCAL ROLE $role")
+    }
+
+    private fun roleCanExecuteContinuityLock(role: String): Boolean {
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT pg_catalog.has_function_privilege(
+                ?,
+                'public.lock_tenant_administrator_continuity(uuid)',
+                'EXECUTE'
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            role,
+        ) == true
+    }
+
+    private fun roleHasTenantPrivilege(role: String, privilege: String): Boolean {
+        return jdbcTemplate.queryForObject(
+            "SELECT pg_catalog.has_table_privilege(?, 'public.tenants', ?)",
+            Boolean::class.java,
+            role,
+            privilege,
+        ) == true
+    }
+
+    private fun roleHasTenantColumnPrivilege(
+        role: String,
+        column: String,
+        privilege: String,
+    ): Boolean {
+        return jdbcTemplate.queryForObject(
+            "SELECT pg_catalog.has_column_privilege(?, 'public.tenants', ?, ?)",
+            Boolean::class.java,
+            role,
+            column,
+            privilege,
+        ) == true
+    }
+
+    private fun bindTenantRuntimeConnection(connection: Connection, tenantId: UUID) {
+        connection.createStatement().use { statement ->
+            statement.execute("SET LOCAL ROLE $API_ROLE")
+        }
+        connection.prepareStatement(
+            "SELECT pg_catalog.set_config('app.current_tenant_id', ?, true)",
+        ).use { statement ->
+            statement.setString(1, tenantId.toString())
+            statement.executeQuery().use { rows -> assertTrue(rows.next()) }
+        }
+    }
+
+    private fun acquireTenantContinuityLock(connection: Connection, tenantId: UUID): Boolean {
+        return connection.prepareStatement(
+            "SELECT public.lock_tenant_administrator_continuity(?)",
+        ).use { statement ->
+            statement.setObject(1, tenantId)
+            statement.executeQuery().use { rows ->
+                assertTrue(rows.next())
+                rows.getBoolean(1)
+            }
+        }
     }
 
     private fun bindTenant(tenantId: UUID) {
@@ -621,12 +869,18 @@ class RuntimeDatabaseRoleIntegrationTests {
     ): UUID {
         val supportSessionId = UUID.randomUUID()
         val approver = insertPlatformFixture()
+        val ticketId = UUID.randomUUID()
+        jdbcTemplate.update(
+            "INSERT INTO support_tickets (id, tenant_id, ticket_number, subject) VALUES (?, ?, ?, ?)",
+            ticketId, tenantId, "SUP-${ticketId.toString().take(8)}", "Runtime role access",
+        )
         jdbcTemplate.update(
             """
             INSERT INTO platform_break_glass_access (
                 id,
                 platform_user_id,
                 tenant_id,
+                support_ticket_id,
                 action_code,
                 reason,
                 status,
@@ -636,7 +890,7 @@ class RuntimeDatabaseRoleIntegrationTests {
                 starts_at,
                 expires_at
             ) VALUES (
-                ?, ?, ?, ?, 'Runtime role support grant', 'active', ?,
+                ?, ?, ?, ?, ?, 'Runtime role support grant', 'active', ?,
                 now(), now(), now() - interval '1 minute',
                 now() + interval '1 hour'
             )
@@ -644,6 +898,7 @@ class RuntimeDatabaseRoleIntegrationTests {
             supportSessionId,
             platformUserId,
             tenantId,
+            ticketId,
             actionCode,
             approver.platformUserId,
         )
@@ -768,5 +1023,7 @@ class RuntimeDatabaseRoleIntegrationTests {
         const val API_ROLE = "pms_app"
         const val PLATFORM_ROLE = "pms_platform"
         const val WORKER_ROLE = "pms_worker"
+        const val SUPPORT_ROLE = "pms_readonly_support"
+        const val CONTINUITY_OWNER_ROLE = "pms_tenant_continuity_owner"
     }
 }

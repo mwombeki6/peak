@@ -5,12 +5,12 @@ import com.mwombeki.peak.nightaudit.api.NightAuditCloseSnapshotResponse
 import com.mwombeki.peak.reliability.api.ClaimedOutboxEvent
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventHandler
-import com.mwombeki.peak.reporting.api.ObjectStoragePort
-import com.mwombeki.peak.reporting.api.StoreReportObject
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.shared.outbound.ObjectStoragePort
+import com.mwombeki.peak.shared.outbound.StoreObject
 import io.micrometer.core.instrument.MeterRegistry
 import java.security.MessageDigest
 import java.sql.Timestamp
@@ -66,7 +66,7 @@ class ReportGenerationOutboxHandler(
             val objectKey = objectKey(work)
             val stored = try {
                 objectStoragePort.putIfAbsent(
-                    StoreReportObject(
+                    StoreObject(
                         objectKey = objectKey,
                         bytes = bytes,
                         contentType = PDF_CONTENT_TYPE,

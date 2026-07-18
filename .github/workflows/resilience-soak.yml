@@ -59,6 +59,7 @@ jobs:
             -e 's|^PEAK_ACCEPTANCE_MODE=.*|PEAK_ACCEPTANCE_MODE=true|' \
             -e 's|^POSTGRES_MIGRATOR_PASSWORD=.*|POSTGRES_MIGRATOR_PASSWORD=soak-migrator-password|' \
             -e 's|^POSTGRES_APP_PASSWORD=.*|POSTGRES_APP_PASSWORD=soak-application-password|' \
+            -e 's|^POSTGRES_PLATFORM_PASSWORD=.*|POSTGRES_PLATFORM_PASSWORD=soak-platform-password|' \
             -e 's|^POSTGRES_WORKER_PASSWORD=.*|POSTGRES_WORKER_PASSWORD=soak-worker-password|' \
             -e 's|^POSTGRES_PLATFORM_SUPPORT_PASSWORD=.*|POSTGRES_PLATFORM_SUPPORT_PASSWORD=soak-support-password|' \
             -e 's|^KEYCLOAK_ADMIN_PASSWORD=.*|KEYCLOAK_ADMIN_PASSWORD=soak-keycloak-admin-password|' \

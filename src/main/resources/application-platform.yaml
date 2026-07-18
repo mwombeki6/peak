@@ -1,0 +1,15 @@
+spring:
+  flyway:
+    enabled: false
+
+peak:
+  runtime:
+    mode: platform
+  realtime:
+    journal:
+      fanout-enabled: false
+  reliability:
+    outbox:
+      worker:
+        enabled: false
+        health-required: true

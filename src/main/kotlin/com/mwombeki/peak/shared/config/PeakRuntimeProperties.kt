@@ -9,6 +9,7 @@ data class PeakRuntimeProperties(
 
 enum class PeakRuntimeMode {
     API,
+    PLATFORM,
     WORKER,
     MIGRATION,
     BOOTSTRAP,

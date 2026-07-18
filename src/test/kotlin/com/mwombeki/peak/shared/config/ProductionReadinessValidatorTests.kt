@@ -150,6 +150,32 @@ class ProductionReadinessValidatorTests {
     }
 
     @Test
+    fun allowsOnlyIsolatedDatabaseLoginForPlatformRuntime() {
+        validator(
+            environment = secureProdEnvironment()
+                .withProperty("spring.datasource.username", "peak_platform")
+                .withProperty("spring.datasource.password", "not-local-platform-secret")
+                .withProperty("spring.flyway.enabled", "false"),
+            runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.PLATFORM),
+            httpSecurityProperties = secureHttpProperties(),
+            requestContextProperties = secureRequestContextProperties(),
+        ).afterSingletonsInstantiated()
+
+        val error = assertFailsWith<IllegalStateException> {
+            validator(
+                environment = secureProdEnvironment()
+                    .withProperty("spring.datasource.username", "peak_app")
+                    .withProperty("spring.datasource.password", "not-local-platform-secret")
+                    .withProperty("spring.flyway.enabled", "false"),
+                runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.PLATFORM),
+                httpSecurityProperties = secureHttpProperties(),
+                requestContextProperties = secureRequestContextProperties(),
+            ).afterSingletonsInstantiated()
+        }
+        assertTrue(requireNotNull(error.message).contains("isolated peak_platform"))
+    }
+
+    @Test
     fun rejectsInvitationTokenExposureInProduction() {
         val error = assertFailsWith<IllegalStateException> {
             validator(

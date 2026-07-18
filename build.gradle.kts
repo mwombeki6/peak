@@ -177,6 +177,9 @@ kapt {
 }
 
 tasks.withType<Test>().configureEach {
+    // Spring integration contexts and container clients retain native resources;
+    // bounded forks keep the complete suite deterministic on CI-sized runners.
+    forkEvery = 25
     systemProperty(
         "spring.profiles.active",
         System.getProperty("spring.profiles.active") ?: "test",
