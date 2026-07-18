@@ -43,6 +43,9 @@ PY
 )"
 
 OIDC_CONFIGURATION="$(curl -fsS "$BASE_URL/realms/$REALM/.well-known/openid-configuration")"
+REALM_RESPONSE="$(curl -fsS \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  "$BASE_URL/admin/realms/$REALM")"
 CLIENTS_RESPONSE="$(curl -fsS \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   "$BASE_URL/admin/realms/$REALM/clients?clientId=peak-api")"
@@ -69,6 +72,7 @@ WEB_MAPPERS_RESPONSE="$(curl -fsS \
   "$BASE_URL/admin/realms/$REALM/clients/$WEB_CLIENT_ID/protocol-mappers/models")"
 
 OIDC_CONFIGURATION="$OIDC_CONFIGURATION" \
+REALM_RESPONSE="$REALM_RESPONSE" \
 CLIENTS_RESPONSE="$CLIENTS_RESPONSE" \
 WEB_CLIENTS_RESPONSE="$WEB_CLIENTS_RESPONSE" \
 WEB_MAPPERS_RESPONSE="$WEB_MAPPERS_RESPONSE" \
@@ -86,12 +90,37 @@ expected_audience = os.environ["EXPECTED_AUDIENCE"]
 expected_app_origin = os.environ["EXPECTED_APP_ORIGIN"].rstrip("/")
 
 oidc = json.loads(os.environ["OIDC_CONFIGURATION"])
+realm = json.loads(os.environ["REALM_RESPONSE"])
 issuer = (oidc.get("issuer") or "").rstrip("/")
 jwks_uri = oidc.get("jwks_uri")
 if issuer != expected_issuer:
     raise SystemExit(f"Unexpected issuer: {issuer!r}; expected {expected_issuer!r}")
 if not jwks_uri:
     raise SystemExit("OIDC configuration does not expose jwks_uri")
+
+security_expectations = {
+    "bruteForceProtected": True,
+    "organizationsEnabled": True,
+    "eventsEnabled": True,
+    "adminEventsEnabled": True,
+    "adminEventsDetailsEnabled": True,
+    "revokeRefreshToken": True,
+}
+for field, expected in security_expectations.items():
+    if realm.get(field) is not expected:
+        raise SystemExit(f"Keycloak realm must set {field}={expected!r}")
+if realm.get("maxFailure", 999) > 5:
+    raise SystemExit("Keycloak brute-force maxFailure must be at most 5")
+if realm.get("accessTokenLifespan", 999999) > 300:
+    raise SystemExit("Keycloak access tokens must expire within five minutes")
+if realm.get("otpPolicyAlgorithm") not in {"HmacSHA256", "HmacSHA512"}:
+    raise SystemExit("Keycloak OTP must use SHA-256 or SHA-512")
+if realm.get("otpPolicyDigits", 0) < 6:
+    raise SystemExit("Keycloak OTP must use at least six digits")
+password_policy = realm.get("passwordPolicy") or ""
+for requirement in ("length(12)", "digits(1)", "upperCase(1)", "lowerCase(1)", "specialChars(1)"):
+    if requirement not in password_policy:
+        raise SystemExit(f"Keycloak password policy is missing {requirement}")
 
 api_clients = json.loads(os.environ["CLIENTS_RESPONSE"])
 if len(api_clients) != 1:

@@ -25,6 +25,10 @@ class PosConfigurationService(
             "outlets",
             request,
         ) { tenantId, id ->
+            jdbcTemplate.queryForList(
+                "SELECT assert_tenant_capacity(?, 'limit.outlets')",
+                tenantId,
+            )
             requireExists(
                 """
                 SELECT EXISTS (

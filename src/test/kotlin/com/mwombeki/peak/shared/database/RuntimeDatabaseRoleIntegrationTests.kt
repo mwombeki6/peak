@@ -226,6 +226,34 @@ class RuntimeDatabaseRoleIntegrationTests {
     }
 
     @Test
+    fun tenantAndPlatformRuntimeRolesCannotCrossControlPlaneWriteBoundaries() {
+        val platformFixture = insertPlatformFixture()
+        val tenantFixture = insertTenantFixture(status = "active")
+
+        assertFailsWith<DataAccessException> {
+            inTransaction {
+                setRole(API_ROLE)
+                bindTenant(tenantFixture.tenantId)
+                jdbcTemplate.queryForObject(
+                    "SELECT count(*) FROM platform_releases",
+                    Int::class.java,
+                )
+            }
+        }
+
+        assertFailsWith<DataAccessException> {
+            inTransaction {
+                setRole(PLATFORM_ROLE)
+                bindPlatform(platformFixture.platformUserId)
+                jdbcTemplate.update(
+                    "INSERT INTO properties (tenant_id, name, code) VALUES (?, 'Forbidden', 'NOPE')",
+                    tenantFixture.tenantId,
+                )
+            }
+        }
+    }
+
+    @Test
     fun platformRoleCanPersistAdministrationReliabilitySideEffects() {
         val platformFixture = insertPlatformFixture()
         val idempotencyId = UUID.randomUUID()
@@ -621,12 +649,18 @@ class RuntimeDatabaseRoleIntegrationTests {
     ): UUID {
         val supportSessionId = UUID.randomUUID()
         val approver = insertPlatformFixture()
+        val ticketId = UUID.randomUUID()
+        jdbcTemplate.update(
+            "INSERT INTO support_tickets (id, tenant_id, ticket_number, subject) VALUES (?, ?, ?, ?)",
+            ticketId, tenantId, "SUP-${ticketId.toString().take(8)}", "Runtime role access",
+        )
         jdbcTemplate.update(
             """
             INSERT INTO platform_break_glass_access (
                 id,
                 platform_user_id,
                 tenant_id,
+                support_ticket_id,
                 action_code,
                 reason,
                 status,
@@ -636,7 +670,7 @@ class RuntimeDatabaseRoleIntegrationTests {
                 starts_at,
                 expires_at
             ) VALUES (
-                ?, ?, ?, ?, 'Runtime role support grant', 'active', ?,
+                ?, ?, ?, ?, ?, 'Runtime role support grant', 'active', ?,
                 now(), now(), now() - interval '1 minute',
                 now() + interval '1 hour'
             )
@@ -644,6 +678,7 @@ class RuntimeDatabaseRoleIntegrationTests {
             supportSessionId,
             platformUserId,
             tenantId,
+            ticketId,
             actionCode,
             approver.platformUserId,
         )

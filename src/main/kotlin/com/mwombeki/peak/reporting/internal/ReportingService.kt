@@ -6,7 +6,6 @@ import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.reporting.api.AddReportRecipientRequest
 import com.mwombeki.peak.reporting.api.CreateReportRunRequest
 import com.mwombeki.peak.reporting.api.CreateReportSubscriptionRequest
-import com.mwombeki.peak.reporting.api.ObjectStoragePort
 import com.mwombeki.peak.reporting.api.ReportCatalogResponse
 import com.mwombeki.peak.reporting.api.ReportDeliveryAttemptResponse
 import com.mwombeki.peak.reporting.api.ReportDeliveryResponse
@@ -25,6 +24,7 @@ import com.mwombeki.peak.reporting.api.UpdateReportingSettingsRequest
 import com.mwombeki.peak.reporting.api.UpdateReportSubscriptionRequest
 import com.mwombeki.peak.shared.context.TenantActor
 import com.mwombeki.peak.shared.context.TenantRequestContext
+import com.mwombeki.peak.shared.outbound.ObjectStoragePort
 import java.sql.ResultSet
 import java.sql.Time
 import java.sql.Timestamp

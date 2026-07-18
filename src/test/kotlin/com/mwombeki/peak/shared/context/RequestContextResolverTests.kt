@@ -160,6 +160,58 @@ class RequestContextResolverTests {
     }
 
     @Test
+    fun overlaysExactSupportSelectorOnAuthenticatedPlatformIdentity() {
+        val platformUserId = UUID.randomUUID()
+        val tenantId = UUID.randomUUID()
+        val sessionId = UUID.randomUUID()
+        val request = MockHttpServletRequest("GET", "/api/v1/platform/tenants/$tenantId")
+        request.addHeader(PeakRequestHeaders.SUPPORT_SESSION_ID, sessionId.toString())
+        request.addHeader(PeakRequestHeaders.SUPPORT_TENANT_ID, tenantId.toString())
+
+        val identity = resolver(
+            externalIdentityResolver = ExternalIdentityResolver {
+                ResolvedExternalIdentity.Platform(platformUserId)
+            },
+        ).resolve(
+            request,
+            jwtAuthentication(
+                "iss" to "https://issuer.example.com/realms/peak",
+                "sub" to "support-operator",
+            ),
+        ).identity
+
+        assertEquals(
+            RequestIdentity.Support(platformUserId, tenantId, sessionId, identity.correlationId),
+            identity,
+        )
+    }
+
+    @Test
+    fun rejectsSupportSelectorOnAuthenticatedTenantIdentity() {
+        val tenantId = UUID.randomUUID()
+        val tenantUserId = UUID.randomUUID()
+        val request = MockHttpServletRequest("GET", "/api/v1/tenants/$tenantId")
+        request.addHeader(PeakRequestHeaders.SUPPORT_SESSION_ID, UUID.randomUUID().toString())
+        request.addHeader(PeakRequestHeaders.SUPPORT_TENANT_ID, tenantId.toString())
+
+        val error = assertFailsWith<RequestContextException> {
+            resolver(
+                externalIdentityResolver = ExternalIdentityResolver {
+                    ResolvedExternalIdentity.Tenant(tenantId, tenantUserId)
+                },
+            ).resolve(
+                request,
+                jwtAuthentication(
+                    "iss" to "https://issuer.example.com/realms/peak",
+                    "sub" to "tenant-user",
+                ),
+            )
+        }
+
+        assertEquals("Support access requires an authenticated platform identity", error.message)
+    }
+
+    @Test
     fun resolvesUnlinkedOidcJwtIdentityAsPublic() {
         val request = MockHttpServletRequest("GET", "/api/v1/tenants")
         request.addHeader(PeakRequestHeaders.CORRELATION_ID, "corr-unlinked-oidc")

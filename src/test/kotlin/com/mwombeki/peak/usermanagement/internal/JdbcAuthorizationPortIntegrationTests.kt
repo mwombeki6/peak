@@ -905,12 +905,18 @@ class JdbcAuthorizationPortIntegrationTests {
     ) {
         val approverId = UUID.randomUUID()
         insertPlatformUser(approverId)
+        val ticketId = UUID.randomUUID()
+        jdbcTemplate.update(
+            "INSERT INTO support_tickets (id, tenant_id, ticket_number, subject) VALUES (?, ?, ?, ?)",
+            ticketId, tenantId, "SUP-${ticketId.toString().take(8)}", "Authorization access",
+        )
         jdbcTemplate.update(
             """
             INSERT INTO platform_break_glass_access (
                 id,
                 platform_user_id,
                 tenant_id,
+                support_ticket_id,
                 action_code,
                 reason,
                 status,
@@ -920,7 +926,7 @@ class JdbcAuthorizationPortIntegrationTests {
                 starts_at,
                 expires_at
             ) VALUES (
-                ?, ?, ?, ?, 'Authorization integration test', 'active',
+                ?, ?, ?, ?, ?, 'Authorization integration test', 'active',
                 ?, now(), now(), now() - interval '1 minute',
                 now() + interval '1 hour'
             )
@@ -928,6 +934,7 @@ class JdbcAuthorizationPortIntegrationTests {
             supportSessionId,
             platformUserId,
             tenantId,
+            ticketId,
             actionCode,
             approverId,
         )

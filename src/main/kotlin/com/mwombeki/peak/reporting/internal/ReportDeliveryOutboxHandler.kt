@@ -5,9 +5,9 @@ import com.mwombeki.peak.communication.api.ReportLinkDeliveryPort
 import com.mwombeki.peak.reliability.api.ClaimedOutboxEvent
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventHandler
-import com.mwombeki.peak.reporting.api.ObjectStoragePort
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.shared.outbound.ObjectStoragePort
 import io.micrometer.core.instrument.MeterRegistry
 import java.sql.Timestamp
 import java.time.Duration

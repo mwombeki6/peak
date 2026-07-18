@@ -48,23 +48,56 @@ class RequestContextResolver(
         val hasIdentityHeaders = PeakRequestHeaders.IDENTITY_HEADERS.any { header ->
             !request.getHeader(header).isNullOrBlank()
         }
+        val hasSupportSelectorHeaders = SUPPORT_SELECTOR_HEADERS.any { header ->
+            !request.getHeader(header).isNullOrBlank()
+        }
+        val hasNonSupportIdentityHeaders = NON_SUPPORT_IDENTITY_HEADERS.any { header ->
+            !request.getHeader(header).isNullOrBlank()
+        }
 
-        if (authentication.hasAuthenticatedPrincipal() && hasIdentityHeaders) {
+        if (authentication.hasAuthenticatedPrincipal() && hasNonSupportIdentityHeaders) {
             throw RequestContextException(
                 "Identity headers cannot be combined with authenticated identity",
             )
         }
 
-        if (hasIdentityHeaders && !properties.allowHeaderIdentity) {
+        if (!authentication.hasAuthenticatedPrincipal() &&
+            hasIdentityHeaders && !properties.allowHeaderIdentity
+        ) {
             throw RequestContextException(
                 "Identity headers are disabled for this runtime",
             )
         }
 
-        return authentication.toRequestIdentity(correlationId)
+        val authenticatedIdentity = authentication.toRequestIdentity(correlationId)
+        if (authenticatedIdentity != null && hasSupportSelectorHeaders) {
+            return authenticatedIdentity.withSupportSelector(request, correlationId)
+        }
+
+        return authenticatedIdentity
             ?: headerIdentity(request, correlationId)
             ?: publicRouteIdentity(request, correlationId)
             ?: RequestIdentity.Public(correlationId = correlationId)
+    }
+
+    private fun RequestIdentity.withSupportSelector(
+        request: HttpServletRequest,
+        correlationId: String,
+    ): RequestIdentity.Support {
+        val platform = this as? RequestIdentity.Platform
+            ?: throw RequestContextException(
+                "Support access requires an authenticated platform identity",
+            )
+        val sessionId = request.uuidHeader(PeakRequestHeaders.SUPPORT_SESSION_ID)
+            ?: throw RequestContextException("Support session header is required")
+        val tenantId = request.uuidHeader(PeakRequestHeaders.SUPPORT_TENANT_ID)
+            ?: throw RequestContextException("Support tenant header is required")
+        return RequestIdentity.Support(
+            platformUserId = platform.platformUserId,
+            tenantId = tenantId,
+            supportSessionId = sessionId,
+            correlationId = correlationId,
+        )
     }
 
     private fun Authentication?.hasAuthenticatedPrincipal(): Boolean {
@@ -265,6 +298,15 @@ class RequestContextResolver(
 
     private companion object {
         const val MAX_USER_AGENT_LENGTH = 512
+        val SUPPORT_SELECTOR_HEADERS = setOf(
+            PeakRequestHeaders.SUPPORT_SESSION_ID,
+            PeakRequestHeaders.SUPPORT_TENANT_ID,
+        )
+        val NON_SUPPORT_IDENTITY_HEADERS = setOf(
+            PeakRequestHeaders.TENANT_ID,
+            PeakRequestHeaders.TENANT_USER_ID,
+            PeakRequestHeaders.PLATFORM_USER_ID,
+        )
         val SAFE_CONTEXT_TOKEN = Regex("[A-Za-z0-9._:-]{1,128}")
         val SAFE_IP_ADDRESS = Regex("^[0-9a-fA-F:.]{2,45}$")
         val PUBLIC_PROPERTY_ROUTE_PATTERN = Regex(

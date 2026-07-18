@@ -6,6 +6,7 @@
                 "reliability::api",
                 "shared::context",
                 "shared::exception",
+                "shared::outbound",
                 "usermanagement::api"
         }
 )

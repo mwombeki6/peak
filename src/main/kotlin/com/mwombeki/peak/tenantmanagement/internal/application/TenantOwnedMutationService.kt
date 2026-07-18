@@ -52,6 +52,68 @@ class TenantOwnedMutationService(
         )
         check(changed == 1) { "Tenant lifecycle transition lost its locked target" }
 
+        val controlLifecycle = when (command.newStatus) {
+            "trial", "active", "suspended", "frozen", "archived", "terminated", "cancelled" ->
+                command.newStatus
+            else -> throw IllegalArgumentException("Unsupported tenant control status ${command.newStatus}")
+        }
+        jdbcTemplate.update(
+            """
+            UPDATE tenant_control_states
+            SET lifecycle_status = ?,
+                provisioning_status = CASE
+                    WHEN ? = 'active' THEN 'ready'
+                    WHEN ? IN ('archived', 'terminated', 'cancelled') THEN 'deprovisioned'
+                    ELSE provisioning_status
+                END,
+                service_status = CASE WHEN ? = 'active' THEN 'operational' ELSE service_status END,
+                offboarding_status = CASE
+                    WHEN ? IN ('archived', 'terminated', 'cancelled') THEN 'completed'
+                    WHEN ? = 'active' THEN 'none'
+                    ELSE offboarding_status
+                END,
+                version = version + 1,
+                updated_by_platform_user_id = ?
+            WHERE tenant_id = ?
+            """.trimIndent(),
+            controlLifecycle,
+            controlLifecycle,
+            controlLifecycle,
+            controlLifecycle,
+            controlLifecycle,
+            controlLifecycle,
+            command.operatorId,
+            command.tenantId,
+        )
+        if (command.newStatus == "active") {
+            jdbcTemplate.update(
+                """
+                UPDATE tenant_workflow_steps
+                SET status = 'succeeded', attempt_count = GREATEST(attempt_count, 1),
+                    started_at = COALESCE(started_at, now()), completed_at = now()
+                WHERE tenant_id = ?
+                  AND workflow_id = (
+                      SELECT id FROM tenant_workflows
+                      WHERE tenant_id = ? AND workflow_type = 'onboarding'
+                      ORDER BY created_at DESC LIMIT 1
+                  )
+                  AND step_key = 'activate'
+                """.trimIndent(),
+                command.tenantId,
+                command.tenantId,
+            )
+            jdbcTemplate.update(
+                """
+                UPDATE tenant_workflows
+                SET status = 'succeeded', current_step = 'activate',
+                    completed_steps = total_steps, completed_at = now()
+                WHERE tenant_id = ? AND workflow_type = 'onboarding'
+                  AND status NOT IN ('succeeded', 'cancelled')
+                """.trimIndent(),
+                command.tenantId,
+            )
+        }
+
         jdbcTemplate.update(
             """
             INSERT INTO tenant_lifecycle_events (

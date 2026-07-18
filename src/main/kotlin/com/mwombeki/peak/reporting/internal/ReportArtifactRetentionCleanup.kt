@@ -1,8 +1,8 @@
 package com.mwombeki.peak.reporting.internal
 
-import com.mwombeki.peak.reporting.api.ObjectStoragePort
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.shared.outbound.ObjectStoragePort
 import io.micrometer.core.instrument.MeterRegistry
 import java.util.UUID
 import org.springframework.beans.factory.annotation.Value

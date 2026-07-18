@@ -216,11 +216,17 @@ class TenantGovernanceServiceIntegrationTests {
     ) {
         val approverId = UUID.randomUUID()
         insertPlatformFixture(approverId)
+        val ticketId = UUID.randomUUID()
+        jdbcTemplate.update(
+            "INSERT INTO support_tickets (id, tenant_id, ticket_number, subject) VALUES (?, ?, ?, ?)",
+            ticketId, tenantId, "SUP-${ticketId.toString().take(8)}", "Break-glass regression",
+        )
         jdbcTemplate.update(
             """
             INSERT INTO platform_break_glass_access (
                 platform_user_id,
                 tenant_id,
+                support_ticket_id,
                 action_code,
                 reason,
                 status,
@@ -230,10 +236,11 @@ class TenantGovernanceServiceIntegrationTests {
                 starts_at,
                 expires_at
             )
-            VALUES (?, ?, ?, 'Regression test support access', 'active', ?, now(), now(), now() - interval '1 minute', now() + interval '1 hour')
+            VALUES (?, ?, ?, ?, 'Regression test support access', 'active', ?, now(), now(), now() - interval '1 minute', now() + interval '1 hour')
             """.trimIndent(),
             platformUserId,
             tenantId,
+            ticketId,
             actionCode,
             approverId,
         )

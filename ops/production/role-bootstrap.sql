@@ -7,6 +7,7 @@
 --     psql -v peak_app_password='...' \
 --          -v peak_worker_password='...' \
 --          -v peak_platform_password='...' \
+--          -v peak_platform_support_password='...' \
 --          -U "$POSTGRES_MIGRATOR_USER" -d "$POSTGRES_DB" \
 --          -f /path/to/role-bootstrap.sql
 
@@ -47,16 +48,26 @@ WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'peak_worker')
 \gexec
 
 SELECT format(
-  'CREATE ROLE peak_platform_support LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOBYPASSRLS',
+  'CREATE ROLE peak_platform LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOBYPASSRLS',
   :'peak_platform_password'
+)
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'peak_platform')
+\gexec
+
+SELECT format(
+  'CREATE ROLE peak_platform_support LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOBYPASSRLS',
+  :'peak_platform_support_password'
 )
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'peak_platform_support')
 \gexec
 
 ALTER ROLE peak_app PASSWORD :'peak_app_password';
+ALTER ROLE peak_platform PASSWORD :'peak_platform_password';
 ALTER ROLE peak_worker PASSWORD :'peak_worker_password';
-ALTER ROLE peak_platform_support PASSWORD :'peak_platform_password';
+ALTER ROLE peak_platform_support PASSWORD :'peak_platform_support_password';
 
-GRANT pms_app, pms_platform TO peak_app;
+REVOKE pms_platform FROM peak_app;
+GRANT pms_app TO peak_app;
+GRANT pms_platform TO peak_platform;
 GRANT pms_worker TO peak_worker;
 GRANT pms_readonly_support TO peak_platform_support;

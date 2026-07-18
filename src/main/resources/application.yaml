@@ -117,6 +117,8 @@ peak:
           - Content-Type
           - Idempotency-Key
           - X-Correlation-Id
+          - X-Peak-Support-Session-Id
+          - X-Peak-Support-Tenant-Id
         exposed-headers:
           - X-Correlation-Id
     request-context:

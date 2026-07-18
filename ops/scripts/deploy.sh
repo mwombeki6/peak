@@ -29,5 +29,5 @@ done
 
 podman compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --profile migration \
   run --rm --no-deps peak-migration
-podman compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d peak-api peak-worker
+podman compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d peak-api peak-platform peak-worker
 "$ROOT_DIR/ops/scripts/smoke-test.sh"

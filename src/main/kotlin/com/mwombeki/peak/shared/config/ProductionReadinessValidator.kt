@@ -109,8 +109,22 @@ class ProductionReadinessValidator(
             )
         ) {
             requireTrue(username != LOCAL_MIGRATOR_USER) {
-                "API/worker runtime must not use the migrator database role in prod"
+                "API/worker runtime must not use the migrator database role in prod; " +
+                    "the platform runtime is subject to the same restriction"
             }
+        }
+
+        when (runtimeProperties.mode) {
+            PeakRuntimeMode.API -> requireTrue(username == API_RUNTIME_USER) {
+                "API runtime must use the isolated peak_app database login"
+            }
+            PeakRuntimeMode.PLATFORM -> requireTrue(username == PLATFORM_RUNTIME_USER) {
+                "Platform runtime must use the isolated peak_platform database login"
+            }
+            PeakRuntimeMode.WORKER -> requireTrue(username == WORKER_RUNTIME_USER) {
+                "Worker runtime must use the isolated peak_worker database login"
+            }
+            PeakRuntimeMode.MIGRATION, PeakRuntimeMode.BOOTSTRAP -> Unit
         }
     }
 
@@ -137,19 +151,20 @@ class ProductionReadinessValidator(
         )
 
         when (runtimeProperties.mode) {
-            PeakRuntimeMode.API -> {
+            PeakRuntimeMode.API,
+            PeakRuntimeMode.PLATFORM -> {
                 requireTrue(!outboxWorkerEnabled) {
-                    "peak.reliability.outbox.worker.enabled must be false for API runtime in prod"
+                    "peak.reliability.outbox.worker.enabled must be false for API/platform runtime in prod"
                 }
                 requireTrue(webApplicationType != WEB_APPLICATION_TYPE_NONE) {
-                    "spring.main.web-application-type must not be none for API runtime in prod"
+                    "spring.main.web-application-type must not be none for API/platform runtime in prod"
                 }
                 requireTrue(
                     environment.getProperty("server.forward-headers-strategy")
                         ?.trim()
                         ?.lowercase() == FORWARD_HEADERS_NATIVE,
                 ) {
-                    "server.forward-headers-strategy must be native for API runtime in prod"
+                    "server.forward-headers-strategy must be native for API/platform runtime in prod"
                 }
                 requireTrue(
                     environment.getProperty(
@@ -158,7 +173,7 @@ class ProductionReadinessValidator(
                         false,
                     ),
                 ) {
-                    "peak.reliability.outbox.worker.health-required must be true for API runtime in prod"
+                    "peak.reliability.outbox.worker.health-required must be true for API/platform runtime in prod"
                 }
                 validateRealtimeWebSocketOrigins()
             }
@@ -262,7 +277,10 @@ class ProductionReadinessValidator(
     }
 
     private fun MutableList<String>.validateSecretEnvelope() {
-        if (runtimeProperties.mode !in setOf(PeakRuntimeMode.API, PeakRuntimeMode.WORKER)) {
+        if (runtimeProperties.mode !in setOf(
+                PeakRuntimeMode.API, PeakRuntimeMode.PLATFORM, PeakRuntimeMode.WORKER,
+            )
+        ) {
             return
         }
         val keyReference = environment.getProperty("peak.security.envelope.key-reference")
@@ -324,7 +342,8 @@ class ProductionReadinessValidator(
     }
 
     private fun String?.isDefaultLocalSecret(): Boolean {
-        return this == LOCAL_MIGRATOR_USER || this == "peak_app" || this == "peak_worker"
+        return this == LOCAL_MIGRATOR_USER || this == "peak_app" ||
+            this == "peak_platform" || this == "peak_worker"
     }
 
     private fun springDocEnabled(property: String): Boolean {
@@ -363,6 +382,9 @@ class ProductionReadinessValidator(
         const val PROD_PROFILE = "prod"
         const val ACCEPTANCE_PROFILE = "acceptance"
         const val LOCAL_MIGRATOR_USER = "peak_migrator"
+        const val API_RUNTIME_USER = "peak_app"
+        const val PLATFORM_RUNTIME_USER = "peak_platform"
+        const val WORKER_RUNTIME_USER = "peak_worker"
         const val WEB_APPLICATION_TYPE_NONE = "none"
         const val FORWARD_HEADERS_NATIVE = "native"
         val OUTBOUND_HOST_PATTERN = Regex(

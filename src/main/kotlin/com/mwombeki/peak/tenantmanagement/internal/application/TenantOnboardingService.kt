@@ -93,6 +93,7 @@ class TenantOnboardingService(
 
             tenantRepository.save(tenant)
             tenantProfileRepository.save(profile)
+            initializeControlPlane(tenant, operatorId)
             tenantRepository.recordLifecycleEvent(
                 tenantId = tenantId,
                 eventType = "created",
@@ -241,6 +242,77 @@ class TenantOnboardingService(
 
     private fun schemaNameFor(tenantId: UUID): String {
         return "tenant_${tenantId.toString().replace("-", "")}"
+    }
+
+    private fun initializeControlPlane(tenant: Tenant, operatorId: UUID) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_control_states (
+                tenant_id, lifecycle_status, verification_status,
+                provisioning_status, subscription_status, service_status,
+                offboarding_status, updated_by_platform_user_id
+            ) VALUES (?, 'trial', 'unverified', 'provisioning', 'trialing',
+                      'operational', 'none', ?)
+            """.trimIndent(),
+            tenant.id,
+            operatorId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_subscriptions (
+                tenant_id, plan_id, status, billing_cycle, billing_currency,
+                provider, current_period_starts_at, trial_ends_at,
+                created_by_platform_user_id
+            ) VALUES (?, ?, 'trialing', 'monthly', ?, 'manual', now(),
+                      now() + interval '30 days', ?)
+            """.trimIndent(),
+            tenant.id,
+            tenant.planId,
+            tenant.currencyCode ?: "TZS",
+            operatorId,
+        )
+        val workflowId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_workflows (
+                id, tenant_id, workflow_type, status,
+                requested_by_platform_user_id, reason, current_step,
+                total_steps, completed_steps, started_at
+            ) VALUES (?, ?, 'onboarding', 'running', ?,
+                      'Tenant registered; verification and provisioning required',
+                      'register_tenant', 6, 1, now())
+            """.trimIndent(),
+            workflowId,
+            tenant.id,
+            operatorId,
+        )
+        listOf(
+            "register_tenant" to "succeeded",
+            "verify_business" to "pending",
+            "provision_administrator" to "pending",
+            "configure_entitlements" to "pending",
+            "verify_readiness" to "pending",
+            "activate" to "pending",
+        ).forEachIndexed { index, (step, status) ->
+            jdbcTemplate.update(
+                """
+                INSERT INTO tenant_workflow_steps (
+                    tenant_id, workflow_id, step_key, sequence, status,
+                    attempt_count, started_at, completed_at
+                ) VALUES (?, ?, ?, ?, ?, ?,
+                          CASE WHEN ? = 'succeeded' THEN now() ELSE NULL END,
+                          CASE WHEN ? = 'succeeded' THEN now() ELSE NULL END)
+                """.trimIndent(),
+                tenant.id,
+                workflowId,
+                step,
+                index + 1,
+                status,
+                if (status == "succeeded") 1 else 0,
+                status,
+                status,
+            )
+        }
     }
 
 }

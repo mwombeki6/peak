@@ -112,6 +112,10 @@ class TenantUserInvitationService(
         requireActiveTenantRole(command.tenantId, command.tenantRoleId)
         requireDelegableTenantInvitationRole(command.tenantId, command.tenantRoleId, actor)
         requireNoExistingUserWithEmail(command.tenantId, command.email)
+        jdbcTemplate.queryForList(
+            "SELECT assert_tenant_capacity(?, 'limit.users')",
+            command.tenantId,
+        )
 
         val invitationId = UUID.randomUUID()
         val token = InvitationTokens.newToken()
