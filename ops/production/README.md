@@ -136,8 +136,9 @@ Dry-run restore into a disposable environment before every production restore:
 1. Start a disposable PostgreSQL container or a separate Podman Compose project.
 2. Set `COMPOSE_FILE`, `ENV_FILE`, and `POSTGRES_DB` to the disposable target.
 3. Run `ops/scripts/restore-postgres.sh backups/<backup>.sql.gz`. The restore
-   idempotently recreates the non-superuser runtime roles before applying the
-   dump and aborts on the first SQL error.
+   idempotently recreates the non-superuser runtime roles and the dedicated
+   non-login tenant-continuity function owner before applying the dump, then
+   aborts on the first SQL error.
 4. Restore the Keycloak backup with
    `ops/scripts/restore-keycloak.sh backups/<keycloak-backup>.sql.gz` against a
    disposable Keycloak database when identity recovery is in scope.

@@ -10,6 +10,7 @@ PROJECT="${COMPOSE_PROJECT_NAME:-peak-tenant-property-foundation}"
 BASE_URL="${PEAK_BASE_URL:-http://localhost:8080}"
 PLATFORM_BASE_URL="${PEAK_PLATFORM_BASE_URL:-http://localhost:8082}"
 KEYCLOAK_URL="${KEYCLOAK_BASE_URL:-http://localhost:8081}"
+WS_URL="${PEAK_WS_URL:-ws://localhost:8080/ws-connect}"
 ORIGIN="${PEAK_ACCEPTANCE_ORIGIN:-https://localhost:5173}"
 RESET="${TENANT_PROPERTY_RESET:-false}"
 BUILD_IMAGE="${TENANT_PROPERTY_BUILD_IMAGE:-false}"
@@ -459,7 +460,7 @@ done
 [[ "$delivery_status" == "delivered" ]]
 
 python3 "$ROOT_DIR/ops/testing/websocket-acceptance.py" \
-  --url "ws://localhost:8080/ws-connect" \
+  --url "$WS_URL" \
   --token "$tenant_token" \
   --origin "$ORIGIN" \
   --correlation-id "tenant-property-websocket-authorized" \
@@ -512,7 +513,7 @@ other_token="$(token_for "acceptance-other-admin" "$other_password")"
 api GET "/api/v1/properties/$property_id" "$other_token" 403
 api GET "/api/v1/platform/permissions" "$tenant_token" 403
 python3 "$ROOT_DIR/ops/testing/websocket-acceptance.py" \
-  --url "ws://localhost:8080/ws-connect" \
+  --url "$WS_URL" \
   --token "$other_token" \
   --origin "$ORIGIN" \
   --correlation-id "tenant-property-websocket-cross-tenant-denied" \

@@ -414,18 +414,12 @@ class TenantUserLifecycleService(
     }
 
     private fun lockTenantForAdministratorContinuity(tenantId: UUID) {
-        val tenant = jdbcTemplate.query(
-            """
-            SELECT id
-            FROM tenants
-            WHERE id = ?
-              AND deleted_at IS NULL
-            FOR UPDATE
-            """.trimIndent(),
-            { rs, _ -> rs.getObject("id", UUID::class.java) },
+        val locked = jdbcTemplate.queryForObject(
+            "SELECT public.lock_tenant_administrator_continuity(?)",
+            Boolean::class.java,
             tenantId,
-        ).singleOrNull()
-        if (tenant == null) {
+        ) == true
+        if (!locked) {
             throw TenantUserLifecycleNotFoundException("Tenant was not found")
         }
     }

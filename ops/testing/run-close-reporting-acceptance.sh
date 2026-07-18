@@ -233,7 +233,7 @@ podman run --rm \
   run /etc/newman/close-reporting.json \
   --reporters cli,json \
   --reporter-json-export /etc/newman/evidence/newman-private.json \
-  --env-var "baseUrl=http://127.0.0.1:8080" \
+  --env-var "baseUrl=$BASE_URL" \
   --env-var "accessToken=$access_token" \
   --env-var "tenantId=$tenant_id" \
   --env-var "propertyId=$property_id" \
