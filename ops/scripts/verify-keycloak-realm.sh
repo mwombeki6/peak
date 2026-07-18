@@ -46,6 +46,9 @@ OIDC_CONFIGURATION="$(curl -fsS "$BASE_URL/realms/$REALM/.well-known/openid-conf
 REALM_RESPONSE="$(curl -fsS \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   "$BASE_URL/admin/realms/$REALM")"
+REQUIRED_ACTIONS_RESPONSE="$(curl -fsS \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  "$BASE_URL/admin/realms/$REALM/authentication/required-actions")"
 CLIENTS_RESPONSE="$(curl -fsS \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   "$BASE_URL/admin/realms/$REALM/clients?clientId=peak-api")"
@@ -73,6 +76,7 @@ WEB_MAPPERS_RESPONSE="$(curl -fsS \
 
 OIDC_CONFIGURATION="$OIDC_CONFIGURATION" \
 REALM_RESPONSE="$REALM_RESPONSE" \
+REQUIRED_ACTIONS_RESPONSE="$REQUIRED_ACTIONS_RESPONSE" \
 CLIENTS_RESPONSE="$CLIENTS_RESPONSE" \
 WEB_CLIENTS_RESPONSE="$WEB_CLIENTS_RESPONSE" \
 WEB_MAPPERS_RESPONSE="$WEB_MAPPERS_RESPONSE" \
@@ -101,6 +105,7 @@ if not jwks_uri:
 security_expectations = {
     "bruteForceProtected": True,
     "organizationsEnabled": True,
+    "verifyEmail": True,
     "eventsEnabled": True,
     "adminEventsEnabled": True,
     "adminEventsDetailsEnabled": True,
@@ -117,6 +122,15 @@ if realm.get("otpPolicyAlgorithm") not in {"HmacSHA256", "HmacSHA512"}:
     raise SystemExit("Keycloak OTP must use SHA-256 or SHA-512")
 if realm.get("otpPolicyDigits", 0) < 6:
     raise SystemExit("Keycloak OTP must use at least six digits")
+required_actions = {
+    action.get("alias"): action
+    for action in json.loads(os.environ["REQUIRED_ACTIONS_RESPONSE"])
+}
+verify_email_action = required_actions.get("VERIFY_EMAIL") or {}
+if verify_email_action.get("enabled") is not True:
+    raise SystemExit("Keycloak VERIFY_EMAIL required action must be enabled")
+if verify_email_action.get("defaultAction") is not False:
+    raise SystemExit("Keycloak VERIFY_EMAIL must not be assigned to already-verified users")
 password_policy = realm.get("passwordPolicy") or ""
 for requirement in ("length(12)", "digits(1)", "upperCase(1)", "lowerCase(1)", "specialChars(1)"):
     if requirement not in password_policy:
