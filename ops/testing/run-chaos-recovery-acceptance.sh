@@ -15,6 +15,7 @@ TENANT_PASSWORD="${CHAOS_TENANT_PASSWORD:?CHAOS_TENANT_PASSWORD is required}"
 set -a
 . "$ENV_FILE"
 set +a
+HOSPITALITY_REALM="${KEYCLOAK_HOSPITALITY_REALM:-peak-hospitality}"
 
 compose=(
   podman compose
@@ -36,7 +37,7 @@ token_for() {
   curl -fsS -X POST \
     --connect-timeout 2 \
     --max-time 20 \
-    "$KEYCLOAK_URL/realms/peak/protocol/openid-connect/token" \
+    "$KEYCLOAK_URL/realms/$HOSPITALITY_REALM/protocol/openid-connect/token" \
     -H "Content-Type: application/x-www-form-urlencoded" \
     --data-urlencode "grant_type=password" \
     --data-urlencode "client_id=peak-acceptance" \
@@ -132,7 +133,7 @@ if token_for >/dev/null 2>&1; then
   exit 1
 fi
 "${compose[@]}" up -d --no-deps keycloak
-wait_http "$KEYCLOAK_URL/realms/peak/.well-known/openid-configuration"
+wait_http "$KEYCLOAK_URL/realms/$HOSPITALITY_REALM/.well-known/openid-configuration"
 token="$(token_for)"
 
 # API process replacement must retain all database-backed state.

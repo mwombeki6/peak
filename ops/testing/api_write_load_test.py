@@ -7,6 +7,7 @@ import argparse
 import concurrent.futures
 import json
 import math
+import os
 import statistics
 import sys
 import threading
@@ -22,6 +23,9 @@ from typing import Any
 
 class WriteLoadFailure(RuntimeError):
     pass
+
+
+HOSPITALITY_REALM = os.environ.get("KEYCLOAK_HOSPITALITY_REALM", "peak-hospitality")
 
 
 @dataclass
@@ -41,7 +45,7 @@ def token_for(keycloak_url: str, username: str, password: str) -> str:
         }
     ).encode()
     request = urllib.request.Request(
-        f"{keycloak_url.rstrip('/')}/realms/peak/protocol/openid-connect/token",
+        f"{keycloak_url.rstrip('/')}/realms/{HOSPITALITY_REALM}/protocol/openid-connect/token",
         method="POST",
         data=data,
         headers={"Content-Type": "application/x-www-form-urlencoded"},

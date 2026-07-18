@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import sys
 import time
 import urllib.error
@@ -18,6 +19,9 @@ from typing import Any, Iterable
 
 class SecurityFailure(RuntimeError):
     pass
+
+
+HOSPITALITY_REALM = os.environ.get("KEYCLOAK_HOSPITALITY_REALM", "peak-hospitality")
 
 
 @dataclass
@@ -71,7 +75,7 @@ def token_for(keycloak_url: str, username: str, password: str) -> str:
         }
     ).encode()
     request = urllib.request.Request(
-        f"{keycloak_url.rstrip('/')}/realms/peak/protocol/openid-connect/token",
+        f"{keycloak_url.rstrip('/')}/realms/{HOSPITALITY_REALM}/protocol/openid-connect/token",
         method="POST",
         data=data,
         headers={"Content-Type": "application/x-www-form-urlencoded"},

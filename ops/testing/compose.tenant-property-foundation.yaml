@@ -2,6 +2,7 @@
 services:
   peak-api:
     environment:
+      SPRING_PROFILES_ACTIVE: acceptance
       PEAK_REPORT_STORAGE_ENABLED: "false"
 
   peak-platform:
@@ -12,5 +13,5 @@ services:
 
   peak-worker:
     environment:
-      SPRING_PROFILES_ACTIVE: prod,worker,acceptance
+      SPRING_PROFILES_ACTIVE: acceptance,worker
       PEAK_REPORT_STORAGE_ENABLED: "false"

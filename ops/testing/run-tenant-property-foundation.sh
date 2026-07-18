@@ -27,6 +27,9 @@ set -a
 . "$ENV_FILE"
 set +a
 
+PLATFORM_REALM="${KEYCLOAK_PLATFORM_REALM:-peak-platform}"
+HOSPITALITY_REALM="${KEYCLOAK_HOSPITALITY_REALM:-peak-hospitality}"
+
 compose=(
   podman compose
   -p "$PROJECT"
@@ -96,13 +99,14 @@ api() {
 }
 
 kc_admin() {
-  local method="$1"
-  local path="$2"
-  local payload="${3:-}"
+  local realm="$1"
+  local method="$2"
+  local path="$3"
+  local payload="${4:-}"
   local args=(
     -fsS
     -X "$method"
-    "$KEYCLOAK_URL/admin/realms/peak$path"
+    "$KEYCLOAK_URL/admin/realms/$realm$path"
     -H "Authorization: Bearer $ADMIN_TOKEN"
   )
   if [[ -n "$payload" ]]; then
@@ -112,16 +116,18 @@ kc_admin() {
 }
 
 ensure_keycloak_user() {
-  local username="$1"
-  local email="$2"
-  local password="$3"
+  local realm="$1"
+  local username="$2"
+  local email="$3"
+  local password="$4"
   local user_id
+  local user_payload
   user_id="$(
-    kc_admin GET "/users?username=$username&exact=true" |
+    kc_admin "$realm" GET "/users?username=$username&exact=true" |
       jq -r '.[0].id // empty'
   )"
   if [[ -z "$user_id" ]]; then
-    kc_admin POST "/users" "$(
+    kc_admin "$realm" POST "/users" "$(
       jq -nc \
         --arg username "$username" \
         --arg email "$email" \
@@ -135,28 +141,66 @@ ensure_keycloak_user() {
         }'
     )" >/dev/null
     user_id="$(
-      kc_admin GET "/users?username=$username&exact=true" |
+      kc_admin "$realm" GET "/users?username=$username&exact=true" |
         jq -r '.[0].id'
     )"
   fi
-  kc_admin PUT "/users/$user_id/reset-password" "$(
+  kc_admin "$realm" PUT "/users/$user_id/reset-password" "$(
     jq -nc --arg value "$password" \
       '{type: "password", value: $value, temporary: false}'
   )" >/dev/null
+  if [[ "$realm" == "$PLATFORM_REALM" ]]; then
+    user_payload="$(kc_admin "$realm" GET "/users/$user_id" | jq '.requiredActions = []')"
+    kc_admin "$realm" PUT "/users/$user_id" "$user_payload" >/dev/null
+  fi
   printf '%s' "$user_id"
 }
 
 token_for() {
-  local username="$1"
-  local password="$2"
+  local realm="$1"
+  local username="$2"
+  local password="$3"
   curl -fsS \
-    -X POST "$KEYCLOAK_URL/realms/peak/protocol/openid-connect/token" \
+    -X POST "$KEYCLOAK_URL/realms/$realm/protocol/openid-connect/token" \
     -H "Content-Type: application/x-www-form-urlencoded" \
     --data-urlencode "grant_type=password" \
     --data-urlencode "client_id=peak-acceptance" \
     --data-urlencode "username=$username" \
     --data-urlencode "password=$password" |
     jq -r '.access_token'
+}
+
+ensure_acceptance_client() {
+  local realm="$1"
+  local client_id
+  client_id="$(
+    kc_admin "$realm" GET "/clients?clientId=peak-acceptance" |
+      jq -r '.[0].id // empty'
+  )"
+  if [[ -z "$client_id" ]]; then
+    kc_admin "$realm" POST "/clients" '{
+      "clientId": "peak-acceptance",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "protocolMappers": [{
+        "name": "peak-api-audience",
+        "protocol": "openid-connect",
+        "protocolMapper": "oidc-audience-mapper",
+        "consentRequired": false,
+        "config": {
+          "included.custom.audience": "peak-api",
+          "access.token.claim": "true",
+          "id.token.claim": "false",
+          "userinfo.token.claim": "false"
+        }
+      }]
+    }' >/dev/null
+  fi
 }
 
 random_password() {
@@ -174,7 +218,8 @@ fi
 
 "$ROOT_DIR/ops/scripts/validate-production-env.sh" "$ENV_FILE"
 "${compose[@]}" up -d postgres keycloak-db keycloak
-wait_http "$KEYCLOAK_URL/realms/peak/.well-known/openid-configuration"
+wait_http "$KEYCLOAK_URL/realms/$PLATFORM_REALM/.well-known/openid-configuration"
+wait_http "$KEYCLOAK_URL/realms/$HOSPITALITY_REALM/.well-known/openid-configuration"
 
 "${compose[@]}" --profile migration run --rm --no-deps peak-migration
 COMPOSE_PROJECT_NAME="$PROJECT" \
@@ -193,45 +238,24 @@ ADMIN_TOKEN="$(
     jq -r '.access_token'
 )"
 
-client_id="$(
-  kc_admin GET "/clients?clientId=peak-acceptance" |
-    jq -r '.[0].id // empty'
-)"
-if [[ -z "$client_id" ]]; then
-  kc_admin POST "/clients" '{
-    "clientId": "peak-acceptance",
-    "enabled": true,
-    "publicClient": true,
-    "standardFlowEnabled": false,
-    "directAccessGrantsEnabled": true,
-    "protocol": "openid-connect",
-    "protocolMappers": [{
-      "name": "peak-api-audience",
-      "protocol": "openid-connect",
-      "protocolMapper": "oidc-audience-mapper",
-      "consentRequired": false,
-      "config": {
-        "included.custom.audience": "peak-api",
-        "access.token.claim": "true",
-        "id.token.claim": "false",
-        "userinfo.token.claim": "false"
-      }
-    }]
-  }' >/dev/null
-fi
+KEYCLOAK_BASE_URL="$KEYCLOAK_URL" \
+  "$ROOT_DIR/ops/scripts/verify-keycloak-realms.sh"
+
+ensure_acceptance_client "$PLATFORM_REALM"
+ensure_acceptance_client "$HOSPITALITY_REALM"
 
 root_password="${TENANT_PROPERTY_ROOT_PASSWORD:-$(random_password)}"
 tenant_password="${TENANT_PROPERTY_TENANT_PASSWORD:-$(random_password)}"
 other_password="${TENANT_PROPERTY_OTHER_PASSWORD:-$(random_password)}"
-root_subject="$(ensure_keycloak_user "acceptance-platform-root" "acceptance.root@example.com" "$root_password")"
-tenant_subject="$(ensure_keycloak_user "acceptance-tenant-admin" "acceptance.tenant@example.com" "$tenant_password")"
-other_subject="$(ensure_keycloak_user "acceptance-other-admin" "acceptance.other@example.com" "$other_password")"
+root_subject="$(ensure_keycloak_user "$PLATFORM_REALM" "acceptance-platform-root" "acceptance.root@example.com" "$root_password")"
+tenant_subject="$(ensure_keycloak_user "$HOSPITALITY_REALM" "acceptance-tenant-admin" "acceptance.tenant@example.com" "$tenant_password")"
+other_subject="$(ensure_keycloak_user "$HOSPITALITY_REALM" "acceptance-other-admin" "acceptance.other@example.com" "$other_password")"
 
 "${compose[@]}" --profile bootstrap run --rm --no-deps \
   -e PEAK_PLATFORM_BOOTSTRAP_ENABLED=true \
   -e PEAK_PLATFORM_BOOTSTRAP_FULL_NAME="Foundation Platform Root" \
   -e PEAK_PLATFORM_BOOTSTRAP_EMAIL="acceptance.root@example.com" \
-  -e PEAK_PLATFORM_BOOTSTRAP_ISSUER="$PEAK_SECURITY_JWT_ISSUER_URI" \
+  -e PEAK_PLATFORM_BOOTSTRAP_ISSUER="$PEAK_PLATFORM_JWT_ISSUER_URI" \
   -e PEAK_PLATFORM_BOOTSTRAP_SUBJECT="$root_subject" \
   peak-bootstrap
 
@@ -253,9 +277,9 @@ fi
 wait_http "$BASE_URL/actuator/health"
 wait_http "$PLATFORM_BASE_URL/actuator/health/readiness"
 
-platform_token="$(token_for "acceptance-platform-root" "$root_password")"
-tenant_token_unlinked="$(token_for "acceptance-tenant-admin" "$tenant_password")"
-other_token_unlinked="$(token_for "acceptance-other-admin" "$other_password")"
+platform_token="$(token_for "$PLATFORM_REALM" "acceptance-platform-root" "$root_password")"
+tenant_token_unlinked="$(token_for "$HOSPITALITY_REALM" "acceptance-tenant-admin" "$tenant_password")"
+other_token_unlinked="$(token_for "$HOSPITALITY_REALM" "acceptance-other-admin" "$other_password")"
 
 api GET "/api/v1/platform/permissions" "$platform_token" 200
 jq -e 'map(.code) | index("platform.security.manage") != null' <<<"$API_BODY" >/dev/null
@@ -300,7 +324,7 @@ api POST "/api/v1/platform/tenants/$tenant_id/administrators" "$platform_token" 
       }'
   )"
 tenant_user_id="$(jq -r '.tenantUserId' <<<"$API_BODY")"
-tenant_token="$(token_for "acceptance-tenant-admin" "$tenant_password")"
+tenant_token="$(token_for "$HOSPITALITY_REALM" "acceptance-tenant-admin" "$tenant_password")"
 
 api POST "/api/v1/platform/tenants/$tenant_id/profile/verify" "$platform_token" 200 \
   "tenant-profile-verify"
@@ -508,10 +532,11 @@ api POST "/api/v1/platform/tenants/$other_tenant_id/administrators" \
         subject:$subject
       }'
   )"
-other_token="$(token_for "acceptance-other-admin" "$other_password")"
+other_token="$(token_for "$HOSPITALITY_REALM" "acceptance-other-admin" "$other_password")"
 
 api GET "/api/v1/properties/$property_id" "$other_token" 403
-api GET "/api/v1/platform/permissions" "$tenant_token" 403
+api GET "/api/v1/platform/permissions" "$tenant_token" 401
+api GET "/api/v1/properties/$property_id" "$platform_token" 401
 python3 "$ROOT_DIR/ops/testing/websocket-acceptance.py" \
   --url "$WS_URL" \
   --token "$other_token" \

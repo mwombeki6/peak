@@ -7,6 +7,7 @@ import argparse
 import concurrent.futures
 import json
 import math
+import os
 import statistics
 import sys
 import time
@@ -22,6 +23,9 @@ class LoadFailure(RuntimeError):
     pass
 
 
+HOSPITALITY_REALM = os.environ.get("KEYCLOAK_HOSPITALITY_REALM", "peak-hospitality")
+
+
 def token_for(keycloak_url: str, username: str, password: str) -> str:
     body = urllib.parse.urlencode(
         {
@@ -32,7 +36,7 @@ def token_for(keycloak_url: str, username: str, password: str) -> str:
         }
     ).encode()
     request = urllib.request.Request(
-        f"{keycloak_url.rstrip('/')}/realms/peak/protocol/openid-connect/token",
+        f"{keycloak_url.rstrip('/')}/realms/{HOSPITALITY_REALM}/protocol/openid-connect/token",
         method="POST",
         data=body,
         headers={"Content-Type": "application/x-www-form-urlencoded"},

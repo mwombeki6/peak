@@ -174,7 +174,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"fullName\": \"Postman Tenant Administrator\",\n  \"email\": \"acceptance.tenant@example.com\",\n  \"issuer\": \"http://keycloak:8080/realms/peak\",\n  \"subject\": \"{{tenantSubject}}\"\n}"
+              "raw": "{\n  \"fullName\": \"Postman Tenant Administrator\",\n  \"email\": \"acceptance.tenant@example.com\",\n  \"issuer\": \"http://keycloak:8080/realms/peak-hospitality\",\n  \"subject\": \"{{tenantSubject}}\"\n}"
             },
             "url": "{{baseUrl}}/api/v1/platform/tenants/{{tenantId}}/administrators"
           }

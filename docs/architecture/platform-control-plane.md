@@ -84,11 +84,15 @@ prefers a property assignment, then the deepest matching organization unit.
 
 ## 7. Identity and runtime security
 
-Keycloak is configured for verified email, short access tokens, refresh-token
-revocation, brute-force protection, SHA-256 TOTP, stronger passwords,
-organization support, security events and detailed admin events. Direct grants
-and implicit flow remain disabled; the browser client uses authorization code
-with PKCE S256.
+Keycloak uses separate `peak-platform` and `peak-hospitality` realms, verified
+email, short access tokens, refresh-token rotation, brute-force protection,
+SHA-256 TOTP, WebAuthn/passkeys, stronger passwords, security events and
+detailed admin events. Platform MFA enrollment is mandatory. Direct grants and
+implicit flow remain disabled; browser and native clients use authorization
+code with PKCE S256 and exact redirects. Keycloak organizations and realm roles
+do not model Peak tenants or permissions; database identity links and RBAC
+remain authoritative. The complete client and responsibility matrix is in
+`identity-and-access.md`.
 
 Production has five explicit runtime modes: `migration`, `bootstrap`, `api`,
 `platform` and `worker`. Startup validation rejects the wrong database login,

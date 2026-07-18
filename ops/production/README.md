@@ -7,7 +7,10 @@ This directory contains the Podman Compose deployment baseline for Peak.
 - `compose.yaml`: PostgreSQL, Keycloak, migration, one-shot platform bootstrap, API, and worker services.
 - `.env.example`: required environment variables without real secrets.
 - `role-bootstrap.sql`: creates production login roles and grants them membership in Flyway-managed no-login roles.
-- `../keycloak/peak-realm.json`: Keycloak realm export imported by the Keycloak container on first startup.
+- `../keycloak/peak-platform-realm.json`: isolated platform-operator realm bootstrap template.
+- `../keycloak/peak-hospitality-realm.json`: hotel staff, tenant administrator and POS realm bootstrap template.
+- `../scripts/reconcile-keycloak-realms.py`: idempotently applies Peak-owned policy and client drift to existing realms.
+- `../scripts/migrate-keycloak-legacy-realm.sh`: guarded, backup-first migration from the former `peak` realm.
 - `../scripts/smoke-test.sh`: post-deploy API, Keycloak, SpringDoc, and anonymous-access smoke checks.
 
 ## Rollout Order
@@ -16,18 +19,20 @@ This directory contains the Podman Compose deployment baseline for Peak.
 2. Create `ops/production/.env` from `.env.example` and replace every placeholder secret.
 3. Validate the env file: `ops/scripts/validate-production-env.sh ops/production/.env`.
 4. Start PostgreSQL and Keycloak: `podman compose --env-file ops/production/.env -f ops/production/compose.yaml up -d postgres keycloak-db keycloak`.
-5. Verify the imported Keycloak realm: `set -a; . ops/production/.env; set +a; KEYCLOAK_BASE_URL=http://localhost:8081 ops/scripts/verify-keycloak-realm.sh`.
+5. Reconcile and verify both Keycloak realms: `set -a; . ops/production/.env; set +a; KEYCLOAK_BASE_URL=http://localhost:8081 python3 ops/scripts/reconcile-keycloak-realms.py && KEYCLOAK_BASE_URL=http://localhost:8081 ops/scripts/verify-keycloak-realms.sh`.
 6. Bootstrap production login roles: `ops/scripts/bootstrap-db-roles.sh`.
 7. Start PostgreSQL and wait for its health check, then run Flyway through the migration profile: `podman compose --env-file ops/production/.env -f ops/production/compose.yaml --profile migration run --rm --no-deps peak-migration`. The `--no-deps` flag is required with Podman Compose so a one-shot migration does not reconcile or replace already-running services.
 8. On the first installation only, create the initial operator in Keycloak, set `PEAK_PLATFORM_BOOTSTRAP_ENABLED=true` plus the operator name, email, exact issuer, and Keycloak subject, then run `ops/scripts/bootstrap-platform.sh`. Immediately set the flag back to `false` and clear the four bootstrap identity values. The command refuses to create a different root after platform initialization.
 9. If every platform root has lost effective access, use the audited offline recovery procedure: configure the replacement Keycloak identity, set both `PEAK_PLATFORM_BOOTSTRAP_ENABLED=true` and `PEAK_PLATFORM_RECOVERY_ENABLED=true`, then run `ops/scripts/recover-platform-root.sh`. Recovery refuses to run if any effective root remains. Immediately disable both flags and clear the identity values after success.
 10. Start tenant API, isolated platform API, and worker: `podman compose --env-file ops/production/.env -f ops/production/compose.yaml up -d peak-api peak-platform peak-worker`.
-11. Configure a host reverse proxy to terminate TLS for `PEAK_PUBLIC_HOST` and
-    `KEYCLOAK_HOSTNAME`, forwarding only to `127.0.0.1:8080` and
-    `127.0.0.1:8081`. Preserve `X-Forwarded-For`, `X-Forwarded-Proto`, and
-    `Host`, overwrite any client-supplied forwarding headers, and restrict
-    direct access to both loopback listeners.
-12. Verify the deployment: `ops/scripts/smoke-test.sh http://localhost:8080 http://localhost:8081`.
+11. Configure a host reverse proxy to terminate TLS for the tenant API,
+    platform API, `KEYCLOAK_HOSTNAME` and `KEYCLOAK_ADMIN_HOSTNAME`. Forward
+    only to the corresponding loopback listeners. Preserve
+    `X-Forwarded-For`, `X-Forwarded-Proto`, and `Host`, overwrite any
+    client-supplied forwarding headers, and restrict direct listener access.
+    Expose the Keycloak administration hostname only to the operator network.
+    Never proxy the Keycloak management port `9000` publicly.
+12. Verify the deployment: `ops/scripts/smoke-test.sh http://localhost:8080 http://localhost:8081 http://localhost:8082`.
 
 The standard deploy script performs steps 3, 7, 8, and 10:
 
@@ -60,8 +65,22 @@ ops/scripts/deploy.sh
 - Keep SpringDoc disabled in production.
 - Keep CORS origins explicit.
 - Keep realtime WebSocket origins explicit and free of wildcards.
-- Import and verify the Keycloak realm before allowing tenant users to authenticate.
-- Keep `PEAK_SECURITY_JWT_ISSUER_URI` equal to the Keycloak realm issuer and `PEAK_SECURITY_JWT_AUDIENCE=peak-api`.
+- Import, reconcile and verify both Keycloak realms before allowing users to authenticate.
+- Keep `PEAK_SECURITY_JWT_ISSUER_URI` on `peak-hospitality`,
+  `PEAK_PLATFORM_JWT_ISSUER_URI` on `peak-platform`, and
+  `PEAK_SECURITY_JWT_AUDIENCE=peak-api`. The isolated API runtimes must never
+  trust both issuers.
+- Keep platform TOTP enrollment mandatory. Passkeys remain an additional
+  phishing-resistant option; do not weaken user verification or discoverable
+  credential requirements.
+- Keep browser/native clients public, authorization-code-only and PKCE S256.
+  Never introduce a public-client secret, direct grant or wildcard redirect.
+- Keycloak authenticates identities only. Keep tenants, properties, roles,
+  permissions, entitlements, support access and RLS authoritative in Peak's
+  database.
+- Configure authenticated Keycloak SMTP with exactly one of STARTTLS or
+  implicit SSL. Test verification and password-recovery mail before enabling
+  users; do not route identity mail through tenant-configurable guest messaging.
 - Resolve tenant and platform users through active OIDC `identity_links`; do not rely on client-editable user attributes for authorization.
 - Keep payment and fiscal credentials out of checked-in YAML. Production payment
   accounts use `providerCode=clickpesa`,
@@ -119,6 +138,10 @@ versions require an explicit `pg_upgrade` or backup/restore procedure.
 - Worker pool defaults: `PEAK_WORKER_DB_POOL_MAX_SIZE=10`, `PEAK_WORKER_DB_POOL_MIN_IDLE=2`.
 - Migration pool defaults: `PEAK_MIGRATION_DB_POOL_MAX_SIZE=2`, `PEAK_MIGRATION_DB_POOL_MIN_IDLE=0`.
 - Outbox worker defaults: `PEAK_OUTBOX_WORKER_BATCH_SIZE=50`, `PEAK_OUTBOX_WORKER_MAX_PARALLELISM=4`.
+- Keycloak database pool defaults: initial `5`, minimum `5`, maximum `20`.
+- Keycloak rejects above `KEYCLOAK_HTTP_MAX_QUEUED_REQUESTS=1000` rather than
+  accepting unbounded work, uses a graceful shutdown delay, and discovers
+  cluster peers with the `jdbc-ping` cache stack.
 
 Keep worker DB pool size greater than or equal to worker parallelism only when handlers require database access. Otherwise tune pool size to the database budget and provider latency.
 
@@ -142,7 +165,7 @@ Dry-run restore into a disposable environment before every production restore:
 4. Restore the Keycloak backup with
    `ops/scripts/restore-keycloak.sh backups/<keycloak-backup>.sql.gz` against a
    disposable Keycloak database when identity recovery is in scope.
-5. Run `ops/scripts/verify-keycloak-realm.sh` and `ops/scripts/smoke-test.sh`
+5. Run `ops/scripts/verify-keycloak-realms.sh` and `ops/scripts/smoke-test.sh`
    against the disposable environment after migrations are applied.
 
 Never test restore against the live production database.
@@ -168,11 +191,58 @@ Prefer forward fixes for schema changes. Restore from backup only when data inte
 
 ## Keycloak Realm Upgrade
 
-1. Export the current realm from production and keep it with the release evidence.
-2. Update `ops/keycloak/peak-realm.json` in a branch and review client IDs, redirect URIs, audience mapper, and required actions.
-3. Validate JSON in CI and run `ops/scripts/verify-keycloak-realm.sh` against a staging Keycloak instance.
-4. Deploy Keycloak changes before API changes that depend on new token claims.
-5. Re-run `ops/scripts/verify-keycloak-realm.sh` after production rollout.
+The baseline is Keycloak `26.7.0`, pinned by immutable multi-architecture image
+digest. Read every intervening official upgrading guide before changing it.
+
+1. Run the backup/restore drill and verify both realms in staging.
+2. Update the image tag and digest together. Review realm policy, client IDs,
+   redirects, audience mappers, required actions and release security notes.
+3. If the former `peak` realm contains users, schedule a maintenance window and
+   run the guarded migration before changing API issuers:
+
+   ```sh
+   KEYCLOAK_LEGACY_REALM_MIGRATION_APPROVED=true \
+     ops/scripts/migrate-keycloak-legacy-realm.sh
+   ```
+
+   The command backs up both databases, stops authentication and application
+   runtimes, exports the old realm offline, preserves subject identifiers and
+   portable credentials, partitions users into the platform and hospitality
+   realms using Peak's active identity links, and verifies the target users
+   before changing any application data. The issuer cutover and its audit
+   records commit atomically. The old realm is then disabled and a real smoke
+   check must pass before the command succeeds. Temporary files containing
+   credentials are mode-restricted and deleted on every exit. The command also
+   refuses to disable the old realm while it contains an unmapped user or Peak
+   references a subject absent from the export.
+
+   Keycloak service accounts and federated identities intentionally stop the
+   automated migration. Recreate service accounts as workload identities and
+   migrate identity-provider/broker configuration explicitly before retrying.
+4. Run the guarded upgrade:
+
+   ```sh
+   KEYCLOAK_UPGRADE_APPROVED=true ops/scripts/upgrade-keycloak.sh
+   ```
+
+5. The command takes a database backup, pulls the reviewed digest, starts the
+   new version, reconciles both realms and verifies their live contracts. It
+   deliberately does not start an older binary after a failed schema upgrade;
+   use a forward fix or restore the recorded backup into a clean database.
+
+The upgrade guard does not accept a manual confirmation bypass. It checks that
+the old realm is disabled when legacy users remain and independently queries
+Peak for zero active links using the old issuer.
+
+Startup `--import-realm` creates missing realms but skips existing realms.
+Never treat a successful restart as proof that policy changes were applied;
+the reconciler and live verifier are required release gates.
+
+Podman Compose is the single-host production-like baseline. A real production
+deployment should run at least two Keycloak instances across failure domains
+behind a health-aware load balancer, use the shared Keycloak PostgreSQL
+database and `jdbc-ping`, drain nodes during rolling upgrades, and keep port
+`9000` available only to internal health/metrics collectors.
 
 ## Observability
 

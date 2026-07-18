@@ -19,6 +19,7 @@ from typing import Any, Iterable
 
 
 Json = dict[str, Any] | list[Any] | None
+HOSPITALITY_REALM = os.environ.get("KEYCLOAK_HOSPITALITY_REALM", "peak-hospitality")
 
 
 class CheckFailed(RuntimeError):
@@ -120,7 +121,7 @@ def token_for(keycloak_url: str, username: str, password: str) -> str:
         }
     ).encode()
     request = urllib.request.Request(
-        f"{keycloak_url.rstrip('/')}/realms/peak/protocol/openid-connect/token",
+        f"{keycloak_url.rstrip('/')}/realms/{HOSPITALITY_REALM}/protocol/openid-connect/token",
         data=data,
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         method="POST",
@@ -175,7 +176,7 @@ class KeycloakAdmin:
             headers["Content-Type"] = "application/json"
             data = json.dumps(body).encode()
         request = urllib.request.Request(
-            f"{self.base_url}/admin/realms/peak{path}",
+            f"{self.base_url}/admin/realms/{HOSPITALITY_REALM}{path}",
             headers=headers,
             data=data,
             method=method,

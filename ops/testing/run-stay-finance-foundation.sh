@@ -7,6 +7,7 @@ ENV_FILE="${ENV_FILE:-$ROOT_DIR/ops/production/.env}"
 PROJECT="${COMPOSE_PROJECT_NAME:-peak-stay-finance-acceptance}"
 BASE_URL="${PEAK_BASE_URL:-http://localhost:8080}"
 KEYCLOAK_URL="${KEYCLOAK_BASE_URL:-http://localhost:8081}"
+HOSPITALITY_REALM="${KEYCLOAK_HOSPITALITY_REALM:-peak-hospitality}"
 EVIDENCE_DIR="${STAY_FINANCE_EVIDENCE_DIR:-$ROOT_DIR/build/evidence/stay-finance-foundation}"
 TENANT_PROPERTY_EVIDENCE="$EVIDENCE_DIR/tenant-property-foundation.json"
 NEWMAN_REPORT="$EVIDENCE_DIR/newman-private.json"
@@ -42,7 +43,7 @@ room_id="$(jq -er '.roomId' "$TENANT_PROPERTY_EVIDENCE")"
 tenant_id="$(jq -er '.tenantId' "$TENANT_PROPERTY_EVIDENCE")"
 access_token="$(
   curl -fsS \
-    -X POST "$KEYCLOAK_URL/realms/peak/protocol/openid-connect/token" \
+    -X POST "$KEYCLOAK_URL/realms/$HOSPITALITY_REALM/protocol/openid-connect/token" \
     -H "Content-Type: application/x-www-form-urlencoded" \
     --data-urlencode "grant_type=password" \
     --data-urlencode "client_id=peak-acceptance" \
