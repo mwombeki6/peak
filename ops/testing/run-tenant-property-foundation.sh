@@ -8,6 +8,7 @@ COMPOSE_FILE="${COMPOSE_FILE:-$ROOT_DIR/ops/production/compose.yaml}"
 OVERLAY_FILE="${OVERLAY_FILE:-$ROOT_DIR/ops/testing/compose.tenant-property-foundation.yaml}"
 PROJECT="${COMPOSE_PROJECT_NAME:-peak-tenant-property-foundation}"
 BASE_URL="${PEAK_BASE_URL:-http://localhost:8080}"
+PLATFORM_BASE_URL="${PEAK_PLATFORM_BASE_URL:-http://localhost:8082}"
 KEYCLOAK_URL="${KEYCLOAK_BASE_URL:-http://localhost:8081}"
 ORIGIN="${PEAK_ACCEPTANCE_ORIGIN:-https://localhost:5173}"
 RESET="${TENANT_PROPERTY_RESET:-false}"
@@ -64,12 +65,16 @@ api() {
   local expected="$4"
   local idempotency_key="${5:-}"
   local payload="${6:-}"
+  local service_base_url="$BASE_URL"
   local output
   local status
+  if [[ "$path" == /api/v1/platform/* ]]; then
+    service_base_url="$PLATFORM_BASE_URL"
+  fi
   local args=(
     -sS
     -X "$method"
-    "$BASE_URL$path"
+    "$service_base_url$path"
     -H "Authorization: Bearer $token"
     -H "X-Correlation-Id: tenant-property-${idempotency_key:-read}"
   )
@@ -243,8 +248,9 @@ if "${compose[@]}" config --services | grep -Fxq minio-init; then
 fi
 
 # Dependencies are already ready; do not re-traverse removed one-shot containers.
-"${compose[@]}" up -d --no-deps peak-api peak-worker
+"${compose[@]}" up -d --no-deps peak-api peak-platform peak-worker
 wait_http "$BASE_URL/actuator/health"
+wait_http "$PLATFORM_BASE_URL/actuator/health/readiness"
 
 platform_token="$(token_for "acceptance-platform-root" "$root_password")"
 tenant_token_unlinked="$(token_for "acceptance-tenant-admin" "$tenant_password")"
