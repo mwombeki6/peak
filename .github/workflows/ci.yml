@@ -203,6 +203,8 @@ jobs:
             -e 's|^POSTGRES_PLATFORM_SUPPORT_PASSWORD=.*|POSTGRES_PLATFORM_SUPPORT_PASSWORD=ci-support-password-1234|' \
             -e 's|^KEYCLOAK_ADMIN_PASSWORD=.*|KEYCLOAK_ADMIN_PASSWORD=ci-keycloak-admin-password-1234|' \
             -e 's|^KEYCLOAK_DB_PASSWORD=.*|KEYCLOAK_DB_PASSWORD=ci-keycloak-db-password-1234|' \
+            -e 's|^KEYCLOAK_SMTP_USER=.*|KEYCLOAK_SMTP_USER=ci-keycloak-smtp-user|' \
+            -e 's|^KEYCLOAK_SMTP_PASSWORD=.*|KEYCLOAK_SMTP_PASSWORD=ci-keycloak-smtp-password-1234|' \
             -e 's|^PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=.*|PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=ci-communication-key-1234|' \
             -e 's|^PEAK_ENVELOPE_KEY_BASE64=.*|PEAK_ENVELOPE_KEY_BASE64=cGVhay1jaS1lbnZlbG9wZS1rZXktMzItYnl0ZXMhISE=|' \
             -e 's|^PEAK_PAYMENT_GATEWAY_CREDENTIAL=.*|PEAK_PAYMENT_GATEWAY_CREDENTIAL=ci-payment-credential-1234|' \
@@ -219,8 +221,11 @@ jobs:
         run: |
           sh -n ops/scripts/*.sh
           bash -n ops/testing/*.sh
+          python3 -m py_compile ops/scripts/*.py
           python3 -m py_compile ops/testing/*.py
-          python3 -m json.tool ops/keycloak/peak-realm.json >/dev/null
+          python3 ops/testing/test_legacy_keycloak_realm_migration.py
+          find ops/keycloak -name '*-realm.json' -print0 | \
+            xargs -0 -n1 python3 -m json.tool >/dev/null
           find ops/testing ops/observability -name '*.json' -print0 | \
             xargs -0 -n1 python3 -m json.tool >/dev/null
           python3 -c 'import glob,yaml; [yaml.safe_load(open(path)) for path in glob.glob("ops/observability/*.yaml")]'
@@ -291,7 +296,8 @@ jobs:
           sed -i \
             -e 's|^PEAK_IMAGE=.*|PEAK_IMAGE=localhost/peak:acceptance-ci|' \
             -e 's|^KEYCLOAK_HOSTNAME=.*|KEYCLOAK_HOSTNAME=http://keycloak:8080|' \
-            -e 's|^PEAK_SECURITY_JWT_ISSUER_URI=.*|PEAK_SECURITY_JWT_ISSUER_URI=http://keycloak:8080/realms/peak|' \
+            -e 's|^PEAK_SECURITY_JWT_ISSUER_URI=.*|PEAK_SECURITY_JWT_ISSUER_URI=http://keycloak:8080/realms/peak-hospitality|' \
+            -e 's|^PEAK_PLATFORM_JWT_ISSUER_URI=.*|PEAK_PLATFORM_JWT_ISSUER_URI=http://keycloak:8080/realms/peak-platform|' \
             -e 's|^PEAK_CORS_ALLOWED_ORIGINS=.*|PEAK_CORS_ALLOWED_ORIGINS=https://localhost:5173|' \
             -e 's|^PEAK_REALTIME_WEBSOCKET_ALLOWED_ORIGINS=.*|PEAK_REALTIME_WEBSOCKET_ALLOWED_ORIGINS=https://localhost:5173|' \
             -e 's|^PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_BASE_URL=.*|PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_BASE_URL=http://host.containers.internal:8090|' \
@@ -303,6 +309,8 @@ jobs:
             -e 's|^POSTGRES_PLATFORM_SUPPORT_PASSWORD=.*|POSTGRES_PLATFORM_SUPPORT_PASSWORD=acceptance-support-password|' \
             -e 's|^KEYCLOAK_ADMIN_PASSWORD=.*|KEYCLOAK_ADMIN_PASSWORD=acceptance-keycloak-admin-password|' \
             -e 's|^KEYCLOAK_DB_PASSWORD=.*|KEYCLOAK_DB_PASSWORD=acceptance-keycloak-db-password|' \
+            -e 's|^KEYCLOAK_SMTP_USER=.*|KEYCLOAK_SMTP_USER=acceptance-keycloak-smtp-user|' \
+            -e 's|^KEYCLOAK_SMTP_PASSWORD=.*|KEYCLOAK_SMTP_PASSWORD=acceptance-keycloak-smtp-password|' \
             -e 's|^PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=.*|PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=acceptance-communication-key|' \
             -e 's|^PEAK_ENVELOPE_KEY_BASE64=.*|PEAK_ENVELOPE_KEY_BASE64=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=|' \
             -e 's|^PEAK_PAYMENT_GATEWAY_CREDENTIAL=.*|PEAK_PAYMENT_GATEWAY_CREDENTIAL=acceptance-payment-credential|' \

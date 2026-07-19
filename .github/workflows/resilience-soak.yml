@@ -52,7 +52,8 @@ jobs:
           sed -i \
             -e 's|^PEAK_IMAGE=.*|PEAK_IMAGE=localhost/peak:resilience-soak|' \
             -e 's|^KEYCLOAK_HOSTNAME=.*|KEYCLOAK_HOSTNAME=http://keycloak:8080|' \
-            -e 's|^PEAK_SECURITY_JWT_ISSUER_URI=.*|PEAK_SECURITY_JWT_ISSUER_URI=http://keycloak:8080/realms/peak|' \
+            -e 's|^PEAK_SECURITY_JWT_ISSUER_URI=.*|PEAK_SECURITY_JWT_ISSUER_URI=http://keycloak:8080/realms/peak-hospitality|' \
+            -e 's|^PEAK_PLATFORM_JWT_ISSUER_URI=.*|PEAK_PLATFORM_JWT_ISSUER_URI=http://keycloak:8080/realms/peak-platform|' \
             -e 's|^PEAK_CORS_ALLOWED_ORIGINS=.*|PEAK_CORS_ALLOWED_ORIGINS=https://localhost:5173|' \
             -e 's|^PEAK_REALTIME_WEBSOCKET_ALLOWED_ORIGINS=.*|PEAK_REALTIME_WEBSOCKET_ALLOWED_ORIGINS=https://localhost:5173|' \
             -e 's|^PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_BASE_URL=.*|PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_BASE_URL=http://host.containers.internal:8090|' \
@@ -64,6 +65,8 @@ jobs:
             -e 's|^POSTGRES_PLATFORM_SUPPORT_PASSWORD=.*|POSTGRES_PLATFORM_SUPPORT_PASSWORD=soak-support-password|' \
             -e 's|^KEYCLOAK_ADMIN_PASSWORD=.*|KEYCLOAK_ADMIN_PASSWORD=soak-keycloak-admin-password|' \
             -e 's|^KEYCLOAK_DB_PASSWORD=.*|KEYCLOAK_DB_PASSWORD=soak-keycloak-db-password|' \
+            -e 's|^KEYCLOAK_SMTP_USER=.*|KEYCLOAK_SMTP_USER=soak-keycloak-smtp-user|' \
+            -e 's|^KEYCLOAK_SMTP_PASSWORD=.*|KEYCLOAK_SMTP_PASSWORD=soak-keycloak-smtp-password|' \
             -e 's|^PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=.*|PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=soak-communication-key|' \
             -e 's|^PEAK_ENVELOPE_KEY_BASE64=.*|PEAK_ENVELOPE_KEY_BASE64=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=|' \
             -e 's|^PEAK_PAYMENT_GATEWAY_CREDENTIAL=.*|PEAK_PAYMENT_GATEWAY_CREDENTIAL=soak-payment-credential|' \

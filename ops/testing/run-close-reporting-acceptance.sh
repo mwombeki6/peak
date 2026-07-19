@@ -26,6 +26,7 @@ ENV_FILE="${ENV_FILE:-$ROOT_DIR/ops/production/.env}"
 set -a
 . "$ENV_FILE"
 set +a
+HOSPITALITY_REALM="${KEYCLOAK_HOSPITALITY_REALM:-peak-hospitality}"
 
 mock_pid=""
 cleanup() {
@@ -78,7 +79,7 @@ pos_order_id="$(jq -er '.posOrderId' "$CORE_HOSPITALITY_EVIDENCE")"
 
 access_token="$(
   curl -fsS \
-    -X POST "$KEYCLOAK_URL/realms/peak/protocol/openid-connect/token" \
+    -X POST "$KEYCLOAK_URL/realms/$HOSPITALITY_REALM/protocol/openid-connect/token" \
     -H "Content-Type: application/x-www-form-urlencoded" \
     --data-urlencode "grant_type=password" \
     --data-urlencode "client_id=peak-acceptance" \

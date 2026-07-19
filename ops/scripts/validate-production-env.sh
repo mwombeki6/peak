@@ -104,6 +104,9 @@ for name in \
   PEAK_IMAGE \
   PEAK_PUBLIC_HOST \
   PEAK_APP_ORIGIN \
+  PEAK_TENANT_ADMIN_APP_ORIGIN \
+  PEAK_PLATFORM_APP_ORIGIN \
+  PEAK_POS_REDIRECT_URI \
   PEAK_API_BIND_ADDRESS \
   PEAK_PLATFORM_BIND_ADDRESS \
   KEYCLOAK_BIND_ADDRESS \
@@ -117,10 +120,29 @@ for name in \
   KEYCLOAK_DB \
   KEYCLOAK_DB_USER \
   KEYCLOAK_HOSTNAME \
+  KEYCLOAK_ADMIN_HOSTNAME \
+  KEYCLOAK_PLATFORM_REALM \
+  KEYCLOAK_HOSPITALITY_REALM \
+  KEYCLOAK_WEBAUTHN_RP_ID \
+  KEYCLOAK_CACHE_STACK \
+  KEYCLOAK_HTTP_MAX_QUEUED_REQUESTS \
+  KEYCLOAK_SHUTDOWN_DELAY \
+  KEYCLOAK_DB_POOL_INITIAL_SIZE \
+  KEYCLOAK_DB_POOL_MIN_SIZE \
+  KEYCLOAK_DB_POOL_MAX_SIZE \
+  KEYCLOAK_SMTP_FROM \
+  KEYCLOAK_SMTP_FROM_DISPLAY_NAME \
+  KEYCLOAK_SMTP_REPLY_TO \
+  KEYCLOAK_SMTP_HOST \
+  KEYCLOAK_SMTP_PORT \
+  KEYCLOAK_SMTP_USER \
   PEAK_SECURITY_JWT_ISSUER_URI \
+  PEAK_PLATFORM_JWT_ISSUER_URI \
   PEAK_SECURITY_JWT_AUDIENCE \
   PEAK_CORS_ALLOWED_ORIGINS \
   PEAK_REALTIME_WEBSOCKET_ALLOWED_ORIGINS \
+  PEAK_PLATFORM_CORS_ALLOWED_ORIGINS \
+  PEAK_PLATFORM_REALTIME_WEBSOCKET_ALLOWED_ORIGINS \
   PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_BASE_URL \
   PEAK_INVITATION_ACCEPTANCE_BASE_URL \
   PEAK_ENVELOPE_KEY_REFERENCE \
@@ -159,7 +181,11 @@ for name in \
   PEAK_WORKER_DB_POOL_MAX_SIZE \
   PEAK_MIGRATION_DB_POOL_MAX_SIZE \
   PEAK_OUTBOX_WORKER_BATCH_SIZE \
-  PEAK_OUTBOX_WORKER_MAX_PARALLELISM
+  PEAK_OUTBOX_WORKER_MAX_PARALLELISM \
+  KEYCLOAK_HTTP_MAX_QUEUED_REQUESTS \
+  KEYCLOAK_DB_POOL_INITIAL_SIZE \
+  KEYCLOAK_DB_POOL_MAX_SIZE \
+  KEYCLOAK_SMTP_PORT
 do
   require_positive_int "$name"
 done
@@ -167,7 +193,8 @@ done
 for name in \
   PEAK_DB_POOL_MIN_IDLE \
   PEAK_WORKER_DB_POOL_MIN_IDLE \
-  PEAK_MIGRATION_DB_POOL_MIN_IDLE
+  PEAK_MIGRATION_DB_POOL_MIN_IDLE \
+  KEYCLOAK_DB_POOL_MIN_SIZE
 do
   require_non_negative_int "$name"
 done
@@ -175,6 +202,8 @@ done
 require_int_gte PEAK_DB_POOL_MAX_SIZE PEAK_DB_POOL_MIN_IDLE
 require_int_gte PEAK_WORKER_DB_POOL_MAX_SIZE PEAK_WORKER_DB_POOL_MIN_IDLE
 require_int_gte PEAK_MIGRATION_DB_POOL_MAX_SIZE PEAK_MIGRATION_DB_POOL_MIN_IDLE
+require_int_gte KEYCLOAK_DB_POOL_MAX_SIZE KEYCLOAK_DB_POOL_INITIAL_SIZE
+require_int_gte KEYCLOAK_DB_POOL_MAX_SIZE KEYCLOAK_DB_POOL_MIN_SIZE
 
 for name in \
   POSTGRES_MIGRATOR_PASSWORD \
@@ -184,6 +213,7 @@ for name in \
   POSTGRES_PLATFORM_SUPPORT_PASSWORD \
   KEYCLOAK_ADMIN_PASSWORD \
   KEYCLOAK_DB_PASSWORD \
+  KEYCLOAK_SMTP_PASSWORD \
   PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY \
   PEAK_ENVELOPE_KEY_BASE64 \
   PEAK_PAYMENT_GATEWAY_CREDENTIAL \
@@ -195,6 +225,14 @@ for name in \
   PEAK_REPORT_STORAGE_SECRET_KEY
 do
   require_secret "$name"
+done
+
+for name in \
+  KEYCLOAK_SMTP_AUTH \
+  KEYCLOAK_SMTP_STARTTLS \
+  KEYCLOAK_SMTP_SSL
+do
+  require_boolean "$name"
 done
 
 require_distinct POSTGRES_APP_USER POSTGRES_PLATFORM_USER
@@ -310,8 +348,8 @@ if [ "$(value_of PEAK_PLATFORM_BOOTSTRAP_ENABLED)" = "true" ]; then
     reject_placeholder "$name"
   done
 
-  if [ "$(value_of PEAK_PLATFORM_BOOTSTRAP_ISSUER)" != "$(value_of PEAK_SECURITY_JWT_ISSUER_URI)" ]; then
-    fail "PEAK_PLATFORM_BOOTSTRAP_ISSUER must equal PEAK_SECURITY_JWT_ISSUER_URI"
+  if [ "$(value_of PEAK_PLATFORM_BOOTSTRAP_ISSUER)" != "$(value_of PEAK_PLATFORM_JWT_ISSUER_URI)" ]; then
+    fail "PEAK_PLATFORM_BOOTSTRAP_ISSUER must equal PEAK_PLATFORM_JWT_ISSUER_URI"
   fi
 fi
 
@@ -344,6 +382,75 @@ case "$(value_of PEAK_SECURITY_JWT_ISSUER_URI)" in
   *) fail "PEAK_SECURITY_JWT_ISSUER_URI must be an absolute http(s) URL" ;;
 esac
 
+case "$(value_of PEAK_PLATFORM_JWT_ISSUER_URI)" in
+  http://*|https://*) ;;
+  *) fail "PEAK_PLATFORM_JWT_ISSUER_URI must be an absolute http(s) URL" ;;
+esac
+
+if [ "$(value_of KEYCLOAK_PLATFORM_REALM)" != "peak-platform" ]; then
+  fail "KEYCLOAK_PLATFORM_REALM must be peak-platform"
+fi
+
+if [ "$(value_of KEYCLOAK_HOSPITALITY_REALM)" != "peak-hospitality" ]; then
+  fail "KEYCLOAK_HOSPITALITY_REALM must be peak-hospitality"
+fi
+
+if [ "$(value_of PEAK_SECURITY_JWT_ISSUER_URI)" != \
+     "$(value_of KEYCLOAK_HOSTNAME)/realms/$(value_of KEYCLOAK_HOSPITALITY_REALM)" ]; then
+  fail "PEAK_SECURITY_JWT_ISSUER_URI must identify the hospitality realm on KEYCLOAK_HOSTNAME"
+fi
+
+if [ "$(value_of PEAK_PLATFORM_JWT_ISSUER_URI)" != \
+     "$(value_of KEYCLOAK_HOSTNAME)/realms/$(value_of KEYCLOAK_PLATFORM_REALM)" ]; then
+  fail "PEAK_PLATFORM_JWT_ISSUER_URI must identify the platform realm on KEYCLOAK_HOSTNAME"
+fi
+
+require_distinct PEAK_SECURITY_JWT_ISSUER_URI PEAK_PLATFORM_JWT_ISSUER_URI
+
+case "$(value_of KEYCLOAK_IMAGE)" in
+  *@sha256:????????????????????????????????????????????????????????????????) ;;
+  *) fail "KEYCLOAK_IMAGE must be pinned to an immutable sha256 manifest digest" ;;
+esac
+
+case "$(value_of KEYCLOAK_IMAGE)" in
+  *:latest*|*:nightly*) fail "KEYCLOAK_IMAGE must not use latest or nightly tags" ;;
+esac
+
+if [ "$(value_of KEYCLOAK_CACHE_STACK)" != "jdbc-ping" ]; then
+  fail "KEYCLOAK_CACHE_STACK must be jdbc-ping for database-discovered clustering"
+fi
+
+if [ "$(value_of KEYCLOAK_SMTP_AUTH)" != "true" ]; then
+  fail "KEYCLOAK_SMTP_AUTH must be true"
+fi
+if [ "$(value_of KEYCLOAK_SMTP_STARTTLS)" = "$(value_of KEYCLOAK_SMTP_SSL)" ]; then
+  fail "exactly one of KEYCLOAK_SMTP_STARTTLS or KEYCLOAK_SMTP_SSL must be true"
+fi
+case "$(value_of KEYCLOAK_SMTP_HOST)" in
+  *"*"*|*"://"*|*"/"*|*","*|*" "*|"")
+    fail "KEYCLOAK_SMTP_HOST must be one exact DNS hostname"
+    ;;
+esac
+case "$(value_of KEYCLOAK_SMTP_FROM)" in
+  *@*.*) ;;
+  *) fail "KEYCLOAK_SMTP_FROM must be an email address" ;;
+esac
+case "$(value_of KEYCLOAK_SMTP_REPLY_TO)" in
+  *@*.*) ;;
+  *) fail "KEYCLOAK_SMTP_REPLY_TO must be an email address" ;;
+esac
+
+case "$(value_of KEYCLOAK_SHUTDOWN_DELAY)" in
+  *s) ;;
+  *) fail "KEYCLOAK_SHUTDOWN_DELAY must be an explicit seconds duration" ;;
+esac
+
+case "$(value_of KEYCLOAK_WEBAUTHN_RP_ID)" in
+  *"*"*|*"://"*|*"/"*|*","*|"")
+    fail "KEYCLOAK_WEBAUTHN_RP_ID must be one exact registrable DNS domain"
+    ;;
+esac
+
 if [ "$(value_of PEAK_ENVELOPE_KEY_REFERENCE)" != "env:PEAK_ENVELOPE_KEY_BASE64" ]; then
   fail "PEAK_ENVELOPE_KEY_REFERENCE must be env:PEAK_ENVELOPE_KEY_BASE64"
 fi
@@ -364,6 +471,37 @@ case "$(value_of PEAK_APP_ORIGIN)" in
   https://*) ;;
   *) fail "PEAK_APP_ORIGIN must use https" ;;
 esac
+
+case "$(value_of PEAK_TENANT_ADMIN_APP_ORIGIN)" in
+  https://*) ;;
+  *) fail "PEAK_TENANT_ADMIN_APP_ORIGIN must use https" ;;
+esac
+
+case "$(value_of PEAK_PLATFORM_APP_ORIGIN)" in
+  https://*) ;;
+  *) fail "PEAK_PLATFORM_APP_ORIGIN must use https" ;;
+esac
+
+if [ "$(value_of PEAK_POS_REDIRECT_URI)" != "http://127.0.0.1" ]; then
+  fail "PEAK_POS_REDIRECT_URI must use the RFC 8252 loopback redirect http://127.0.0.1"
+fi
+
+require_distinct PEAK_APP_ORIGIN PEAK_TENANT_ADMIN_APP_ORIGIN
+require_distinct PEAK_APP_ORIGIN PEAK_PLATFORM_APP_ORIGIN
+require_distinct PEAK_TENANT_ADMIN_APP_ORIGIN PEAK_PLATFORM_APP_ORIGIN
+
+if [ "$(value_of PEAK_ACCEPTANCE_MODE)" != "true" ]; then
+  case "$(value_of KEYCLOAK_HOSTNAME)" in
+    https://*) ;;
+    *) fail "KEYCLOAK_HOSTNAME must be a full https URL" ;;
+  esac
+  case "$(value_of KEYCLOAK_ADMIN_HOSTNAME)" in
+    https://*) ;;
+    *) fail "KEYCLOAK_ADMIN_HOSTNAME must be a full https URL" ;;
+  esac
+fi
+
+require_distinct KEYCLOAK_HOSTNAME KEYCLOAK_ADMIN_HOSTNAME
 
 case "$(value_of PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS)" in
   *"*"*|*"://"*|*"/"*|*"localhost"*|*"127.0.0.1"*|*"0.0.0.0"*|*"::1"*)
@@ -399,6 +537,16 @@ esac
 
 case "$(value_of PEAK_REALTIME_WEBSOCKET_ALLOWED_ORIGINS)" in
   *http://*) fail "PEAK_REALTIME_WEBSOCKET_ALLOWED_ORIGINS must use https origins" ;;
+esac
+
+case "$(value_of PEAK_PLATFORM_CORS_ALLOWED_ORIGINS)" in
+  *"*"*) fail "PEAK_PLATFORM_CORS_ALLOWED_ORIGINS must not contain wildcards" ;;
+  *http://*) fail "PEAK_PLATFORM_CORS_ALLOWED_ORIGINS must use https origins" ;;
+esac
+
+case "$(value_of PEAK_PLATFORM_REALTIME_WEBSOCKET_ALLOWED_ORIGINS)" in
+  *"*"*) fail "PEAK_PLATFORM_REALTIME_WEBSOCKET_ALLOWED_ORIGINS must not contain wildcards" ;;
+  *http://*) fail "PEAK_PLATFORM_REALTIME_WEBSOCKET_ALLOWED_ORIGINS must use https origins" ;;
 esac
 
 if [ "$(value_of POSTGRES_APP_USER)" = "$(value_of POSTGRES_MIGRATOR_USER)" ]; then

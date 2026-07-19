@@ -6,6 +6,7 @@ ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 PROJECT="${COMPOSE_PROJECT_NAME:-peak-core-hospitality-acceptance}"
 BASE_URL="${PEAK_BASE_URL:-http://localhost:8080}"
 KEYCLOAK_URL="${KEYCLOAK_BASE_URL:-http://localhost:8081}"
+HOSPITALITY_REALM="${KEYCLOAK_HOSPITALITY_REALM:-peak-hospitality}"
 EVIDENCE_DIR="${CORE_HOSPITALITY_EVIDENCE_DIR:-$ROOT_DIR/build/evidence/core-hospitality-journey}"
 STAY_FINANCE_EVIDENCE="$EVIDENCE_DIR/stay-finance-foundation.json"
 TENANT_PROPERTY_EVIDENCE="$EVIDENCE_DIR/tenant-property-foundation.json"
@@ -43,7 +44,7 @@ outlet_id="$(jq -er '.outletId' "$STAY_FINANCE_EVIDENCE")"
 menu_item_id="$(jq -er '.menuItemId' "$STAY_FINANCE_EVIDENCE")"
 access_token="$(
   curl -fsS \
-    -X POST "$KEYCLOAK_URL/realms/peak/protocol/openid-connect/token" \
+    -X POST "$KEYCLOAK_URL/realms/$HOSPITALITY_REALM/protocol/openid-connect/token" \
     -H "Content-Type: application/x-www-form-urlencoded" \
     --data-urlencode "grant_type=password" \
     --data-urlencode "client_id=peak-acceptance" \

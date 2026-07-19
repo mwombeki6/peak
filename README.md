@@ -33,7 +33,8 @@ Production profile validation fails startup when unsafe defaults are present.
 
 ## Key Security Rules
 
-1. Keycloak JWT validation is required in production.
+1. Keycloak JWT validation is required in production; platform and hospitality
+   runtimes trust separate issuers.
 2. Production JWT identity is resolved through database-backed OIDC identity links.
 3. Trusted header identity and trusted direct JWT identity claims are for local or controlled runtimes only.
 4. Public callbacks resolve tenant/property scope from database-owned provider
@@ -48,5 +49,7 @@ Production Podman files live in `ops/production`. Start with `ops/production/.en
 Module-specific ownership notes live beside each module under `src/main/kotlin/com/mwombeki/peak/*/README.md`.
 The canonical module/dependency inventory and database ownership contract live
 under `docs/architecture`; both are enforced by architecture tests.
+The realm, frontend-client and authentication/authorization boundary is defined
+in `docs/architecture/identity-and-access.md`.
 The complete rollout, rollback, restore, Keycloak, and smoke-test procedures are
 in `ops/production/README.md`.

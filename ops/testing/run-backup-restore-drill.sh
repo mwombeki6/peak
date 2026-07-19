@@ -151,19 +151,30 @@ restored_continuity_owner_hardened="$(restored_db "
 
 KEYCLOAK_BIND_ADDRESS=127.0.0.2 \
 KEYCLOAK_HOSTNAME=http://127.0.0.2:8081 \
+KEYCLOAK_ADMIN_HOSTNAME=http://127.0.0.2:8081 \
 podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
   up -d keycloak
 for _ in $(seq 1 60); do
-  if curl -fsS http://127.0.0.2:8081/realms/peak/.well-known/openid-configuration \
-    > "$EVIDENCE_DIR/restored-oidc-discovery.json"; then
+  if curl -fsS \
+      "http://127.0.0.2:8081/realms/$KEYCLOAK_PLATFORM_REALM/.well-known/openid-configuration" \
+      > "$EVIDENCE_DIR/restored-platform-oidc-discovery.json" && \
+    curl -fsS \
+      "http://127.0.0.2:8081/realms/$KEYCLOAK_HOSPITALITY_REALM/.well-known/openid-configuration" \
+      > "$EVIDENCE_DIR/restored-hospitality-oidc-discovery.json"; then
     break
   fi
   sleep 2
 done
-[[ -s "$EVIDENCE_DIR/restored-oidc-discovery.json" ]] || {
-  echo "Restored Keycloak did not publish the peak realm" >&2
+[[ -s "$EVIDENCE_DIR/restored-platform-oidc-discovery.json" ]] && \
+  [[ -s "$EVIDENCE_DIR/restored-hospitality-oidc-discovery.json" ]] || {
+  echo "Restored Keycloak did not publish both Peak realms" >&2
   exit 1
 }
+KEYCLOAK_BASE_URL=http://127.0.0.2:8081 \
+PEAK_PLATFORM_JWT_ISSUER_URI="http://127.0.0.2:8081/realms/$KEYCLOAK_PLATFORM_REALM" \
+PEAK_SECURITY_JWT_ISSUER_URI="http://127.0.0.2:8081/realms/$KEYCLOAK_HOSPITALITY_REALM" \
+  "$ROOT_DIR/ops/scripts/verify-keycloak-realms.sh" \
+  > "$EVIDENCE_DIR/restored-keycloak-verification.log"
 restored_authentication="$(
   curl -fsS -X POST http://127.0.0.2:8081/realms/master/protocol/openid-connect/token \
     --data-urlencode "client_id=admin-cli" \
