@@ -18,7 +18,7 @@ import urllib.request
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 class WriteLoadFailure(RuntimeError):
@@ -26,6 +26,8 @@ class WriteLoadFailure(RuntimeError):
 
 
 HOSPITALITY_REALM = os.environ.get("KEYCLOAK_HOSPITALITY_REALM", "peak-hospitality")
+TokenRequest = Callable[[str, dict[str, str]], dict[str, Any]]
+Clock = Callable[[], float]
 
 
 @dataclass
@@ -35,15 +37,8 @@ class Call:
     duration_ms: float
 
 
-def token_for(keycloak_url: str, username: str, password: str) -> str:
-    data = urllib.parse.urlencode(
-        {
-            "grant_type": "password",
-            "client_id": "peak-acceptance",
-            "username": username,
-            "password": password,
-        }
-    ).encode()
+def request_token(keycloak_url: str, form: dict[str, str]) -> dict[str, Any]:
+    data = urllib.parse.urlencode({"client_id": "peak-acceptance", **form}).encode()
     request = urllib.request.Request(
         f"{keycloak_url.rstrip('/')}/realms/{HOSPITALITY_REALM}/protocol/openid-connect/token",
         method="POST",
@@ -51,12 +46,107 @@ def token_for(keycloak_url: str, username: str, password: str) -> str:
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
     with urllib.request.urlopen(request, timeout=30) as response:
-        return json.load(response)["access_token"]
+        payload = json.load(response)
+    if not payload.get("access_token"):
+        raise WriteLoadFailure("Keycloak token response did not contain access_token")
+    return payload
+
+
+class KeycloakTokenManager:
+    """Share one rotation-safe refresh-token lifecycle across load workers."""
+
+    def __init__(
+        self,
+        keycloak_url: str,
+        username: str,
+        password: str,
+        *,
+        token_request: TokenRequest = request_token,
+        clock: Clock = time.monotonic,
+    ) -> None:
+        self.keycloak_url = keycloak_url
+        self.username = username
+        self.password = password
+        self.token_request = token_request
+        self.clock = clock
+        self.lock = threading.Lock()
+        self.current_access_token: str | None = None
+        self.current_refresh_token: str | None = None
+        self.refresh_at = 0.0
+        self.password_grant_count = 0
+        self.refresh_grant_count = 0
+
+    def access_token(self) -> str:
+        with self.lock:
+            if self.current_access_token and self.clock() < self.refresh_at:
+                return self.current_access_token
+            return self._renew_locked()
+
+    def refresh_after_unauthorized(self, rejected_token: str) -> str:
+        with self.lock:
+            # Another worker may already have rotated the refresh token. Never
+            # reuse the previous refresh token or invalidate the newer access token.
+            if self.current_access_token != rejected_token:
+                if not self.current_access_token:
+                    return self._renew_locked()
+                return self.current_access_token
+            self.refresh_at = 0.0
+            return self._renew_locked()
+
+    def _renew_locked(self) -> str:
+        payload: dict[str, Any]
+        if self.current_refresh_token:
+            try:
+                payload = self.token_request(
+                    self.keycloak_url,
+                    {
+                        "grant_type": "refresh_token",
+                        "refresh_token": self.current_refresh_token,
+                    },
+                )
+                self.refresh_grant_count += 1
+            except urllib.error.HTTPError as error:
+                if error.code not in (400, 401):
+                    raise
+                error.close()
+                payload = self._password_grant()
+        else:
+            payload = self._password_grant()
+        return self._install(payload)
+
+    def _password_grant(self) -> dict[str, Any]:
+        payload = self.token_request(
+            self.keycloak_url,
+            {
+                "grant_type": "password",
+                "username": self.username,
+                "password": self.password,
+            },
+        )
+        self.password_grant_count += 1
+        return payload
+
+    def _install(self, payload: dict[str, Any]) -> str:
+        access_token = str(payload.get("access_token", ""))
+        refresh_token = str(payload.get("refresh_token", ""))
+        try:
+            expires_in = float(payload.get("expires_in", 0))
+        except (TypeError, ValueError) as error:
+            raise WriteLoadFailure("Keycloak token response has invalid expires_in") from error
+        if not access_token or not refresh_token or expires_in <= 0:
+            raise WriteLoadFailure(
+                "Keycloak token response requires access_token, refresh_token, and positive expires_in",
+            )
+        refresh_skew = min(30.0, max(1.0, expires_in * 0.1))
+        self.current_access_token = access_token
+        self.current_refresh_token = refresh_token
+        self.refresh_at = self.clock() + max(0.0, expires_in - refresh_skew)
+        return access_token
 
 
 def request_json(
     base_url: str,
-    token: str,
+    token_manager: KeycloakTokenManager,
     method: str,
     path: str,
     *,
@@ -64,31 +154,40 @@ def request_json(
     idempotency_key: str | None = None,
     correlation_id: str,
 ) -> tuple[int, dict[str, Any], float]:
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/json",
-        "X-Correlation-Id": correlation_id,
-    }
-    if idempotency_key:
-        headers["Idempotency-Key"] = idempotency_key
     data = None
     if body is not None:
-        headers["Content-Type"] = "application/json"
         data = json.dumps(body, separators=(",", ":")).encode()
-    request = urllib.request.Request(
-        f"{base_url.rstrip('/')}{path}",
-        method=method,
-        headers=headers,
-        data=data,
-    )
     started = time.perf_counter()
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            status = response.status
-            raw = response.read()
-    except urllib.error.HTTPError as error:
-        status = error.code
-        raw = error.read()
+
+    def send(access_token: str) -> tuple[int, bytes]:
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/json",
+            "X-Correlation-Id": correlation_id,
+        }
+        if idempotency_key:
+            headers["Idempotency-Key"] = idempotency_key
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+        request = urllib.request.Request(
+            f"{base_url.rstrip('/')}{path}",
+            method=method,
+            headers=headers,
+            data=data,
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return response.status, response.read()
+        except urllib.error.HTTPError as error:
+            try:
+                return error.code, error.read()
+            finally:
+                error.close()
+
+    token = token_manager.access_token()
+    status, raw = send(token)
+    if status == 401:
+        status, raw = send(token_manager.refresh_after_unauthorized(token))
     elapsed = (time.perf_counter() - started) * 1000
     try:
         payload = json.loads(raw) if raw else {}
@@ -131,12 +230,16 @@ def main() -> int:
     property_id = foundation["propertyId"]
     run_id = departments["runId"].lower()
     username = f"real-hotel-restaurant-{run_id}"
-    token = token_for(args.keycloak_url, username, args.staff_password)
+    token_manager = KeycloakTokenManager(
+        args.keycloak_url,
+        username,
+        args.staff_password,
+    )
     test_id = time.strftime("%Y%m%d%H%M%S", time.gmtime())
 
     status, session, opening_ms = request_json(
         args.base_url,
-        token,
+        token_manager,
         "POST",
         f"/api/v1/properties/{property_id}/pos-sessions/open",
         body={"outletId": stay["outletId"], "openingFloat": 1000},
@@ -164,7 +267,7 @@ def main() -> int:
         operation = f"write-load-{test_id}-{sequence}"
         status, order, elapsed = request_json(
             args.base_url,
-            token,
+            token_manager,
             "POST",
             f"/api/v1/properties/{property_id}/pos-orders",
             body={
@@ -181,7 +284,7 @@ def main() -> int:
         order_id = order["id"]
         status, priced, elapsed = request_json(
             args.base_url,
-            token,
+            token_manager,
             "POST",
             f"/api/v1/properties/{property_id}/pos-orders/{order_id}/items",
             body={
@@ -198,7 +301,7 @@ def main() -> int:
         settle_key = f"{operation}-settle"
         status, settled, elapsed = request_json(
             args.base_url,
-            token,
+            token_manager,
             "POST",
             f"/api/v1/properties/{property_id}/pos-orders/{order_id}/settle",
             body={"paymentMethod": "cash"},
@@ -211,7 +314,7 @@ def main() -> int:
         if sequence % 10 == 0:
             replay_status, replay, replay_ms = request_json(
                 args.base_url,
-                token,
+                token_manager,
                 "POST",
                 f"/api/v1/properties/{property_id}/pos-orders/{order_id}/settle",
                 body={"paymentMethod": "cash"},
@@ -254,7 +357,7 @@ def main() -> int:
 
     status, summary, summary_ms = request_json(
         args.base_url,
-        token,
+        token_manager,
         "GET",
         f"/api/v1/properties/{property_id}/pos-sessions/{session_id}",
         correlation_id="write-load-session-summary",
@@ -264,7 +367,7 @@ def main() -> int:
     require(expected_cash == Decimal("1000.00") + total, "POS expected cash did not equal settled total")
     close_status, closed, close_ms = request_json(
         args.base_url,
-        token,
+        token_manager,
         "POST",
         f"/api/v1/properties/{property_id}/pos-sessions/{session_id}/close",
         body={"actualCash": str(expected_cash)},
@@ -311,6 +414,10 @@ def main() -> int:
             "sessionCloseMs": round(close_ms, 2),
         },
         "errorRate": round(error_rate, 6),
+        "authentication": {
+            "passwordGrants": token_manager.password_grant_count,
+            "refreshGrants": token_manager.refresh_grant_count,
+        },
         "statusCounts": {
             str(status): sum(1 for call in calls if call.status == status)
             for status in sorted({call.status for call in calls})
