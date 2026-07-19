@@ -88,7 +88,7 @@ jobs:
           REAL_HOTEL_TENANT_PASSWORD: Soak-Tenant-2026
           REAL_HOTEL_OTHER_PASSWORD: Soak-Other-2026
           REAL_HOTEL_STAFF_PASSWORD: Soak-Staff-2026
-          REAL_HOTEL_ROOT_PASSWORD: Soak-Root-2026
+          REAL_HOTEL_ROOT_PASSWORD: Soak-Platform-Root-2026
           REAL_HOTEL_WRITE_DURATION_SECONDS: ${{ inputs.duration_seconds || '3600' }}
           REAL_HOTEL_WRITE_ORDERS: ${{ inputs.write_orders || '1000' }}
           REAL_HOTEL_LOAD_REQUESTS: ${{ inputs.read_requests || '100000' }}
