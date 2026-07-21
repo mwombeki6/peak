@@ -87,7 +87,7 @@ class JdbcAuditPort(
                 correlation_id,
                 outcome
             )
-            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::inet, ?, ?, ?)
             """.trimIndent(),
             event.tenantId,
             tenantUserId,

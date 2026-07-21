@@ -14,7 +14,8 @@ import com.mwombeki.peak.shared.context.TenantActor
 import com.mwombeki.peak.shared.context.TenantRequestContext
 import java.util.UUID
 import org.springframework.stereotype.Component
-import org.springframework.dao.DataAccessException
+import org.springframework.dao.ConcurrencyFailureException
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.ObjectMapper
 
@@ -38,7 +39,9 @@ class MaintenanceCommandExecutor(
                 block(actor, reserved.recordId).also {
                     idempotency.markSucceeded(reserved.recordId, 200, it, id(it))
                 }
-            } catch (ex: DataAccessException) {
+            } catch (ex: DataIntegrityViolationException) {
+                throw MaintenanceConflictException("Maintenance command conflicts with current data")
+            } catch (ex: ConcurrencyFailureException) {
                 throw MaintenanceConflictException("Maintenance command conflicts with current data")
             }
             is IdempotencyReservation.Replay -> replay(

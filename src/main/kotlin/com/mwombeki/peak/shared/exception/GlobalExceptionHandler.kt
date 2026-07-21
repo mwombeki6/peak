@@ -209,10 +209,11 @@ class GlobalExceptionHandler {
     ): ResponseEntity<ErrorResponse> {
         val traceId = traceId(request)
         log.error(
-            "Fatal unhandled internal server execution error [Trace: {}] type={} detail={}",
+            "Fatal unhandled internal server execution error [Trace: {}] type={} detail={}\n{}",
             traceId,
             ex.javaClass.name,
             PublicErrorSanitizer.sanitize(ex.message),
+            sanitizedTrace(ex),
         )
 
         val errorResponse = ErrorResponse(
@@ -226,12 +227,47 @@ class GlobalExceptionHandler {
         return ResponseEntity(errorResponse, HttpStatus.INTERNAL_SERVER_ERROR)
     }
 
+    /**
+     * Renders the cause chain with class names, sanitized messages, and stack
+     * frames so operators get actionable traces without raw payload data in
+     * the logs.
+     */
+    private fun sanitizedTrace(ex: Throwable): String = buildString {
+        var current: Throwable? = ex
+        var depth = 0
+        val seen = mutableSetOf<Throwable>()
+        while (current != null && depth < MAX_TRACE_CAUSES && seen.add(current)) {
+            if (depth > 0) {
+                append("Caused by: ")
+            }
+            append(current.javaClass.name)
+            append(": ")
+            append(PublicErrorSanitizer.sanitize(current.message))
+            current.stackTrace.take(MAX_TRACE_FRAMES).forEach { frame ->
+                append("\n  at ").append(frame)
+            }
+            if (current.stackTrace.size > MAX_TRACE_FRAMES) {
+                append("\n  ... ")
+                    .append(current.stackTrace.size - MAX_TRACE_FRAMES)
+                    .append(" more")
+            }
+            append('\n')
+            current = current.cause
+            depth += 1
+        }
+    }
+
     private fun traceId(request: HttpServletRequest): String {
         return MDC.get("correlation_id")
             ?: request.getHeader(PeakRequestHeaders.CORRELATION_ID)
                 ?.trim()
                 ?.takeIf { it.isNotEmpty() }
             ?: UUID.randomUUID().toString()
+    }
+
+    private companion object {
+        const val MAX_TRACE_CAUSES = 5
+        const val MAX_TRACE_FRAMES = 15
     }
 
     private fun problem(

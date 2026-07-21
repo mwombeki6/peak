@@ -1,4 +1,4 @@
-package com.mwombeki.peak.platformgovernance.web
+package com.mwombeki.peak.platformgovernance.internal.web
 
 import com.mwombeki.peak.platformgovernance.api.AssignPlatformReleaseCommand
 import com.mwombeki.peak.platformgovernance.api.ChangePlatformReleaseCommand

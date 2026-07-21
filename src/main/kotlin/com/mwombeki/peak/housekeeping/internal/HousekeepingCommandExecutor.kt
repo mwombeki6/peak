@@ -14,7 +14,8 @@ import com.mwombeki.peak.shared.context.TenantActor
 import com.mwombeki.peak.shared.context.TenantRequestContext
 import java.util.UUID
 import org.springframework.stereotype.Component
-import org.springframework.dao.DataAccessException
+import org.springframework.dao.ConcurrencyFailureException
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.ObjectMapper
 
@@ -45,7 +46,9 @@ class HousekeepingCommandExecutor(
                 block(actor, reservation.recordId).also {
                     idempotencyPort.markSucceeded(reservation.recordId, 200, it, resourceId(it))
                 }
-            } catch (ex: DataAccessException) {
+            } catch (ex: DataIntegrityViolationException) {
+                throw HousekeepingConflictException("Housekeeping command conflicts with current data")
+            } catch (ex: ConcurrencyFailureException) {
                 throw HousekeepingConflictException("Housekeeping command conflicts with current data")
             }
             is IdempotencyReservation.Replay -> {
