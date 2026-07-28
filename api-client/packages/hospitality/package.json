@@ -1,0 +1,23 @@
+{
+  "name": "@peak/hospitality-api-client",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "generate": "openapi-typescript ../../contracts/hospitality-v1.json -o src/peak-hospitality-v1.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "openapi-fetch": "0.17.0"
+  }
+}

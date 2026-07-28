@@ -5,8 +5,8 @@
     "moduleResolution": "NodeNext",
     "strict": true,
     "declaration": true,
-    "noEmit": true,
+    "sourceMap": true,
+    "declarationMap": true,
     "skipLibCheck": false
-  },
-  "include": ["src/**/*.ts"]
+  }
 }

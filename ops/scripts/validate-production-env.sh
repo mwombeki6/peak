@@ -103,8 +103,7 @@ require_distinct() {
 for name in \
   PEAK_IMAGE \
   PEAK_PUBLIC_HOST \
-  PEAK_APP_ORIGIN \
-  PEAK_TENANT_ADMIN_APP_ORIGIN \
+  PEAK_HOSPITALITY_APP_ORIGIN \
   PEAK_PLATFORM_APP_ORIGIN \
   PEAK_POS_REDIRECT_URI \
   PEAK_API_BIND_ADDRESS \
@@ -467,14 +466,9 @@ if [ "$(value_of PEAK_ACCEPTANCE_MODE)" != "true" ]; then
   esac
 fi
 
-case "$(value_of PEAK_APP_ORIGIN)" in
+case "$(value_of PEAK_HOSPITALITY_APP_ORIGIN)" in
   https://*) ;;
-  *) fail "PEAK_APP_ORIGIN must use https" ;;
-esac
-
-case "$(value_of PEAK_TENANT_ADMIN_APP_ORIGIN)" in
-  https://*) ;;
-  *) fail "PEAK_TENANT_ADMIN_APP_ORIGIN must use https" ;;
+  *) fail "PEAK_HOSPITALITY_APP_ORIGIN must use https" ;;
 esac
 
 case "$(value_of PEAK_PLATFORM_APP_ORIGIN)" in
@@ -486,9 +480,7 @@ if [ "$(value_of PEAK_POS_REDIRECT_URI)" != "http://127.0.0.1" ]; then
   fail "PEAK_POS_REDIRECT_URI must use the RFC 8252 loopback redirect http://127.0.0.1"
 fi
 
-require_distinct PEAK_APP_ORIGIN PEAK_TENANT_ADMIN_APP_ORIGIN
-require_distinct PEAK_APP_ORIGIN PEAK_PLATFORM_APP_ORIGIN
-require_distinct PEAK_TENANT_ADMIN_APP_ORIGIN PEAK_PLATFORM_APP_ORIGIN
+require_distinct PEAK_HOSPITALITY_APP_ORIGIN PEAK_PLATFORM_APP_ORIGIN
 
 if [ "$(value_of PEAK_ACCEPTANCE_MODE)" != "true" ]; then
   case "$(value_of KEYCLOAK_HOSTNAME)" in

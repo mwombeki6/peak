@@ -33,6 +33,7 @@ enum class GuardMode {
     MODULE_ONLY,
     PLATFORM_PERMISSION,
     PUBLIC_TOKEN,
+    AUTHENTICATED_IDENTITY,
 }
 
 enum class RouteScope {

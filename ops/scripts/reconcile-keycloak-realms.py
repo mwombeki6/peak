@@ -23,6 +23,9 @@ TEMPLATES = (
     ROOT / "ops/keycloak/peak-hospitality-realm.json",
 )
 CHILD_FIELDS = {"clients", "requiredActions"}
+RETIRED_CLIENT_IDS = {
+    "peak-hospitality": ("peak-web", "peak-tenant-admin"),
+}
 UNRESOLVED = re.compile(r"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?")
 
 
@@ -135,6 +138,23 @@ def reconcile_clients(realm: str, desired: list[dict[str, object]], token: str) 
         )
 
 
+def retire_clients(realm: str, desired: list[dict[str, object]], token: str) -> None:
+    desired_ids = {str(client["clientId"]) for client in desired}
+    retired_ids = RETIRED_CLIENT_IDS.get(realm, ())
+    conflicts = sorted(desired_ids & set(retired_ids))
+    if conflicts:
+        raise RuntimeError(
+            f"{realm}/{','.join(conflicts)} is both desired and retired"
+        )
+    for client_id in retired_ids:
+        query = urllib.parse.urlencode({"clientId": client_id})
+        _, matches_payload = admin("GET", f"/realms/{realm}/clients?{query}", token)
+        for client in matches_payload or []:
+            client_uuid = urllib.parse.quote(str(client["id"]), safe="")
+            admin("DELETE", f"/realms/{realm}/clients/{client_uuid}", token)
+            print(f"Retired Keycloak client {realm}/{client_id}")
+
+
 def reconcile_realm(desired: dict[str, object], token: str) -> None:
     realm = str(desired["realm"])
     status, _ = admin("GET", f"/realms/{realm}", token, allow_404=True)
@@ -145,7 +165,9 @@ def reconcile_realm(desired: dict[str, object], token: str) -> None:
     realm_payload = {key: value for key, value in desired.items() if key not in CHILD_FIELDS}
     admin("PUT", f"/realms/{realm}", token, payload=realm_payload)
     reconcile_required_actions(realm, list(desired.get("requiredActions", [])), token)
-    reconcile_clients(realm, list(desired.get("clients", [])), token)
+    desired_clients = list(desired.get("clients", []))
+    reconcile_clients(realm, desired_clients, token)
+    retire_clients(realm, desired_clients, token)
     print(f"Reconciled Keycloak realm {realm}")
 
 

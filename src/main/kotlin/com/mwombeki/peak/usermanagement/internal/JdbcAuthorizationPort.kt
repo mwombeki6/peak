@@ -39,6 +39,7 @@ class JdbcAuthorizationPort(
                 authorizePlatformPermission(request)
             }
             GuardMode.PUBLIC_TOKEN -> authorizePublicToken(identity, request)
+            GuardMode.AUTHENTICATED_IDENTITY -> authorizeAuthenticatedIdentity(identity, request)
         }
     }
 
@@ -174,5 +175,33 @@ class JdbcAuthorizationPort(
         }
 
         return AuthorizationDecision.allowed()
+    }
+
+    private fun authorizeAuthenticatedIdentity(
+        identity: RequestIdentity,
+        request: RouteAuthorizationRequest,
+    ): AuthorizationDecision {
+        if (request.permissionCode != null) {
+            return AuthorizationDecision.denied(
+                "Authenticated identity guard must not require permission",
+            )
+        }
+
+        val allowed = when (request.routeScope) {
+            RouteScope.TENANT ->
+                identity is RequestIdentity.Tenant &&
+                    request.tenantId == identity.tenantId
+            RouteScope.PLATFORM -> identity is RequestIdentity.Platform
+            RouteScope.PROPERTY,
+            RouteScope.PUBLIC_PROPERTY,
+            RouteScope.PUBLIC,
+            -> false
+        }
+
+        return if (allowed) {
+            AuthorizationDecision.allowed()
+        } else {
+            AuthorizationDecision.denied("Authenticated identity does not match route scope")
+        }
     }
 }

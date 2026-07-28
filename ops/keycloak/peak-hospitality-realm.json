@@ -149,8 +149,8 @@
       "protocol": "openid-connect"
     },
     {
-      "clientId": "peak-web",
-      "name": "Peak Hotel Operations Web",
+      "clientId": "peak-hospitality-web",
+      "name": "Peak Hospitality Web",
       "enabled": true,
       "publicClient": true,
       "standardFlowEnabled": true,
@@ -158,56 +158,16 @@
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
       "frontchannelLogout": true,
-      "rootUrl": "${PEAK_APP_ORIGIN}",
-      "baseUrl": "${PEAK_APP_ORIGIN}/",
+      "rootUrl": "${PEAK_HOSPITALITY_APP_ORIGIN}",
+      "baseUrl": "${PEAK_HOSPITALITY_APP_ORIGIN}/",
       "redirectUris": [
-        "${PEAK_APP_ORIGIN}/auth/callback",
-        "${PEAK_APP_ORIGIN}/silent-check-sso.html"
+        "${PEAK_HOSPITALITY_APP_ORIGIN}/auth/callback",
+        "${PEAK_HOSPITALITY_APP_ORIGIN}/silent-check-sso.html"
       ],
-      "webOrigins": ["${PEAK_APP_ORIGIN}"],
+      "webOrigins": ["${PEAK_HOSPITALITY_APP_ORIGIN}"],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "${PEAK_APP_ORIGIN}/*",
-        "oauth2.device.authorization.grant.enabled": "false",
-        "backchannel.logout.session.required": "true",
-        "frontchannel.logout.session.required": "true"
-      },
-      "protocol": "openid-connect",
-      "protocolMappers": [
-        {
-          "name": "peak-api-audience",
-          "protocol": "openid-connect",
-          "protocolMapper": "oidc-audience-mapper",
-          "consentRequired": false,
-          "config": {
-            "included.custom.audience": "peak-api",
-            "access.token.claim": "true",
-            "id.token.claim": "false",
-            "userinfo.token.claim": "false"
-          }
-        }
-      ]
-    },
-    {
-      "clientId": "peak-tenant-admin",
-      "name": "Peak Tenant Administration",
-      "enabled": true,
-      "publicClient": true,
-      "standardFlowEnabled": true,
-      "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
-      "serviceAccountsEnabled": false,
-      "frontchannelLogout": true,
-      "rootUrl": "${PEAK_TENANT_ADMIN_APP_ORIGIN}",
-      "baseUrl": "${PEAK_TENANT_ADMIN_APP_ORIGIN}/",
-      "redirectUris": [
-        "${PEAK_TENANT_ADMIN_APP_ORIGIN}/auth/callback",
-        "${PEAK_TENANT_ADMIN_APP_ORIGIN}/silent-check-sso.html"
-      ],
-      "webOrigins": ["${PEAK_TENANT_ADMIN_APP_ORIGIN}"],
-      "attributes": {
-        "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "${PEAK_TENANT_ADMIN_APP_ORIGIN}/*",
+        "post.logout.redirect.uris": "${PEAK_HOSPITALITY_APP_ORIGIN}/*",
         "oauth2.device.authorization.grant.enabled": "false",
         "backchannel.logout.session.required": "true",
         "frontchannel.logout.session.required": "true"

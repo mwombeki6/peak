@@ -50,14 +50,18 @@ jobs:
             --tests 'com.mwombeki.peak.DatabaseOwnershipArchitectureTests' \
             --tests 'com.mwombeki.peak.contract.OpenApiContractIntegrationTests' \
             --tests '*RouteAccessMatrixCoverageIntegrationTests'
-      - name: Lint OpenAPI and compile generated TypeScript client
+      - name: Split, lint, and compile generated TypeScript clients
         working-directory: api-client
         run: |
           npm ci
-          npm run lint:openapi
+          npm run audit:dependencies
           npm run generate
-          git diff --exit-code -- src/peak-v1.ts
+          git diff --exit-code -- packages
+          npm run verify:boundaries
+          npm run lint:openapi
           npm run typecheck
+          npm run build
+          npm run pack:clients
       - name: Upload contract artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -65,7 +69,12 @@ jobs:
           path: |
             build/contracts/openapi-v1.json
             build/spring-modulith-docs
-            api-client/src/peak-v1.ts
+            api-client/client-boundaries.json
+            api-client/contracts/platform-v1.json
+            api-client/contracts/hospitality-v1.json
+            api-client/packages/platform/src/peak-platform-v1.ts
+            api-client/packages/hospitality/src/peak-hospitality-v1.ts
+            api-client/artifacts/*.tgz
 
   unit-integration:
     name: Unit and integration tests
