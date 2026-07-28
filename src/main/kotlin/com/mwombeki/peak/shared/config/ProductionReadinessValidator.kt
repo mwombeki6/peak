@@ -58,6 +58,15 @@ class ProductionReadinessValidator(
             ) {
                 "peak.security.route-guard.deny-unregistered-api-routes must be true in prod"
             }
+            requireTrue(
+                environment.getProperty(
+                    "peak.security.runtime-route-boundary.enabled",
+                    Boolean::class.java,
+                    false,
+                ),
+            ) {
+                "peak.security.runtime-route-boundary.enabled must be true in prod"
+            }
             requireTrue(!springDocEnabled("springdoc.api-docs.enabled")) {
                 "springdoc.api-docs.enabled must be false in prod"
             }

@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "canonicalContract": "../src/test/resources/contracts/openapi-v1.json",
+  "platformPathPrefix": "/api/v1/platform/",
+  "boundaries": [
+    {
+      "id": "platform",
+      "title": "Peak Platform V1 API",
+      "description": "Peak SaaS control-plane operations for authorized platform operators.",
+      "packageName": "@peak/platform-api-client",
+      "contract": "contracts/platform-v1.json",
+      "generatedTypes": "packages/platform/src/peak-platform-v1.ts",
+      "keycloakTemplate": "../ops/keycloak/peak-platform-realm.json",
+      "realm": "peak-platform",
+      "audience": "peak-api",
+      "runtime": "platform",
+      "oidcClients": [
+        "peak-platform-web"
+      ],
+      "routeScopes": [
+        "PLATFORM"
+      ],
+      "pathSelection": "platform"
+    },
+    {
+      "id": "hospitality",
+      "title": "Peak Hospitality V1 API",
+      "description": "Tenant, property, operational and public hospitality operations.",
+      "packageName": "@peak/hospitality-api-client",
+      "contract": "contracts/hospitality-v1.json",
+      "generatedTypes": "packages/hospitality/src/peak-hospitality-v1.ts",
+      "keycloakTemplate": "../ops/keycloak/peak-hospitality-realm.json",
+      "realm": "peak-hospitality",
+      "audience": "peak-api",
+      "runtime": "api",
+      "oidcClients": [
+        "peak-hospitality-web",
+        "peak-pos-desktop"
+      ],
+      "routeScopes": [
+        "TENANT",
+        "PROPERTY",
+        "PUBLIC",
+        "PUBLIC_PROPERTY"
+      ],
+      "pathSelection": "hospitality"
+    }
+  ],
+  "administratorScopes": [
+    {
+      "id": "platform",
+      "boundary": "platform",
+      "realm": "peak-platform",
+      "authorityStore": "platform_users + platform_user_roles",
+      "routeScope": "PLATFORM",
+      "continuityPermission": "platform.administrators.manage",
+      "delegates": []
+    },
+    {
+      "id": "tenant",
+      "boundary": "hospitality",
+      "realm": "peak-hospitality",
+      "authorityStore": "users + user_tenant_roles",
+      "routeScope": "TENANT",
+      "continuityPermission": "tenant.administrators.manage",
+      "delegates": [
+        "property"
+      ]
+    },
+    {
+      "id": "property",
+      "boundary": "hospitality",
+      "realm": "peak-hospitality",
+      "authorityStore": "users + user_property_roles",
+      "routeScope": "PROPERTY",
+      "continuityPermission": "tenant.properties.administrators.manage",
+      "delegates": []
+    }
+  ],
+  "frontendApplications": [
+    {
+      "id": "platform-console",
+      "boundary": "platform",
+      "oidcClient": "peak-platform-web",
+      "bootstrapPath": "/api/v1/platform/session",
+      "packageName": "@peak/platform-api-client"
+    },
+    {
+      "id": "hospitality-web",
+      "boundary": "hospitality",
+      "oidcClient": "peak-hospitality-web",
+      "bootstrapPath": "/api/v1/session",
+      "packageName": "@peak/hospitality-api-client"
+    },
+    {
+      "id": "pos-desktop",
+      "boundary": "hospitality",
+      "oidcClient": "peak-pos-desktop",
+      "bootstrapPath": "/api/v1/session",
+      "packageName": "@peak/hospitality-api-client"
+    }
+  ]
+}

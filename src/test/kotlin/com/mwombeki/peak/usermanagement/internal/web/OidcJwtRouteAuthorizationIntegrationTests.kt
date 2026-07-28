@@ -32,6 +32,86 @@ class OidcJwtRouteAuthorizationIntegrationTests {
     private lateinit var jdbcTemplate: JdbcTemplate
 
     @Test
+    fun bootstrapsHospitalitySessionFromDatabaseAuthority() {
+        val fixture = tenantOidcFixture()
+        insertAuthorizedTenantFixture(fixture)
+        val propertyAccess = insertPropertyAccess(fixture)
+
+        mockMvc.perform(
+            get("/api/v1/session")
+                .secure(true)
+                .with(oidcJwt(fixture.issuer, fixture.subject, fixture.email))
+                .header(PeakRequestHeaders.CORRELATION_ID, "corr-oidc-session-tenant"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.identityMode").value("TENANT"))
+            .andExpect(jsonPath("$.tenantId").value(fixture.tenantId.toString()))
+            .andExpect(jsonPath("$.userId").value(fixture.userId.toString()))
+            .andExpect(jsonPath("$.email").value(fixture.email))
+            .andExpect(jsonPath("$.tenantRoleCodes[0]").value(fixture.actorRoleCode))
+            .andExpect(jsonPath("$.tenantPermissionCodes[0]").value("tenant.roles.view"))
+            .andExpect(jsonPath("$.enabledTenantModules", hasItem("tenant_admin")))
+            .andExpect(jsonPath("$.enabledTenantModules", hasItem("reservations")))
+            .andExpect(jsonPath("$.properties.length()").value(1))
+            .andExpect(
+                jsonPath("$.properties[0].propertyId")
+                    .value(propertyAccess.propertyId.toString()),
+            )
+            .andExpect(jsonPath("$.properties[0].code").value(propertyAccess.propertyCode))
+            .andExpect(jsonPath("$.properties[0].roleNames[0]").value(propertyAccess.roleName))
+            .andExpect(
+                jsonPath("$.properties[0].permissionCodes[0]")
+                    .value(propertyAccess.permissionCode),
+            )
+            .andExpect(jsonPath("$.properties[0].enabledModules[0]").value("reservations"))
+    }
+
+    @Test
+    fun bootstrapsPlatformSessionFromDatabaseAuthority() {
+        val fixture = platformOidcFixture()
+        insertAuthorizedPlatformFixture(fixture)
+
+        mockMvc.perform(
+            get("/api/v1/platform/session")
+                .secure(true)
+                .with(oidcJwt(fixture.issuer, fixture.subject, fixture.email))
+                .header(PeakRequestHeaders.CORRELATION_ID, "corr-oidc-session-platform"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.identityMode").value("PLATFORM"))
+            .andExpect(jsonPath("$.platformUserId").value(fixture.platformUserId.toString()))
+            .andExpect(jsonPath("$.email").value(fixture.email))
+            .andExpect(
+                jsonPath(
+                    "$.permissionCodes",
+                    hasItem("platform.tenants.view"),
+                ),
+            )
+            .andExpect(
+                jsonPath(
+                    "$.permissionCodes",
+                    hasItem("platform.tenants.manage"),
+                ),
+            )
+    }
+
+    @Test
+    fun deniesPlatformSessionToHospitalityIdentity() {
+        val fixture = tenantOidcFixture()
+        insertAuthorizedTenantFixture(fixture)
+
+        mockMvc.perform(
+            get("/api/v1/platform/session")
+                .secure(true)
+                .with(oidcJwt(fixture.issuer, fixture.subject, fixture.email))
+                .header(PeakRequestHeaders.CORRELATION_ID, "corr-oidc-session-cross-boundary"),
+        )
+            .andExpect(status().isForbidden)
+            .andExpect(content().contentType("application/problem+json"))
+            .andExpect(content().string(containsString("does not match route scope")))
+    }
+
+    @Test
     fun authorizesTenantRouteUsingOidcIdentityLinkWithoutIdentityHeaders() {
         val fixture = tenantOidcFixture()
         insertAuthorizedTenantFixture(fixture)
@@ -328,6 +408,85 @@ class OidcJwtRouteAuthorizationIntegrationTests {
         )
     }
 
+    private fun insertPropertyAccess(fixture: TenantOidcFixture): PropertyAccessFixture {
+        val access = PropertyAccessFixture(
+            propertyId = UUID.randomUUID(),
+            roleId = UUID.randomUUID(),
+            permissionId = UUID.randomUUID(),
+            propertyCode = "P${fixture.tenantId.toString().take(7)}",
+            roleName = "Front Office",
+            permissionCode = "reservations.view",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO properties (id, tenant_id, name, code, status, is_active)
+            VALUES (?, ?, ?, ?, 'active', true)
+            """.trimIndent(),
+            access.propertyId,
+            fixture.tenantId,
+            "OIDC Session Property ${access.propertyId}",
+            access.propertyCode,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_modules (tenant_id, module_id, is_enabled, is_configured)
+            VALUES (?, 'reservations', true, true)
+            """.trimIndent(),
+            fixture.tenantId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO property_modules (
+                tenant_id,
+                property_id,
+                module_id,
+                is_enabled,
+                is_configured
+            )
+            VALUES (?, ?, 'reservations', true, true)
+            """.trimIndent(),
+            fixture.tenantId,
+            access.propertyId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO roles (id, tenant_id, name, is_active)
+            VALUES (?, ?, ?, true)
+            """.trimIndent(),
+            access.roleId,
+            fixture.tenantId,
+            access.roleName,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO permissions (id, tenant_id, code, description)
+            VALUES (?, ?, ?, 'View reservations')
+            """.trimIndent(),
+            access.permissionId,
+            fixture.tenantId,
+            access.permissionCode,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO role_permissions (role_id, permission_id)
+            VALUES (?, ?)
+            """.trimIndent(),
+            access.roleId,
+            access.permissionId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO user_property_roles (user_id, property_id, role_id, tenant_id)
+            VALUES (?, ?, ?, ?)
+            """.trimIndent(),
+            fixture.userId,
+            access.propertyId,
+            access.roleId,
+            fixture.tenantId,
+        )
+        return access
+    }
+
     private fun insertPlan(planId: UUID) {
         jdbcTemplate.update(
             """
@@ -418,5 +577,14 @@ class OidcJwtRouteAuthorizationIntegrationTests {
         val issuer: String,
         val subject: String,
         val email: String,
+    )
+
+    private data class PropertyAccessFixture(
+        val propertyId: UUID,
+        val roleId: UUID,
+        val permissionId: UUID,
+        val propertyCode: String,
+        val roleName: String,
+        val permissionCode: String,
     )
 }

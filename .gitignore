@@ -7,9 +7,13 @@ docs/architecture/*
 !docs/architecture/module-inventory.md
 !docs/architecture/platform-control-plane.md
 !docs/architecture/identity-and-access.md
+!docs/architecture/frontend-applications.md
 !docs/engineering-readiness.md
 .gradle
 api-client/node_modules/
+api-client/contracts/
+api-client/artifacts/
+api-client/packages/*/dist/
 build/
 test_output*.txt
 ops/production/.env

@@ -35,6 +35,7 @@ class ProductionReadinessValidatorTests {
     fun allowsProductionMigrationRuntimeWithMigratorRole() {
         validator(
             environment = prodEnvironment()
+                .withProperty("peak.security.runtime-route-boundary.enabled", "true")
                 .withProperty("spring.datasource.username", "peak_migrator")
                 .withProperty("spring.datasource.password", "not-local-secret")
                 .withProperty("springdoc.api-docs.enabled", "false")
@@ -201,6 +202,27 @@ class ProductionReadinessValidatorTests {
     }
 
     @Test
+    fun rejectsDisabledRuntimeRouteBoundaryInProduction() {
+        val error = assertFailsWith<IllegalStateException> {
+            validator(
+                environment = secureProdEnvironment()
+                    .withProperty("spring.datasource.username", "peak_app")
+                    .withProperty("spring.datasource.password", "not-local-secret")
+                    .withProperty("spring.flyway.enabled", "false")
+                    .withProperty("peak.security.runtime-route-boundary.enabled", "false"),
+                runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.API),
+                httpSecurityProperties = secureHttpProperties(),
+                requestContextProperties = secureRequestContextProperties(),
+            ).afterSingletonsInstantiated()
+        }
+
+        assertTrue(
+            requireNotNull(error.message)
+                .contains("runtime-route-boundary.enabled must be true in prod"),
+        )
+    }
+
+    @Test
     fun rejectsUnsafeOutboundProviderHostAllowlist() {
         val error = assertFailsWith<IllegalStateException> {
             validator(
@@ -312,6 +334,7 @@ class ProductionReadinessValidatorTests {
 
     private fun secureProdEnvironment(): MockEnvironment {
         return prodEnvironment()
+            .withProperty("peak.security.runtime-route-boundary.enabled", "true")
             .withProperty("springdoc.api-docs.enabled", "false")
             .withProperty("springdoc.swagger-ui.enabled", "false")
             .withProperty("server.forward-headers-strategy", "native")

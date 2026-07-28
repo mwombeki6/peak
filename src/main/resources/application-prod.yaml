@@ -55,6 +55,8 @@ peak:
       allow-trusted-jwt-identity-claims: false
     route-guard:
       validate-route-matrix-on-startup: true
+    runtime-route-boundary:
+      enabled: true
   integrations:
     nida:
       mode: ${PEAK_NIDA_MODE:disabled}

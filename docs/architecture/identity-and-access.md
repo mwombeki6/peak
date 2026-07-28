@@ -29,11 +29,10 @@ to change.
 | `peak-platform` | `peak-api` | Bearer-only resource server | Isolated platform API |
 | `peak-platform` | `peak-platform-web` | Public OIDC + PKCE | Peak platform administration web |
 | `peak-hospitality` | `peak-api` | Bearer-only resource server | Hotel operations API |
-| `peak-hospitality` | `peak-web` | Public OIDC + PKCE | Front office and hotel operations web |
-| `peak-hospitality` | `peak-tenant-admin` | Public OIDC + PKCE | Tenant owner/administrator web |
+| `peak-hospitality` | `peak-hospitality-web` | Public OIDC + PKCE | Tenant, property and hotel operations web |
 | `peak-hospitality` | `peak-pos-desktop` | Public native OIDC + PKCE | Tauri/desktop POS |
 
-There are four interactive frontend clients and two realm-local resource-server
+There are three interactive frontend clients and two realm-local resource-server
 registrations. The repeated `peak-api` audience is safe because API runtimes
 also require their exact, distinct issuer. CI creates a direct-grant
 `peak-acceptance` client dynamically in disposable realms; it is not part of
@@ -42,6 +41,57 @@ production configuration.
 The platform API trusts only `peak-platform`. The hotel API and worker trust
 only `peak-hospitality`. A token from one realm must not authenticate to the
 other runtime even when its audience text is `peak-api`.
+
+## Frontend and SDK boundaries
+
+Peak publishes two generated TypeScript clients from the canonical V1 OpenAPI
+contract. SDK boundaries follow resource-server and issuer boundaries, not the
+number of screens or administrator titles.
+
+| Frontend | Realm | Generated client | Authority evaluated by Peak |
+|---|---|---|---|
+| Platform administration web | `peak-platform` | `@peak/platform-api-client` | Platform roles and permissions |
+| Hospitality web | `peak-hospitality` | `@peak/hospitality-api-client` | Tenant and property roles, permissions and assignments |
+| POS desktop | `peak-hospitality` | `@peak/hospitality-api-client` | Property roles and permissions |
+
+The platform client contains only `/api/v1/platform/**` operations. The
+hospitality client contains every other V1 operation and no platform operation.
+Their generated path sets are disjoint and must exactly reconstruct the
+canonical V1 path set; CI fails if a route is missing, duplicated or placed
+across the issuer boundary.
+
+Possessing an SDK type never grants access. Each application still authenticates
+through its assigned OIDC client, and each request is authorized from current
+database state.
+
+Hospitality Web is one deployment with role-specific workspaces for tenant
+administration, property administration, front office, finance, housekeeping,
+maintenance, inventory and reporting. A role is not an application boundary.
+The legacy `peak-web` and `peak-tenant-admin` registrations are retired during
+realm reconciliation after the unified client is installed.
+
+## Administrator scope and delegation
+
+Platform, tenant and property administrator are independent authority scopes:
+
+| Administrator | Identity and authority | Scope | Relationship |
+|---|---|---|---|
+| Platform administrator | `peak-platform`; `platform_users` and `platform_user_roles` | Operates Peak's SaaS control plane | Has no implicit tenant or property authority |
+| Tenant administrator | `peak-hospitality`; `users` and `user_tenant_roles` | Governs one tenant business | May appoint property administrators with `tenant.properties.administrators.manage` |
+| Property administrator | `peak-hospitality`; `users` and `user_property_roles` | Operates an assigned property | Receives no authority over sibling properties or the tenant control plane |
+
+A person can hold more than one scope, but each assignment is explicit and
+evaluated independently. Platform support access to hotel data remains a
+ticket-bound, time-limited, audited break-glass workflow; platform employment or
+the `platform.admin.all` permission never silently creates a hospitality user.
+
+Tenant and property administrators share the hospitality identity realm and SDK
+because they act on the same hotel system. They are separated by route scope,
+tenant/property binding, role assignment, RLS and permission checks. Tenant
+administrator continuity uses `tenant.administrators.manage`; property
+administrator continuity uses the narrower
+`tenant.properties.administrators.manage`. Revocation cannot orphan the
+corresponding tenant or property.
 
 ## Authentication posture
 
@@ -76,9 +126,15 @@ before expiry and clear local state on refresh failure or logout. The POS must
 open the system browser, bind a loopback listener only for the callback, verify
 state and PKCE, then close that listener.
 
-The API remains the source of current user, property, module and permission
-state. Frontends may hide unavailable controls for usability, but must treat API
-authorization responses as final.
+After OIDC login, Hospitality Web and POS bootstrap database-authoritative
+identity and access state from `GET /api/v1/session`. Platform Console uses
+`GET /api/v1/platform/session`. The responses include only the caller's current
+scope and never accept tenant, property, role or permission authority from the
+frontend.
+
+Frontends may hide unavailable controls for usability, but must treat API
+authorization responses as final. The complete deployable-application and
+integration contract is in `frontend-applications.md`.
 
 ## Configuration lifecycle
 

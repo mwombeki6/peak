@@ -20,6 +20,6 @@
 | Commercial capacity | Properties, rooms, users, outlets | Database advisory lock plus effective plan/override entitlement assertion in the owning write transaction |
 | Configuration rollout | Portfolio and feature control | Immutable hashed revisions, deterministic precedence, canary/apply/rollback states and attributable approvals |
 
-Applied migrations `V1–V70` are immutable. `V71` adds the hospitality platform
-control plane. Any later remediation starts at `V72`; application-only boundary
-fixes do not create empty migrations.
+Applied migrations `V1–V73` are immutable. `V74` adds authenticated frontend
+session bootstrap route contracts. Later database remediation starts at `V75`;
+application-only boundary fixes do not create empty migrations.
