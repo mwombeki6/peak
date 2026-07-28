@@ -1,4 +1,4 @@
-package com.mwombeki.peak.platformgovernance.web
+package com.mwombeki.peak.platformgovernance.internal.web
 
 import com.mwombeki.peak.platformgovernance.api.AddSupportNoteCommand
 import com.mwombeki.peak.platformgovernance.api.OpenSupportTicketCommand

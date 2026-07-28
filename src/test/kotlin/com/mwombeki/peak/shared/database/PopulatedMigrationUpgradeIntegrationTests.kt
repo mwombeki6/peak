@@ -41,6 +41,8 @@ class PopulatedMigrationUpgradeIntegrationTests @Autowired constructor(
             val propertyId = UUID.randomUUID()
             val folioId = UUID.randomUUID()
             val chargeId = UUID.randomUUID()
+            val validAuditId = UUID.randomUUID()
+            val malformedAuditId = UUID.randomUUID()
             DriverManager.getConnection(url, postgres.username, postgres.password).use { connection ->
                 connection.createStatement().use { sql ->
                     sql.execute(
@@ -90,6 +92,21 @@ class PopulatedMigrationUpgradeIntegrationTests @Autowired constructor(
                         )
                         """.trimIndent(),
                     )
+                    sql.execute(
+                        """
+                        INSERT INTO audit_logs (
+                            id, tenant_id, action, entity_type, ip_address, correlation_id
+                        ) VALUES
+                            (
+                                '$validAuditId', '$tenantId', 'upgrade.valid-ip',
+                                'migration_test', '203.0.113.42', 'upgrade-valid-ip'
+                            ),
+                            (
+                                '$malformedAuditId', '$tenantId', 'upgrade.malformed-ip',
+                                'migration_test', 'legacy-not-an-ip', 'upgrade-malformed-ip'
+                            )
+                        """.trimIndent(),
+                    )
                 }
             }
 
@@ -97,7 +114,7 @@ class PopulatedMigrationUpgradeIntegrationTests @Autowired constructor(
                 .dataSource(url, postgres.username, postgres.password)
                 .load()
             upgraded.migrate()
-            assertEquals("72", upgraded.info().current().version.version)
+            assertEquals("73", upgraded.info().current().version.version)
 
             DriverManager.getConnection(url, postgres.username, postgres.password).use { connection ->
                 connection.prepareStatement(
@@ -109,6 +126,31 @@ class PopulatedMigrationUpgradeIntegrationTests @Autowired constructor(
                         assertEquals("125000.00", rows.getBigDecimal("subtotal").toPlainString())
                         assertEquals("22500.00", rows.getBigDecimal("tax_amount").toPlainString())
                         assertEquals("147500.00", rows.getBigDecimal("amount").toPlainString())
+                    }
+                }
+                connection.prepareStatement(
+                    """
+                    SELECT id, host(ip_address) AS ip_address,
+                           pg_typeof(ip_address)::text AS ip_address_type
+                    FROM audit_logs
+                    WHERE id IN (?, ?)
+                    ORDER BY id
+                    """.trimIndent(),
+                ).use { statement ->
+                    statement.setObject(1, validAuditId)
+                    statement.setObject(2, malformedAuditId)
+                    statement.executeQuery().use { rows ->
+                        val converted = buildMap {
+                            while (rows.next()) {
+                                assertEquals("inet", rows.getString("ip_address_type"))
+                                put(
+                                    rows.getObject("id", UUID::class.java),
+                                    rows.getString("ip_address"),
+                                )
+                            }
+                        }
+                        assertEquals("203.0.113.42", converted[validAuditId])
+                        assertEquals(null, converted[malformedAuditId])
                     }
                 }
                 connection.prepareStatement(

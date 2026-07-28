@@ -305,11 +305,11 @@ class PlatformTenantControlService(
                 null
             }
             val after = lockedState(tenantId)
-            if (changed) {
+            if (workflowId != null) {
                 recordSideEffects(
                     action = "platform.tenants.control.reconciled",
                     tenantId = tenantId,
-                    resourceId = workflowId!!,
+                    resourceId = workflowId,
                     before = before.asMap(),
                     after = after.asMap(),
                     idempotencyKeyId = reservationId,

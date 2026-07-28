@@ -13,10 +13,28 @@ import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.shared.context.TenantActor
 import com.mwombeki.peak.shared.context.TenantRequestContext
 import java.util.UUID
+import org.springframework.dao.ConcurrencyFailureException
+import org.springframework.dao.DataIntegrityViolationException
+import org.springframework.jdbc.UncategorizedSQLException
 import org.springframework.stereotype.Component
-import org.springframework.dao.DataAccessException
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.ObjectMapper
+
+internal object InventoryDatabaseConflictClassifier {
+    private const val RAISE_EXCEPTION_SQL_STATE = "P0001"
+    private val messages = listOf(
+        "Stock movements are append-only",
+        "Canonical stock movements require",
+        "Stock movement would make item",
+        "Outgoing movement must use locked source average cost",
+    )
+
+    fun isConflict(ex: UncategorizedSQLException): Boolean {
+        val sqlException = ex.sqlException ?: return false
+        return sqlException.sqlState == RAISE_EXCEPTION_SQL_STATE &&
+            messages.any { sqlException.message.orEmpty().contains(it) }
+    }
+}
 
 @Component
 class InventoryCommandExecutor(
@@ -38,7 +56,14 @@ class InventoryCommandExecutor(
                 block(actor, reserved.recordId).also {
                     idempotency.markSucceeded(reserved.recordId, 200, it, id(it))
                 }
-            } catch (ex: DataAccessException) {
+            } catch (ex: DataIntegrityViolationException) {
+                throw InventoryConflictException("Inventory command conflicts with current stock")
+            } catch (ex: ConcurrencyFailureException) {
+                throw InventoryConflictException("Inventory command conflicts with current stock")
+            } catch (ex: UncategorizedSQLException) {
+                if (!InventoryDatabaseConflictClassifier.isConflict(ex)) {
+                    throw ex
+                }
                 throw InventoryConflictException("Inventory command conflicts with current stock")
             }
             is IdempotencyReservation.Replay -> replay(

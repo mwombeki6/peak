@@ -15,7 +15,8 @@ import com.mwombeki.peak.shared.context.TenantRequestContext
 import io.micrometer.core.instrument.MeterRegistry
 import java.util.UUID
 import org.springframework.stereotype.Component
-import org.springframework.dao.DataAccessException
+import org.springframework.dao.ConcurrencyFailureException
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.ObjectMapper
 
@@ -54,7 +55,9 @@ class PosCommandExecutor(
                     is IdempotencyReservation.Started -> {
                         val response = try {
                             block(actor, reservation.recordId)
-                        } catch (ex: DataAccessException) {
+                        } catch (ex: DataIntegrityViolationException) {
+                            throw PosConflictException("POS command conflicts with current data")
+                        } catch (ex: ConcurrencyFailureException) {
                             throw PosConflictException("POS command conflicts with current data")
                         }
                         idempotencyPort.markSucceeded(
