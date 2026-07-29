@@ -32,9 +32,14 @@ import com.mwombeki.peak.usermanagement.api.TenantProfileVerificationReceipt
 import com.mwombeki.peak.usermanagement.api.UpdatePlatformRoleCommand
 import com.mwombeki.peak.usermanagement.api.UpdatePlatformUserCommand
 import com.mwombeki.peak.usermanagement.api.VerifyTenantBusinessProfileCommand
+import com.mwombeki.peak.usermanagement.api.DecidePlatformAdministratorChangeCommand
+import com.mwombeki.peak.usermanagement.api.PlatformAdministratorChangeAction
+import com.mwombeki.peak.usermanagement.api.PlatformAdministratorChangeReceipt
+import com.mwombeki.peak.usermanagement.api.RequestPlatformAdministratorChangeCommand
 import jakarta.validation.Valid
 import jakarta.validation.constraints.Email
 import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.Size
 import jakarta.validation.constraints.NotEmpty
 import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.Min
@@ -97,6 +102,40 @@ class PlatformAdministrationController(
         return platformAdministrationPort.revokePlatformAdministrator(
             RevokePlatformAdministratorCommand(platformUserId),
         ).toHttpResponse()
+    }
+
+    /**
+     * Opens a dual-controlled request to change Platform Emergency
+     * Administrator authority. Appointment and revocation are unreachable
+     * without one of these approved by an independent quorum.
+     */
+    @PostMapping("/administrators/change-requests")
+    fun requestPlatformAdministratorChange(
+        @Valid @RequestBody request: PlatformAdministratorChangeHttpRequest,
+    ): PlatformAdministratorChangeReceipt {
+        return platformAdministrationPort.requestPlatformAdministratorChange(
+            RequestPlatformAdministratorChangeCommand(
+                targetPlatformUserId = request.targetPlatformUserId,
+                action = request.action,
+                reason = request.reason,
+                durationMinutes = request.durationMinutes,
+            ),
+        )
+    }
+
+    @PostMapping("/administrators/change-requests/{requestId}/decisions")
+    fun decidePlatformAdministratorChange(
+        @PathVariable requestId: UUID,
+        @Valid @RequestBody request: PlatformAdministratorChangeDecisionHttpRequest,
+    ): PlatformAdministratorChangeReceipt {
+        return platformAdministrationPort.decidePlatformAdministratorChange(
+            DecidePlatformAdministratorChangeCommand(
+                requestId = requestId,
+                seatCode = request.seatCode,
+                approve = request.approve,
+                reason = request.reason,
+            ),
+        )
     }
 
     @PostMapping("/users")
@@ -603,4 +642,20 @@ data class TenantProfileVerificationHttpResponse(
     val verificationStatus: String,
     val changed: Boolean,
     val replayed: Boolean,
+)
+
+data class PlatformAdministratorChangeHttpRequest(
+    val targetPlatformUserId: UUID,
+    val action: PlatformAdministratorChangeAction,
+    @field:NotBlank
+    @field:Size(min = 10, max = 1000)
+    val reason: String,
+    val durationMinutes: Int = 60,
+)
+
+data class PlatformAdministratorChangeDecisionHttpRequest(
+    @field:NotBlank
+    val seatCode: String,
+    val approve: Boolean,
+    val reason: String? = null,
 )

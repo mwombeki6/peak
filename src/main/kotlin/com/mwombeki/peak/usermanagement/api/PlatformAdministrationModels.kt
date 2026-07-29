@@ -23,6 +23,23 @@ interface PlatformAdministrationPort {
     fun revokePlatformAdministrator(
         command: RevokePlatformAdministratorCommand,
     ): PlatformUserRoleMutationReceipt
+
+    /**
+     * Opens a dual-controlled request to appoint or revoke a Platform
+     * Emergency Administrator. The role change itself remains unreachable
+     * until an independent quorum approves this exact request.
+     */
+    fun requestPlatformAdministratorChange(
+        command: RequestPlatformAdministratorChangeCommand,
+    ): PlatformAdministratorChangeReceipt
+
+    /**
+     * Records one seat decision against an open request. The requester and the
+     * target are both excluded, and an approver must hold the seat permission.
+     */
+    fun decidePlatformAdministratorChange(
+        command: DecidePlatformAdministratorChangeCommand,
+    ): PlatformAdministratorChangeReceipt
     fun listPlatformPermissions(): List<PlatformPermissionSummary>
     fun linkPlatformOidcIdentity(command: LinkPlatformOidcIdentityCommand): PlatformIdentityLinkReceipt
     fun revokePlatformOidcIdentity(command: RevokePlatformOidcIdentityCommand): PlatformIdentityLinkReceipt
@@ -218,3 +235,36 @@ class PlatformAdministrationConflictException(
 class PlatformAdministrationInProgressException(
     message: String,
 ) : PlatformAdministrationException(message)
+
+/** Action requested against Platform Emergency Administrator authority. */
+enum class PlatformAdministratorChangeAction {
+    APPOINT,
+    REVOKE,
+    ;
+
+    fun databaseValue(): String = name.lowercase()
+}
+
+data class RequestPlatformAdministratorChangeCommand(
+    val targetPlatformUserId: UUID,
+    val action: PlatformAdministratorChangeAction,
+    val reason: String,
+    val durationMinutes: Int = 60,
+)
+
+data class DecidePlatformAdministratorChangeCommand(
+    val requestId: UUID,
+    val seatCode: String,
+    val approve: Boolean,
+    val reason: String? = null,
+)
+
+data class PlatformAdministratorChangeReceipt(
+    val requestId: UUID,
+    val action: String,
+    val targetPlatformUserId: UUID,
+    val status: String,
+    val requestVersion: Int,
+    val quorumSatisfied: Boolean,
+    val expiresAt: Instant,
+)
