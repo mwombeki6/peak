@@ -36,6 +36,7 @@ class TenantAdministrationService(
     private val transactionTemplate: TransactionTemplate,
     private val objectMapper: ObjectMapper,
     private val meterRegistry: MeterRegistry,
+    private val readinessEvaluator: TenantOperationalReadinessEvaluator,
 ) : TenantAdministrationPort {
 
     override fun listTenantModules(tenantId: UUID): List<TenantModuleSummary> {
@@ -99,29 +100,7 @@ class TenantAdministrationService(
         return requireNotNull(
             transactionTemplate.execute {
                 requireTenantPermission(tenantId, TENANT_PROFILE_VIEW_PERMISSION)
-                val missing = mutableListOf<String>()
-
-                if (!tenantExistsAndUsable(tenantId)) {
-                    missing.add("Tenant account must be trial or active.")
-                }
-                if (!businessProfileIsVerified(tenantId)) {
-                    missing.add("Tenant business profile must be verified and include business contacts.")
-                }
-                if (!requiredBusinessContactExists(tenantId)) {
-                    missing.add("Tenant must have an active owner, signatory, or primary contact.")
-                }
-                if (!operationalReportRecipientExists(tenantId)) {
-                    missing.add("Tenant must have an enabled operational report recipient with consent.")
-                }
-                if (!tenantAdminModuleEnabled(tenantId)) {
-                    missing.add("Tenant administration module must be enabled.")
-                }
-
-                TenantReadinessResponse(
-                    tenantId = tenantId,
-                    isReady = missing.isEmpty(),
-                    missingRequirements = missing,
-                )
+                readinessEvaluator.evaluate(tenantId)
             },
         )
     }
@@ -323,106 +302,6 @@ class TenantAdministrationService(
                 priority = 3,
             ),
         )
-    }
-
-    private fun tenantExistsAndUsable(tenantId: UUID): Boolean {
-        return jdbcTemplate.queryForObject(
-            """
-            SELECT EXISTS (
-                SELECT 1
-                FROM tenants
-                WHERE id = ?
-                  AND deleted_at IS NULL
-                  AND status IN ('trial', 'active')
-            )
-            """.trimIndent(),
-            Boolean::class.java,
-            tenantId,
-        ) == true
-    }
-
-    private fun businessProfileIsVerified(tenantId: UUID): Boolean {
-        return jdbcTemplate.queryForObject(
-            """
-            SELECT EXISTS (
-                SELECT 1
-                FROM tenant_profiles
-                WHERE tenant_id = ?
-                  AND verification_status IN ('approved', 'verified')
-                  AND business_phone IS NOT NULL
-                  AND business_email IS NOT NULL
-            )
-            """.trimIndent(),
-            Boolean::class.java,
-            tenantId,
-        ) == true
-    }
-
-    private fun requiredBusinessContactExists(tenantId: UUID): Boolean {
-        return jdbcTemplate.queryForObject(
-            """
-            SELECT EXISTS (
-                SELECT 1
-                FROM tenant_contact_roles tcr
-                JOIN tenant_contacts tc
-                    ON tc.tenant_id = tcr.tenant_id
-                   AND tc.id = tcr.contact_id
-                   AND tc.deleted_at IS NULL
-                   AND tc.status = 'active'
-                WHERE tcr.tenant_id = ?
-                  AND tcr.role_code IN (
-                      'owner_managing_director',
-                      'authorized_signatory',
-                      'primary_contact'
-                  )
-                  AND (tcr.effective_to IS NULL OR tcr.effective_to > now())
-            )
-            """.trimIndent(),
-            Boolean::class.java,
-            tenantId,
-        ) == true
-    }
-
-    private fun operationalReportRecipientExists(tenantId: UUID): Boolean {
-        return jdbcTemplate.queryForObject(
-            """
-            SELECT EXISTS (
-                SELECT 1
-                FROM report_subscription_recipients rsr
-                JOIN report_subscriptions rs
-                    ON rs.tenant_id = rsr.tenant_id
-                   AND rs.id = rsr.subscription_id
-                   AND rs.status = 'active'
-                   AND rs.deleted_at IS NULL
-                WHERE rsr.tenant_id = ?
-                  AND rsr.is_enabled = true
-                  AND contact_channel_has_active_consent(
-                      rsr.tenant_id,
-                      rsr.contact_id,
-                      rsr.contact_channel_id,
-                      'operational_reports'
-                  )
-            )
-            """.trimIndent(),
-            Boolean::class.java,
-            tenantId,
-        ) == true
-    }
-
-    private fun tenantAdminModuleEnabled(tenantId: UUID): Boolean {
-        return jdbcTemplate.queryForObject(
-            """
-            SELECT EXISTS (
-                SELECT 1
-                FROM tenant_modules
-                WHERE tenant_id = ?
-                  AND module_id = 'tenant_admin'
-                  AND is_enabled = true
-            )
-            """.trimIndent(),
-            Boolean::class.java,
-            tenantId,
-        ) == true
     }
 
     private fun replayModuleMutation(

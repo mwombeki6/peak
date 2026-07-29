@@ -63,6 +63,8 @@ data class TenantControlOverview(
     val openSupportTickets: Int,
     val unresolvedAlerts: Int,
     val configurationDrift: Boolean,
+    val activation: TenantActivationReadiness,
+    val onboardingWorkflow: TenantWorkflowSummary?,
 )
 
 enum class TenantControlAction {

@@ -43,6 +43,7 @@ class TenantGovernanceServiceIntegrationTests {
         insertPlatformFixture(platformUserId)
         insertPlan(planId)
         insertTenant(tenantId, planId, "trial")
+        insertActivationReadinessEvidence(tenantId, planId, platformUserId)
         requestContextHolder.set(platformContext(platformUserId, "corr-governance"))
 
         val activation = tenantGovernancePort.approveTenant(
@@ -77,6 +78,31 @@ class TenantGovernanceServiceIntegrationTests {
             tenantId,
         )
         assertEquals(listOf("activated", "suspended"), eventTypes)
+    }
+
+    @Test
+    fun rejectsActivationWhenTenantOnboardingEvidenceIsIncomplete() {
+        val platformUserId = UUID.randomUUID()
+        val planId = UUID.randomUUID()
+        val tenantId = UUID.randomUUID()
+        insertPlatformFixture(platformUserId)
+        insertPlan(planId)
+        insertTenant(tenantId, planId, "trial")
+        requestContextHolder.set(platformContext(platformUserId, "corr-governance-not-ready"))
+
+        val error = assertFailsWith<IllegalStateException> {
+            tenantGovernancePort.approveTenant(
+                tenantId = tenantId,
+                operatorId = platformUserId,
+                reason = "Attempt activation before onboarding is complete",
+            )
+        }
+
+        assertEquals(
+            "Tenant activation is blocked by incomplete onboarding requirements",
+            error.message,
+        )
+        assertEquals("trial", tenantStatus(tenantId))
     }
 
     @Test
@@ -206,6 +232,181 @@ class TenantGovernanceServiceIntegrationTests {
             status,
             "tenant_${tenantId.toString().replace("-", "")}",
             planId,
+        )
+    }
+
+    private fun insertActivationReadinessEvidence(
+        tenantId: UUID,
+        planId: UUID,
+        platformUserId: UUID,
+    ) {
+        val administratorId = UUID.randomUUID()
+        val administratorRoleId = UUID.randomUUID()
+        val contactId = UUID.randomUUID()
+        val channelId = UUID.randomUUID()
+        val subscriptionId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_profiles (
+                tenant_id, legal_name, entity_type, business_phone,
+                business_email, verification_status, verified_at,
+                verified_by_platform_user_id
+            ) VALUES (
+                ?, 'Governance Tenant Limited', 'limited_company',
+                '+255712345678', ?, 'verified', now(), ?
+            )
+            """.trimIndent(),
+            tenantId,
+            "governance-$tenantId@example.com",
+            platformUserId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_control_states (
+                tenant_id, lifecycle_status, verification_status,
+                provisioning_status, subscription_status,
+                desired_configuration_version, actual_configuration_version,
+                updated_by_platform_user_id
+            ) VALUES (?, 'trial', 'verified', 'provisioning', 'trialing', 1, 1, ?)
+            """.trimIndent(),
+            tenantId,
+            platformUserId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_subscriptions (
+                tenant_id, plan_id, status, billing_currency,
+                created_by_platform_user_id
+            ) VALUES (?, ?, 'trialing', 'TZS', ?)
+            """.trimIndent(),
+            tenantId,
+            planId,
+            platformUserId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_roles (
+                id, tenant_id, name, code, is_system, is_active
+            ) VALUES (?, ?, 'Tenant Administrator', 'tenant_admin', true, true)
+            """.trimIndent(),
+            administratorRoleId,
+            tenantId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO users (
+                id, tenant_id, full_name, email, status, is_active
+            ) VALUES (?, ?, 'Tenant Administrator', ?, 'active', true)
+            """.trimIndent(),
+            administratorId,
+            tenantId,
+            "administrator-$tenantId@example.com",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO user_tenant_roles (
+                user_id, tenant_id, tenant_role_id
+            ) VALUES (?, ?, ?)
+            """.trimIndent(),
+            administratorId,
+            tenantId,
+            administratorRoleId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO identity_links (
+                identity_mode, provider, issuer, subject,
+                tenant_id, user_id, email, linked_by_user_id
+            ) VALUES (
+                'tenant', 'oidc', 'https://identity.example/realms/hospitality',
+                ?, ?, ?, ?, ?
+            )
+            """.trimIndent(),
+            "administrator-$administratorId",
+            tenantId,
+            administratorId,
+            "administrator-$tenantId@example.com",
+            administratorId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_modules (
+                tenant_id, module_id, is_enabled, is_configured, source, configured_at
+            ) VALUES (?, 'tenant_admin', true, true, 'system', now())
+            """.trimIndent(),
+            tenantId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_contacts (
+                id, tenant_id, full_name, job_title, status, is_primary_contact
+            ) VALUES (?, ?, 'Managing Director', 'Managing Director', 'active', true)
+            """.trimIndent(),
+            contactId,
+            tenantId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_contact_roles (
+                tenant_id, contact_id, role_code, is_primary_for_role, created_by
+            ) VALUES (?, ?, 'owner_managing_director', true, ?)
+            """.trimIndent(),
+            tenantId,
+            contactId,
+            administratorId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO contact_channels (
+                id, tenant_id, contact_id, channel_type, address,
+                normalized_address, is_primary, verification_status
+            ) VALUES (?, ?, ?, 'email', ?, ?, true, 'verified')
+            """.trimIndent(),
+            channelId,
+            tenantId,
+            contactId,
+            "reports-$tenantId@example.com",
+            "reports-$tenantId@example.com",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO communication_consents (
+                tenant_id, contact_id, contact_channel_id, purpose,
+                status, policy_version, capture_source, captured_by
+            ) VALUES (
+                ?, ?, ?, 'operational_reports', 'active', 'v1', 'api', ?
+            )
+            """.trimIndent(),
+            tenantId,
+            contactId,
+            channelId,
+            administratorId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO report_subscriptions (
+                id, tenant_id, report_code, subscription_name,
+                scope, frequency, created_by
+            ) VALUES (
+                ?, ?, 'monthly_executive_summary',
+                'Activation readiness', 'tenant', 'monthly', ?
+            )
+            """.trimIndent(),
+            subscriptionId,
+            tenantId,
+            administratorId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO report_subscription_recipients (
+                tenant_id, subscription_id, contact_id,
+                contact_channel_id, delivery_format, is_enabled
+            ) VALUES (?, ?, ?, ?, 'pdf', true)
+            """.trimIndent(),
+            tenantId,
+            subscriptionId,
+            contactId,
+            channelId,
         )
     }
 

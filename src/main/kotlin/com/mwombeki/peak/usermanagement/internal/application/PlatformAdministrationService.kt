@@ -974,17 +974,15 @@ class PlatformAdministrationService(
             if (existingUser) throw PlatformAdministrationConflictException(
                 "A tenant user already exists for this email",
             )
-            val tenantRoleId = jdbcTemplate.query(
-                """
-                SELECT id FROM tenant_roles
-                WHERE tenant_id = ? AND code = 'tenant_admin'
-                  AND is_system = true AND is_active = true
-                """.trimIndent(),
-                { rs, _ -> rs.getObject("id", UUID::class.java) },
-                command.tenantId,
-            ).singleOrNull() ?: throw PlatformAdministrationNotFoundException(
-                "Tenant Administrator role was not found",
-            )
+            val tenantRoleId = requireNotNull(
+                jdbcTemplate.queryForObject(
+                    "SELECT public.prepare_initial_tenant_administrator(?)",
+                    UUID::class.java,
+                    command.tenantId,
+                ),
+            ) {
+                "Initial tenant administrator preparation did not return a role"
+            }
             jdbcTemplate.queryForList(
                 "SELECT assert_tenant_capacity(?, 'limit.users')",
                 command.tenantId,

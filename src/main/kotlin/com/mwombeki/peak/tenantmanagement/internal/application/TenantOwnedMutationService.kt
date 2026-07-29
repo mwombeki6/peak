@@ -5,6 +5,7 @@ import com.mwombeki.peak.tenantmanagement.api.TenantLifecycleMutationPort
 import com.mwombeki.peak.tenantmanagement.api.TenantLifecycleTransition
 import com.mwombeki.peak.tenantmanagement.api.TenantLifecycleTransitionCommand
 import com.mwombeki.peak.tenantmanagement.api.TenantModuleConfigurationPort
+import com.mwombeki.peak.tenantmanagement.api.PlatformTenantActivationPort
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
 import tools.jackson.databind.ObjectMapper
@@ -13,6 +14,7 @@ import tools.jackson.databind.ObjectMapper
 class TenantOwnedMutationService(
     private val jdbcTemplate: JdbcTemplate,
     private val objectMapper: ObjectMapper,
+    private val activationPort: PlatformTenantActivationPort,
 ) : TenantLifecycleMutationPort, TenantModuleConfigurationPort {
 
     override fun transition(
@@ -37,6 +39,9 @@ class TenantOwnedMutationService(
 
         require(currentStatus in command.allowedCurrentStatuses) {
             "Tenant cannot move from $currentStatus to ${command.newStatus}"
+        }
+        if (command.requireActivationReadiness) {
+            activationPort.requireReady(command.tenantId)
         }
 
         val changed = jdbcTemplate.update(
