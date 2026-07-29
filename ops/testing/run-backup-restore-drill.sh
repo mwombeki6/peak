@@ -95,8 +95,8 @@ restored_runtime_roles="$(restored_db "
   FROM pg_roles
   WHERE rolname IN (
     'pms_app', 'pms_platform', 'pms_worker', 'pms_readonly_support',
-    'pms_tenant_continuity_owner', 'peak_app', 'peak_worker',
-    'peak_platform', 'peak_platform_support'
+    'pms_tenant_continuity_owner', 'pms_initial_admin_owner',
+    'peak_app', 'peak_worker', 'peak_platform', 'peak_platform_support'
   )
     AND rolsuper = false
     AND rolcreatedb = false
@@ -122,8 +122,8 @@ restored_runtime_owned_relations="$(restored_db "
   WHERE relation.relkind IN ('r', 'p', 'v', 'm', 'S')
     AND owner_role.rolname IN (
       'pms_app', 'pms_platform', 'pms_worker', 'pms_readonly_support',
-      'pms_tenant_continuity_owner', 'peak_app', 'peak_worker',
-      'peak_platform', 'peak_platform_support'
+      'pms_tenant_continuity_owner', 'pms_initial_admin_owner',
+      'peak_app', 'peak_worker', 'peak_platform', 'peak_platform_support'
     )
 ")"
 restored_continuity_owner="$(restored_db "
@@ -147,6 +147,47 @@ restored_continuity_owner_hardened="$(restored_db "
     AND rolcreatedb = false
     AND rolcreaterole = false
     AND rolbypassrls = false
+")"
+restored_initial_admin_functions_hardened="$(restored_db "
+  SELECT count(*)
+  FROM pg_catalog.pg_proc AS function
+  JOIN pg_catalog.pg_namespace AS namespace
+    ON namespace.oid = function.pronamespace
+  JOIN pg_catalog.pg_roles AS owner_role
+    ON owner_role.oid = function.proowner
+  WHERE namespace.nspname = 'public'
+    AND owner_role.rolname = 'pms_initial_admin_owner'
+    AND function.prosecdef = true
+    AND COALESCE(
+      'search_path=pg_catalog, public, pg_temp' = ANY(function.proconfig),
+      false
+    )
+    AND (
+      (function.proname = 'prepare_initial_tenant_administrator' AND function.pronargs = 1)
+      OR (function.proname = 'tenant_administrator_readiness' AND function.pronargs = 1)
+      OR (function.proname = 'accept_tenant_user_invitation' AND function.pronargs = 5)
+    )
+")"
+restored_initial_admin_owner_hardened="$(restored_db "
+  SELECT count(*)
+  FROM pg_catalog.pg_roles
+  WHERE rolname = 'pms_initial_admin_owner'
+    AND rolcanlogin = false
+    AND rolinherit = false
+    AND rolsuper = false
+    AND rolcreatedb = false
+    AND rolcreaterole = false
+    AND rolbypassrls = false
+")"
+restored_initial_admin_owner_memberships="$(restored_db "
+  SELECT count(*)
+  FROM pg_catalog.pg_auth_members AS membership
+  JOIN pg_catalog.pg_roles AS granted_role
+    ON granted_role.oid = membership.roleid
+  JOIN pg_catalog.pg_roles AS member_role
+    ON member_role.oid = membership.member
+  WHERE granted_role.rolname = 'pms_initial_admin_owner'
+     OR member_role.rolname = 'pms_initial_admin_owner'
 ")"
 
 KEYCLOAK_BIND_ADDRESS=127.0.0.2 \
@@ -195,11 +236,14 @@ assert_same reportArtifacts "$source_reports" "$restored_reports"
 assert_same keycloakRealms "$source_realms" "$restored_realms"
 assert_same keycloakClients "$source_clients" "$restored_clients"
 assert_same keycloakUsers "$source_users" "$restored_users"
-assert_same hardenedRuntimeRoles 9 "$restored_runtime_roles"
+assert_same hardenedRuntimeRoles 10 "$restored_runtime_roles"
 assert_same runtimeRoleMemberships 4 "$restored_runtime_memberships"
 assert_same runtimeOwnedRelations 0 "$restored_runtime_owned_relations"
 assert_same continuityFunctionOwner pms_tenant_continuity_owner "$restored_continuity_owner"
 assert_same hardenedContinuityOwner 1 "$restored_continuity_owner_hardened"
+assert_same hardenedInitialAdministratorFunctions 3 "$restored_initial_admin_functions_hardened"
+assert_same hardenedInitialAdministratorOwner 1 "$restored_initial_admin_owner_hardened"
+assert_same initialAdministratorOwnerMemberships 0 "$restored_initial_admin_owner_memberships"
 
 jq -n \
   --arg schema "$restored_schema" \
@@ -214,6 +258,9 @@ jq -n \
   --arg runtimeOwnedRelations "$restored_runtime_owned_relations" \
   --arg continuityFunctionOwner "$restored_continuity_owner" \
   --arg continuityOwnerHardened "$restored_continuity_owner_hardened" \
+  --arg initialAdministratorFunctionsHardened "$restored_initial_admin_functions_hardened" \
+  --arg initialAdministratorOwnerHardened "$restored_initial_admin_owner_hardened" \
+  --arg initialAdministratorOwnerMemberships "$restored_initial_admin_owner_memberships" \
   --argjson keycloakAuthentication "$restored_authentication" \
   --arg postgresBackup "$(sha256sum "$postgres_backup" | cut -d' ' -f1)" \
   --arg keycloakBackup "$(sha256sum "$keycloak_backup" | cut -d' ' -f1)" \
@@ -224,7 +271,11 @@ jq -n \
     runtimeRoles:{hardened:($runtimeRoles|tonumber), memberships:($runtimeMemberships|tonumber),
     ownedRelations:($runtimeOwnedRelations|tonumber),
     continuityFunctionOwner:$continuityFunctionOwner,
-    continuityOwnerHardened:($continuityOwnerHardened|tonumber), verified:true},
+    continuityOwnerHardened:($continuityOwnerHardened|tonumber),
+    initialAdministratorFunctionsHardened:($initialAdministratorFunctionsHardened|tonumber),
+    initialAdministratorOwnerHardened:($initialAdministratorOwnerHardened|tonumber),
+    initialAdministratorOwnerMemberships:($initialAdministratorOwnerMemberships|tonumber),
+    verified:true},
     backupSha256:{postgres:$postgresBackup,keycloak:$keycloakBackup}}' \
   > "$EVIDENCE_DIR/backup-restore-drill.json"
 
