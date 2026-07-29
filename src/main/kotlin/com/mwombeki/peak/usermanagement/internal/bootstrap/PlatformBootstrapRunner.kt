@@ -25,24 +25,101 @@ class PlatformBootstrapRunner(
     private val auditPort: AuditPort,
 ) : ApplicationRunner {
     override fun run(args: ApplicationArguments) {
-        val fullName = properties.fullName.required("PEAK_PLATFORM_BOOTSTRAP_FULL_NAME")
-        val email = properties.email.required("PEAK_PLATFORM_BOOTSTRAP_EMAIL").lowercase()
-        val issuer = properties.issuer.required("PEAK_PLATFORM_BOOTSTRAP_ISSUER")
-        val subject = properties.subject.required("PEAK_PLATFORM_BOOTSTRAP_SUBJECT")
+        val custodians = resolveCustodians()
 
-        val result = requireNotNull(
+        // One transaction for the whole ceremony: either every custodian
+        // becomes effective or none does. A partial bootstrap would leave a
+        // single unilateral root, which is the state dual control exists to
+        // prevent.
+        val results = requireNotNull(
             transactionTemplate.execute {
-                bootstrap(fullName, email, issuer, subject, properties.recoveryEnabled)
+                val baseline = ceremonyBaseline()
+                custodians.map { custodian ->
+                    bootstrap(
+                        custodian.fullName,
+                        custodian.email,
+                        custodian.issuer,
+                        custodian.subject,
+                        properties.recoveryEnabled,
+                        baseline,
+                    )
+                }
             },
         )
-        logger.info(
-            "Platform bootstrap completed platformUserId={} recovery={} changed={} correlationId={}",
-            result.platformUserId,
-            properties.recoveryEnabled,
-            result.changed,
-            result.correlationId,
+
+        results.forEach { result ->
+            logger.info(
+                "Platform bootstrap completed platformUserId={} custodians={} recovery={} " +
+                        "changed={} correlationId={}",
+                result.platformUserId,
+                custodians.size,
+                properties.recoveryEnabled,
+                result.changed,
+                result.correlationId,
+            )
+        }
+    }
+
+    /**
+     * Resolves the custodians to provision and enforces their distinctness.
+     *
+     * Two custodians who share an email, or an issuer and subject pair, are one
+     * person holding two records. That satisfies the letter of dual control
+     * while defeating it entirely, so it is rejected here rather than
+     * discovered later.
+     */
+    private fun resolveCustodians(): List<Custodian> {
+        val primary = Custodian(
+            fullName = properties.fullName.required("PEAK_PLATFORM_BOOTSTRAP_FULL_NAME"),
+            email = properties.email.required("PEAK_PLATFORM_BOOTSTRAP_EMAIL").lowercase(),
+            issuer = properties.issuer.required("PEAK_PLATFORM_BOOTSTRAP_ISSUER"),
+            subject = properties.subject.required("PEAK_PLATFORM_BOOTSTRAP_SUBJECT"),
+        )
+
+        if (!properties.hasSecondCustodian) {
+            return listOf(primary)
+        }
+
+        val secondary = Custodian(
+            fullName = properties.secondFullName
+                .required("PEAK_PLATFORM_BOOTSTRAP_SECOND_FULL_NAME"),
+            email = properties.secondEmail
+                .required("PEAK_PLATFORM_BOOTSTRAP_SECOND_EMAIL").lowercase(),
+            issuer = properties.secondIssuer
+                .required("PEAK_PLATFORM_BOOTSTRAP_SECOND_ISSUER"),
+            subject = properties.secondSubject
+                .required("PEAK_PLATFORM_BOOTSTRAP_SECOND_SUBJECT"),
+        )
+
+        check(!primary.email.equals(secondary.email, ignoreCase = true)) {
+            "Platform emergency administrator custodians must have distinct email addresses"
+        }
+        check(primary.issuer != secondary.issuer || primary.subject != secondary.subject) {
+            "Platform emergency administrator custodians must have distinct identity subjects"
+        }
+        return listOf(primary, secondary)
+    }
+
+    /**
+     * Counts platform users once, before any custodian is created, so a
+     * co-provisioned second custodian is not mistaken for a pre-existing
+     * account by the closed-bootstrap guard.
+     */
+    private fun ceremonyBaseline(): Int {
+        return requireNotNull(
+            jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM platform_users WHERE deleted_at IS NULL",
+                Int::class.java,
+            ),
         )
     }
+
+    private data class Custodian(
+        val fullName: String,
+        val email: String,
+        val issuer: String,
+        val subject: String,
+    )
 
     private fun bootstrap(
         fullName: String,
@@ -50,15 +127,10 @@ class PlatformBootstrapRunner(
         issuer: String,
         subject: String,
         recoveryEnabled: Boolean,
+        platformUserCount: Int,
     ): BootstrapResult {
         jdbcTemplate.execute(
             "SELECT pg_advisory_xact_lock(hashtext('peak.platform.administrator.continuity'))",
-        )
-        val platformUserCount = requireNotNull(
-            jdbcTemplate.queryForObject(
-                "SELECT count(*) FROM platform_users WHERE deleted_at IS NULL",
-                Int::class.java,
-            ),
         )
         val effectiveRootCount = requireNotNull(
             jdbcTemplate.queryForObject(

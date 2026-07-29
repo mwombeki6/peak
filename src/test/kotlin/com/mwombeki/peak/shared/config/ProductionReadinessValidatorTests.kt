@@ -247,25 +247,68 @@ class ProductionReadinessValidatorTests {
     }
 
     @Test
-    fun allowsOneShotProductionBootstrapWithExplicitIdentity() {
+    fun allowsOneShotProductionBootstrapWithTwoCustodians() {
         validator(
-            environment = secureProdEnvironment()
-                .withProperty("spring.datasource.username", "peak_migrator")
-                .withProperty("spring.datasource.password", "not-local-secret")
-                .withProperty("spring.flyway.enabled", "false")
-                .withProperty("spring.main.web-application-type", "none")
-                .withProperty("peak.bootstrap.platform.enabled", "true")
-                .withProperty("peak.bootstrap.platform.full-name", "Platform Root")
-                .withProperty("peak.bootstrap.platform.email", "root@peak.example.com")
-                .withProperty(
-                    "peak.bootstrap.platform.issuer",
-                    "https://auth.peak.example.com/realms/peak",
-                )
-                .withProperty("peak.bootstrap.platform.subject", UUID.randomUUID().toString()),
+            environment = bootstrapProdEnvironment(),
             runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.BOOTSTRAP),
             httpSecurityProperties = secureHttpProperties(),
             requestContextProperties = secureRequestContextProperties(),
         ).afterSingletonsInstantiated()
+    }
+
+    /**
+     * Production provisions two Platform Emergency Administrator custodians so
+     * dual control holds from the first minute. A single-custodian production
+     * bootstrap would leave one account able to appoint another root
+     * unilaterally, so it must fail startup rather than proceed.
+     */
+    @Test
+    fun rejectsProductionBootstrapWithOnlyOneCustodian() {
+        val error = assertFailsWith<IllegalStateException> {
+            validator(
+                environment = bootstrapProdEnvironment(withSecondCustodian = false),
+                runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.BOOTSTRAP),
+                httpSecurityProperties = secureHttpProperties(),
+                requestContextProperties = secureRequestContextProperties(),
+            ).afterSingletonsInstantiated()
+        }
+
+        assertTrue(
+            requireNotNull(error.message).contains("second-"),
+            "a single-custodian production bootstrap must be rejected",
+        )
+    }
+
+    private fun bootstrapProdEnvironment(
+        withSecondCustodian: Boolean = true,
+    ): MockEnvironment {
+        val environment = secureProdEnvironment()
+            .withProperty("spring.datasource.username", "peak_migrator")
+            .withProperty("spring.datasource.password", "not-local-secret")
+            .withProperty("spring.flyway.enabled", "false")
+            .withProperty("spring.main.web-application-type", "none")
+            .withProperty("peak.bootstrap.platform.enabled", "true")
+            .withProperty("peak.bootstrap.platform.full-name", "Platform Root")
+            .withProperty("peak.bootstrap.platform.email", "root@peak.example.com")
+            .withProperty(
+                "peak.bootstrap.platform.issuer",
+                "https://auth.peak.example.com/realms/peak",
+            )
+            .withProperty("peak.bootstrap.platform.subject", UUID.randomUUID().toString())
+        if (!withSecondCustodian) {
+            return environment
+        }
+        return environment
+            .withProperty("peak.bootstrap.platform.second-full-name", "Platform Root Two")
+            .withProperty("peak.bootstrap.platform.second-email", "root2@peak.example.com")
+            .withProperty(
+                "peak.bootstrap.platform.second-issuer",
+                "https://auth.peak.example.com/realms/peak",
+            )
+            .withProperty(
+                "peak.bootstrap.platform.second-subject",
+                UUID.randomUUID().toString(),
+            )
     }
 
     @Test

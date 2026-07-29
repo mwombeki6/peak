@@ -132,6 +132,94 @@ class PlatformBootstrapRunnerIntegrationTests {
         )
     }
 
+    /**
+     * Two custodians sharing an email are one person holding two records. That
+     * satisfies the letter of dual control while defeating it entirely.
+     */
+    @Test
+    fun rejectsTwoCustodiansSharingAnEmailAddress() {
+        val runner = twoCustodianRunner(
+            firstEmail = "custodian@example.test",
+            secondEmail = "CUSTODIAN@example.test",
+            firstSubject = "subject-a",
+            secondSubject = "subject-b",
+        )
+
+        val failure = assertFailsWith<IllegalStateException> {
+            runner.run(DefaultApplicationArguments())
+        }
+        assertTrue(failure.message!!.contains("distinct email"))
+    }
+
+    /**
+     * Distinct emails are not enough: the same Keycloak identity behind two
+     * platform records is still one human being able to approve themselves.
+     */
+    @Test
+    fun rejectsTwoCustodiansSharingAnIdentitySubject() {
+        val runner = twoCustodianRunner(
+            firstEmail = "custodian-a@example.test",
+            secondEmail = "custodian-b@example.test",
+            firstSubject = "shared-subject",
+            secondSubject = "shared-subject",
+        )
+
+        val failure = assertFailsWith<IllegalStateException> {
+            runner.run(DefaultApplicationArguments())
+        }
+        assertTrue(failure.message!!.contains("distinct identity subjects"))
+    }
+
+    /**
+     * A partially configured second custodian must fail loudly rather than
+     * silently degrading to a single-custodian bootstrap.
+     */
+    @Test
+    fun rejectsAnIncompleteSecondCustodian() {
+        val runner = PlatformBootstrapRunner(
+            properties = PlatformBootstrapProperties(
+                enabled = true,
+                fullName = "Primary Custodian",
+                email = "primary@example.test",
+                issuer = PLATFORM_ISSUER,
+                subject = "subject-primary",
+                secondEmail = "secondary@example.test",
+            ),
+            jdbcTemplate = jdbcTemplate,
+            transactionTemplate = TransactionTemplate(transactionManager),
+            auditPort = auditPort,
+        )
+
+        val failure = assertFailsWith<IllegalStateException> {
+            runner.run(DefaultApplicationArguments())
+        }
+        assertTrue(failure.message!!.contains("SECOND_FULL_NAME"))
+    }
+
+    private fun twoCustodianRunner(
+        firstEmail: String,
+        secondEmail: String,
+        firstSubject: String,
+        secondSubject: String,
+    ): PlatformBootstrapRunner {
+        return PlatformBootstrapRunner(
+            properties = PlatformBootstrapProperties(
+                enabled = true,
+                fullName = "Custodian A",
+                email = firstEmail,
+                issuer = PLATFORM_ISSUER,
+                subject = firstSubject,
+                secondFullName = "Custodian B",
+                secondEmail = secondEmail,
+                secondIssuer = PLATFORM_ISSUER,
+                secondSubject = secondSubject,
+            ),
+            jdbcTemplate = jdbcTemplate,
+            transactionTemplate = TransactionTemplate(transactionManager),
+            auditPort = auditPort,
+        )
+    }
+
     private fun recoveryRunner(
         email: String,
         issuer: String,
@@ -208,5 +296,9 @@ class PlatformBootstrapRunnerIntegrationTests {
             platformUserId,
             "effective-root-${identityLinkId.toString().take(8)}@example.com",
         )
+    }
+
+    private companion object {
+        const val PLATFORM_ISSUER = "https://keycloak.test/realms/peak-platform"
     }
 }
