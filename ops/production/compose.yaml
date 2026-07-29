@@ -43,8 +43,13 @@ services:
       - --http-max-queued-requests=${KEYCLOAK_HTTP_MAX_QUEUED_REQUESTS}
       - --shutdown-delay=${KEYCLOAK_SHUTDOWN_DELAY}
     environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
-      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      # Bootstrap administrators are temporary by design. Keycloak creates one
+      # only when these are non-empty, so leaving them unset on ordinary starts
+      # means no permanent master-realm human admin is re-provisioned on every
+      # restart. Set them deliberately for first installation or for an offline
+      # recovery ceremony, then unset them and remove the account.
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_BOOTSTRAP_ADMIN:-}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:-}
       KC_DB: postgres
       KC_DB_URL_HOST: keycloak-db
       KC_DB_URL_DATABASE: ${KEYCLOAK_DB}

@@ -554,6 +554,34 @@ require_distinct POSTGRES_MIGRATOR_PASSWORD POSTGRES_WORKER_PASSWORD
 require_distinct POSTGRES_APP_PASSWORD POSTGRES_WORKER_PASSWORD
 require_distinct KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_DB_PASSWORD
 
+# --- Keycloak administration separation -------------------------------------
+# Bootstrap administrators are temporary. Retaining them in the ordinary
+# runtime environment re-provisions a permanent master-realm human admin on
+# every restart, which is exactly the account that must not exist in steady
+# state. First installation and offline recovery set them deliberately, run the
+# ceremony, then remove them.
+if [ -n "$(value_of KEYCLOAK_BOOTSTRAP_ADMIN)" ] || \
+   [ -n "$(value_of KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD)" ]; then
+  fail "KEYCLOAK_BOOTSTRAP_ADMIN and KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD must be unset in steady-state production; set them only for a first-install or recovery ceremony"
+fi
+
+# Administrative endpoints must be reached over the operator network, not the
+# public hostname. Keycloak warns that --hostname-admin alone does not stop
+# Admin REST access through the public frontend URL, so the reverse proxy must
+# block /admin/** and /realms/master/** publicly and automation must target the
+# admin base explicitly.
+if [ "$(value_of KEYCLOAK_ADMIN_HOSTNAME)" = "$(value_of KEYCLOAK_HOSTNAME)" ]; then
+  fail "KEYCLOAK_ADMIN_HOSTNAME must differ from KEYCLOAK_HOSTNAME so administrative endpoints are not served on the public host"
+fi
+
+if [ -z "$(value_of KEYCLOAK_ADMIN_BASE_URL)" ]; then
+  fail "KEYCLOAK_ADMIN_BASE_URL is required so realm reconciliation targets the administration hostname instead of the public one"
+fi
+
+if [ "$(value_of KEYCLOAK_ADMIN_BASE_URL)" = "$(value_of KEYCLOAK_BASE_URL)" ]; then
+  fail "KEYCLOAK_ADMIN_BASE_URL must differ from KEYCLOAK_BASE_URL"
+fi
+
 if [ "$failures" -gt 0 ]; then
   exit 1
 fi

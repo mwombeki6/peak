@@ -174,9 +174,16 @@ def reconcile_realm(desired: dict[str, object], token: str) -> None:
 def main() -> int:
     if not ADMIN_PASSWORD:
         raise RuntimeError("KEYCLOAK_ADMIN_PASSWORD is required")
+    # Administrative token acquisition must use the administration base, not
+    # the public one. Keycloak documents that hostname-admin alone does not
+    # prevent Admin REST access through the public frontend URL, so the reverse
+    # proxy is expected to block /admin/** and /realms/master/** publicly. A
+    # script that authenticates over the public host would break the moment
+    # that block is correctly applied, and until then it quietly depends on the
+    # gap being open.
     _, token_payload = request(
         "POST",
-        f"{PUBLIC_BASE}/realms/master/protocol/openid-connect/token",
+        f"{ADMIN_BASE}/realms/master/protocol/openid-connect/token",
         form={
             "client_id": "admin-cli",
             "grant_type": "password",
