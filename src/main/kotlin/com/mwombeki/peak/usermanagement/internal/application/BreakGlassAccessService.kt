@@ -53,7 +53,7 @@ class BreakGlassAccessService(
         limit: Int,
     ): List<BreakGlassAccessSummary> {
         require(limit in 1..200) { "Access request limit must be between 1 and 200" }
-        requirePlatform(tenantId, "platform.support.impersonate", "platform.support.access.list")
+        requirePlatform(tenantId, "platform.support.access.view", "platform.support.access.list")
         val clauses = mutableListOf<String>()
         val args = mutableListOf<Any>()
         tenantId?.let { clauses += "access.tenant_id = ?"; args += it }
@@ -72,7 +72,7 @@ class BreakGlassAccessService(
     @Transactional
     override fun requestAccess(command: RequestBreakGlassAccessCommand): BreakGlassAccessSummary {
         requirePlatform(
-            command.tenantId, "platform.support.impersonate", "platform.support.access.request",
+            command.tenantId, "platform.support.access.request", "platform.support.access.request",
         )
         requirePlatform(command.tenantId, command.actionCode, "platform.support.target_permission")
         require(command.reason.isNotBlank() && command.reason.length <= 1000) {
@@ -134,7 +134,7 @@ class BreakGlassAccessService(
         require(command.reason.isNotBlank()) { "Privileged access decision reason is required" }
         val candidate = access(command.accessId)
         requirePlatform(
-            candidate.tenantId, "platform.support.impersonate", "platform.support.access.decide",
+            candidate.tenantId, "platform.support.access.approve", "platform.support.access.decide",
         )
         val approver = currentPlatformUser()
         // Approving is itself a privileged act and needs a proven fresh
@@ -190,7 +190,7 @@ class BreakGlassAccessService(
     override fun activateAccess(accessId: UUID): BreakGlassAccessSummary {
         val candidate = access(accessId)
         requirePlatform(
-            candidate.tenantId, "platform.support.impersonate", "platform.support.access.activate",
+            candidate.tenantId, "platform.support.access.activate", "platform.support.access.activate",
         )
         val actor = currentPlatformUser()
         require(actor == candidate.platformUserId) {
@@ -235,7 +235,7 @@ class BreakGlassAccessService(
         require(reason.isNotBlank()) { "Privileged access revocation reason is required" }
         val candidate = access(accessId)
         requirePlatform(
-            candidate.tenantId, "platform.support.impersonate", "platform.support.access.revoke",
+            candidate.tenantId, "platform.support.access.revoke", "platform.support.access.revoke",
         )
         return mutate(
             "platform.support.access.revoke", mapOf("accessId" to accessId, "reason" to reason),
