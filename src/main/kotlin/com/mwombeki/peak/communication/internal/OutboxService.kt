@@ -1116,7 +1116,7 @@ class OutboxService(
               AND cc.is_active = true
               AND cc.verification_status = 'verified'
               AND cc.deleted_at IS NULL
-              AND contact_channel_has_active_consent(
+              AND contact_channel_can_receive(
                     cc.tenant_id,
                     cc.contact_id,
                     cc.id,
