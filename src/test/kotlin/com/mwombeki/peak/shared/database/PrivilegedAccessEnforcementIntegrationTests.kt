@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.annotation.Import
 import org.springframework.dao.DataAccessException
+import org.springframework.jdbc.core.ConnectionCallback
 import org.springframework.jdbc.core.JdbcTemplate
 import org.testcontainers.junit.jupiter.Testcontainers
 
@@ -314,7 +315,74 @@ class PrivilegedAccessEnforcementIntegrationTests @Autowired constructor(
     }
 
 
+
+    // --------------------------------------------------- evidence isolation
+
+    /**
+     * The evidence view is defined over tables whose row-level security is
+     * keyed on platform permissions, and a PostgreSQL view runs with its
+     * owner's privileges rather than the caller's. Scope therefore has to come
+     * from the view itself. This asserts it does: a session bound to one tenant
+     * sees that tenant's history and nothing else.
+     */
+    @Test
+    fun `evidence is scoped to the bound tenant and never leaks another`() {
+        val mine = world(maxUses = 2)
+        val theirs = world(maxUses = 2)
+        consume(mine)
+        consume(theirs)
+
+        val visible = evidenceTenantIdsForSession(mine.tenantId)
+
+        assertTrue(visible.isNotEmpty(), "a bound tenant must see its own history")
+        assertEquals(
+            setOf(mine.tenantId),
+            visible,
+            "no other tenant's privileged access may be visible",
+        )
+    }
+
+    /** An unbound session is a failure to scope, so it must see nothing. */
+    @Test
+    fun `evidence is empty when no tenant session is bound`() {
+        val world = world(maxUses = 2)
+        consume(world)
+
+        assertTrue(
+            evidenceTenantIdsForSession(null).isEmpty(),
+            "an unbound session must see no privileged access evidence",
+        )
+    }
+
+    private fun evidenceTenantIdsForSession(tenantId: UUID?): Set<UUID> =
+        requireNotNull(
+            jdbcTemplate.execute(ConnectionCallback { connection ->
+                connection.prepareStatement(
+                    "SELECT set_config('app.current_tenant_id', ?, false)",
+                ).use { statement ->
+                    statement.setString(1, tenantId?.toString() ?: "")
+                    statement.execute()
+                }
+                val found = mutableSetOf<UUID>()
+                connection.prepareStatement(
+                    "SELECT DISTINCT tenant_id FROM tenant_privileged_access_evidence",
+                ).use { statement ->
+                    statement.executeQuery().use { rows ->
+                        while (rows.next()) {
+                            found.add(rows.getObject("tenant_id", UUID::class.java))
+                        }
+                    }
+                }
+                // Leave the pooled connection clean for the next test.
+                connection.prepareStatement(
+                    "SELECT set_config('app.current_tenant_id', '', false)",
+                ).use { statement -> statement.execute() }
+                found
+            }),
+        )
+
     // ------------------------------------------- notification delivery basis
+
 
     /**
      * A security notice about privileged staff access is an obligation Peak
