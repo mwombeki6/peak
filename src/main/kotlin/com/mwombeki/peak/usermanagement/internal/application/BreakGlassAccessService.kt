@@ -226,6 +226,11 @@ class BreakGlassAccessService(
             ))
             access(accessId).also {
                 record(it, "platform.support.access.activated", "Approved access activated", reservationId)
+                // Activation is the moment access becomes usable, so it is the
+                // moment the tenant is told. Enqueued in the same transaction
+                // as the state change, so a notice cannot be lost by a later
+                // failure, and the worker supplies retry and delivery evidence.
+                notifyTenantOfPrivilegedAccess(it, reservationId)
             }
         }
     }
@@ -282,6 +287,77 @@ class BreakGlassAccessService(
         rs.getTimestamp("last_used_at")?.toInstant(), rs.getString("assurance_level"),
         rs.getString("decision_reason"),
     )
+
+    /**
+     * Tells the tenant that Peak staff access to their data has become active.
+     *
+     * Routed through the ordinary notification outbox so the notice inherits
+     * durability, retry and per-attempt delivery evidence rather than being a
+     * best-effort side call. The purpose is `security_notifications`, whose
+     * delivery basis is legitimate interest, so a recipient cannot silence it
+     * by withholding consent; the worker still re-checks eligibility, so a
+     * deactivated or unverified channel is dropped.
+     *
+     * The content is deliberately factual: which ticket, which operation, when
+     * it expires. Internal decision notes and the operator's reasoning are not
+     * included.
+     */
+    private fun notifyTenantOfPrivilegedAccess(
+        access: BreakGlassAccessSummary,
+        reservationId: UUID,
+    ) {
+        val channelIds = jdbcTemplate.query(
+            """
+            SELECT channel.id
+            FROM contact_channels channel
+            JOIN tenant_contacts contact
+              ON contact.tenant_id = channel.tenant_id
+             AND contact.id = channel.contact_id
+             AND contact.status = 'active'
+             AND contact.deleted_at IS NULL
+            WHERE channel.tenant_id = ?
+              AND channel.is_active = true
+              AND channel.verification_status = 'verified'
+              AND channel.deleted_at IS NULL
+              AND contact_channel_can_receive(
+                    channel.tenant_id, channel.contact_id, channel.id,
+                    'security_notifications'
+                  )
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("id", UUID::class.java) },
+            access.tenantId,
+        )
+
+        channelIds.forEach { channelId ->
+            outboxPort.enqueue(
+                OutboxEventCommand(
+                    aggregateType = "platform_break_glass_access",
+                    aggregateId = access.accessId,
+                    tenantId = access.tenantId,
+                    eventType = "platform.support.access.tenant_notified",
+                    destination = OutboxDestination.NOTIFICATION,
+                    payload = mapOf(
+                        "contactChannelId" to channelId,
+                        "purpose" to "security_notifications",
+                        "subject" to "Peak support access to your account is active",
+                        "content" to buildString {
+                            append("Peak support has activated approved access to your account ")
+                            append("under support ticket ")
+                            append(access.supportTicketId)
+                            append(". Permitted operation: ")
+                            append(access.actionCode)
+                            append(". Access expires at ")
+                            append(access.expiresAt)
+                            append(". You can review the full access record in your ")
+                            append("privileged access evidence timeline.")
+                        },
+                    ),
+                    idempotencyKeyId = reservationId,
+                    priority = 2,
+                ),
+            )
+        }
+    }
 
     private fun record(
         access: BreakGlassAccessSummary, action: String, reason: String, reservationId: UUID,

@@ -313,7 +313,117 @@ class PrivilegedAccessEnforcementIntegrationTests @Autowired constructor(
         }
     }
 
+
+    // ------------------------------------------- notification delivery basis
+
+    /**
+     * A security notice about privileged staff access is an obligation Peak
+     * owes, not an offer the recipient may decline. It must reach a verified
+     * channel that has never granted consent.
+     */
+    @Test
+    fun `a security notice reaches a verified channel without any consent`() {
+        val channel = verifiedChannel()
+
+        assertTrue(
+            canReceive(channel, "security_notifications"),
+            "security notices must not require consent",
+        )
+    }
+
+    /**
+     * The change is narrow: every consent-based purpose still requires an
+     * active consent decision on the same channel.
+     */
+    @Test
+    fun `consent purposes still require consent on the same channel`() {
+        val channel = verifiedChannel()
+
+        assertFalse(canReceive(channel, "marketing"), "marketing must remain opt-in")
+        assertFalse(
+            canReceive(channel, "operational_reports"),
+            "operational reports must remain opt-in",
+        )
+        assertFalse(
+            canReceive(channel, "critical_operational_alerts"),
+            "critical alerts remain opt-in until that product decision is taken",
+        )
+    }
+
+    @Test
+    fun `an unverified channel receives nothing regardless of basis`() {
+        val channel = verifiedChannel(verified = false)
+
+        assertFalse(canReceive(channel, "security_notifications"))
+        assertFalse(canReceive(channel, "marketing"))
+    }
+
+    /** An unknown purpose must neither widen eligibility nor silently suppress. */
+    @Test
+    fun `an unknown purpose is never deliverable`() {
+        val channel = verifiedChannel()
+
+        assertFalse(canReceive(channel, "security_notifcations"))
+    }
+
+    private data class ContactChannel(
+        val tenantId: UUID,
+        val contactId: UUID,
+        val channelId: UUID,
+    )
+
+    private fun verifiedChannel(verified: Boolean = true): ContactChannel {
+        val suffix = UUID.randomUUID().toString().take(8)
+        val planId = UUID.randomUUID()
+        val tenantId = UUID.randomUUID()
+        val contactId = UUID.randomUUID()
+        val channelId = UUID.randomUUID()
+
+        jdbcTemplate.update(
+            "INSERT INTO plans (id, name, code) VALUES (?, ?, ?)",
+            planId, "Plan $suffix", "plan-$suffix",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenants (id, name, slug, status, schema_name, plan_id)
+            VALUES (?, ?, ?, 'active', ?, ?)
+            """.trimIndent(),
+            tenantId, "Notify $suffix", "notify-$suffix",
+            "tenant_${tenantId.toString().replace("-", "")}", planId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_contacts (id, tenant_id, full_name, status)
+            VALUES (?, ?, ?, 'active')
+            """.trimIndent(),
+            contactId, tenantId, "Security Contact $suffix",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO contact_channels (
+                id, tenant_id, contact_id, channel_type, address,
+                normalized_address, verification_status, is_active
+            ) VALUES (?, ?, ?, 'email', ?, ?, ?, true)
+            """.trimIndent(),
+            channelId, tenantId, contactId,
+            "security-$suffix@example.test", "security-$suffix@example.test",
+            if (verified) "verified" else "unverified",
+        )
+        return ContactChannel(tenantId, contactId, channelId)
+    }
+
+    private fun canReceive(channel: ContactChannel, purpose: String): Boolean =
+        jdbcTemplate.queryForObject(
+            "SELECT contact_channel_can_receive(?::uuid, ?::uuid, ?::uuid, ?::text)",
+            Boolean::class.java,
+            channel.tenantId,
+            channel.contactId,
+            channel.channelId,
+            purpose,
+        ) == true
+
     // ------------------------------------------------------------- helpers
+
 
     private data class World(
         val accessId: UUID,
