@@ -25257,6 +25257,174 @@
         }
       }
     },
+    "/api/v1/platform/administrators/change-requests" : {
+      "post" : {
+        "tags" : [ "platform-administration-controller" ],
+        "summary" : "Request Platform Administrator Change",
+        "description" : "Request Platform Administrator Change",
+        "operationId" : "requestPlatformAdministratorChange",
+        "parameters" : [ {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PlatformAdministratorChangeHttpRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PlatformAdministratorChangeReceipt"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/administrators/change-requests/{requestId}/decisions" : {
+      "post" : {
+        "tags" : [ "platform-administration-controller" ],
+        "summary" : "Decide Platform Administrator Change",
+        "description" : "Decide Platform Administrator Change",
+        "operationId" : "decidePlatformAdministratorChange",
+        "parameters" : [ {
+          "name" : "requestId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PlatformAdministratorChangeDecisionHttpRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PlatformAdministratorChangeReceipt"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/payments/webhooks/clickpesa/{providerAccountId}" : {
       "post" : {
         "tags" : [ "payment-webhook-controller" ],
@@ -27207,6 +27375,89 @@
                   "type" : "array",
                   "items" : {
                     "$ref" : "#/components/schemas/PropertyAdministratorHttpResponse"
+                  }
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tenants/{tenantId}/privileged-access" : {
+      "get" : {
+        "tags" : [ "tenant-privileged-access-evidence-controller" ],
+        "summary" : "List Privileged Access",
+        "description" : "List Privileged Access",
+        "operationId" : "listPrivilegedAccess",
+        "parameters" : [ {
+          "name" : "tenantId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 200,
+            "maximum" : 500,
+            "minimum" : 1
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/TenantPrivilegedAccessEvent"
                   }
                 }
               }
@@ -30225,6 +30476,75 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/TenantCommercialOverview"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/tenants/{tenantId}/activation-readiness" : {
+      "get" : {
+        "tags" : [ "platform-tenant-control-controller" ],
+        "summary" : "Activation Readiness",
+        "description" : "Activation Readiness",
+        "operationId" : "activationReadiness",
+        "parameters" : [ {
+          "name" : "tenantId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TenantActivationReadiness"
                 }
               }
             }
@@ -38201,6 +38521,75 @@
           }
         }
       },
+      "PlatformAdministratorChangeHttpRequest" : {
+        "type" : "object",
+        "properties" : {
+          "targetPlatformUserId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "action" : {
+            "type" : "string",
+            "enum" : [ "APPOINT", "REVOKE" ]
+          },
+          "reason" : {
+            "type" : "string",
+            "maxLength" : 1000,
+            "minLength" : 10
+          },
+          "durationMinutes" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "reason" ]
+      },
+      "PlatformAdministratorChangeReceipt" : {
+        "type" : "object",
+        "properties" : {
+          "requestId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "action" : {
+            "type" : "string"
+          },
+          "targetPlatformUserId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "requestVersion" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "quorumSatisfied" : {
+            "type" : "boolean"
+          },
+          "expiresAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "PlatformAdministratorChangeDecisionHttpRequest" : {
+        "type" : "object",
+        "properties" : {
+          "seatCode" : {
+            "type" : "string",
+            "minLength" : 1
+          },
+          "approve" : {
+            "type" : "boolean"
+          },
+          "reason" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "seatCode" ]
+      },
       "PaymentWebhookReceipt" : {
         "type" : "object",
         "properties" : {
@@ -38813,6 +39202,57 @@
           },
           "active" : {
             "type" : "boolean"
+          }
+        }
+      },
+      "TenantPrivilegedAccessEvent" : {
+        "type" : "object",
+        "properties" : {
+          "accessId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "supportTicketId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "operatorName" : {
+            "type" : "string"
+          },
+          "actionCode" : {
+            "type" : "string"
+          },
+          "operationCode" : {
+            "type" : "string"
+          },
+          "reason" : {
+            "type" : "string"
+          },
+          "eventType" : {
+            "type" : "string"
+          },
+          "occurredAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "startsAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "expiresAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "maxUses" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "useCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "denialReason" : {
+            "type" : "string"
           }
         }
       },
@@ -40017,6 +40457,91 @@
           }
         }
       },
+      "TenantActivationAction" : {
+        "type" : "object",
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "label" : {
+            "type" : "string"
+          },
+          "responsibleParty" : {
+            "type" : "string"
+          },
+          "method" : {
+            "type" : "string"
+          },
+          "path" : {
+            "type" : "string"
+          }
+        }
+      },
+      "TenantActivationGate" : {
+        "type" : "object",
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "label" : {
+            "type" : "string"
+          },
+          "satisfied" : {
+            "type" : "boolean"
+          },
+          "detail" : {
+            "type" : "string"
+          }
+        }
+      },
+      "TenantActivationReadiness" : {
+        "type" : "object",
+        "properties" : {
+          "tenantId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "ready" : {
+            "type" : "boolean"
+          },
+          "lifecycleStatus" : {
+            "type" : "string"
+          },
+          "administratorStatus" : {
+            "type" : "string"
+          },
+          "effectiveAdministrators" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "pendingInitialInvitations" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "gates" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TenantActivationGate"
+            }
+          },
+          "blockerCodes" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "nextActions" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TenantActivationAction"
+            }
+          },
+          "evaluatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
       "TenantControlOverview" : {
         "type" : "object",
         "properties" : {
@@ -40056,6 +40581,12 @@
           },
           "configurationDrift" : {
             "type" : "boolean"
+          },
+          "activation" : {
+            "$ref" : "#/components/schemas/TenantActivationReadiness"
+          },
+          "onboardingWorkflow" : {
+            "$ref" : "#/components/schemas/TenantWorkflowSummary"
           }
         }
       },

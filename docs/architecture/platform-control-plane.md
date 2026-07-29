@@ -41,20 +41,93 @@ provider subject. The subject is bound only when the invitation is accepted.
 
 ## 4. Support and privileged access
 
+Peak does not impersonate tenant users. It grants a scoped platform session that
+passes tenant-bound authorization, which is why the permissions are
+`platform.support.access.*` and why Keycloak's native impersonation role is
+never granted to Peak support. `platform.support.impersonate` is deprecated and
+authorizes nothing; it is retained only so historical grants and audit records
+stay interpretable.
+
 Support tickets have customer/internal notes and an immutable event timeline.
 Privileged access requires:
 
 1. an open ticket for the exact tenant;
-2. an exact target permission already held by the operator;
-3. active MFA;
-4. approval by a different platform operator;
-5. a bounded duration and use count;
-6. activation by the requesting operator; and
+2. an exact operation, resolved through `privileged_operation_policies` rather
+   than a permission code alone, because one permission can guard several routes
+   whose risk differs by method;
+3. authentication assurance proven by the validated token. `acr`, `amr` and
+   `auth_time` are compared against the operation's required level and freshness
+   window. `platform_users.mfa_enabled` records only that an operator once
+   enrolled a factor and no longer authorizes anything;
+4. an independent approval quorum. Policies declare seats, each naming a
+   permission and a number of distinct approvers. The requester cannot approve,
+   one person cannot occupy two seats regardless of how many roles they hold,
+   and `platform.admin.all` does not satisfy a seat, so an under-staffed quorum
+   leaves the operation unavailable rather than silently shrinking;
+5. a bounded duration and use count, enforced atomically by
+   `consume_privileged_access`. Ceilings are database constraints per access
+   class, so the catalog cannot declare a limit looser than its class permits,
+   and destructive operations are barred from eligibility by constraint;
+6. activation by the requesting operator, which starts the window; and
 7. an authenticated platform token plus exact session and tenant selector
    headers on every supported request.
 
-Revocation is immediate. Every request, approval, activation, use decision and
-revocation is auditable.
+Approvals bind to a canonical hash and version of the exact request. Changing
+the tenant, operation, reason, duration, use limit or ticket bumps the version
+and invalidates every prior approval automatically.
+
+One server request consumes at most one use. Deduplication uses a
+server-generated execution identifier rather than the caller-supplied
+correlation id, which a client can pin across requests. A denied authorization
+records evidence but consumes nothing. Consuming the final use exhausts the
+grant, which is distinct evidence from time expiry.
+
+Revocation is immediate. Requests, approvals, activation, every consumed or
+denied use, exhaustion, expiry and revocation are recorded in append-only tables
+that reject `UPDATE` and `DELETE`. Business outcomes are appended separately, so
+a crash after consumption records an unknown outcome and never refunds the use.
+
+Tenants are told. Activation enqueues a security notice in the same transaction
+as the state change, so it cannot be lost by a later failure and inherits retry
+and per-attempt delivery evidence from the notification worker. That notice uses
+a legitimate-interest delivery basis: a recipient cannot suppress notification
+that their data was accessed by withholding consent, though the channel must
+still be verified and active. `GET /api/v1/tenants/{tenantId}/privileged-access`
+returns the tenant's own timeline, scoped by the bound database session rather
+than by the path parameter.
+
+### Emergency administration
+
+`platform_root` is retained as the database role code but means Platform
+Emergency Administrator. It is not a daily workspace. Appointment and revocation
+both require a request approved by two distinct security custodians, plus a
+fresh phishing-resistant step-up by the operator applying it. Quorum is
+re-evaluated at apply time rather than trusted from the request status, because
+an approver disabled or stripped of the seat permission after approving must
+stop counting.
+
+Production bootstrap provisions two custodians in one transaction, with distinct
+emails and distinct identity subjects, so dual control holds from the first
+minute and no window exists in which a single account can unilaterally appoint
+another root. Development may bootstrap one custodian; production readiness
+validation rejects that configuration. Offline zero-root recovery remains the
+exceptional path and is refused while any effective root can sign in.
+
+### Known limits
+
+Stated because a control described more strongly than it is enforced is worse
+than an absent one.
+
+- When trusted header identity is enabled, root changes skip the step-up check,
+  since such a runtime carries no token. This is safe only because production
+  readiness validation rejects header identity under `prod`; that coupling is
+  documented rather than asserted by a test.
+- Realm reconciliation still authenticates with a master-realm administrator
+  password grant rather than a least-privileged service account.
+- The reverse proxy that must block `/admin/**` and `/realms/master/**` on the
+  public hostname is not configured in this repository, so nothing here proves
+  that isolation. Environment validation asserts the configuration that makes
+  the block possible, not the block itself.
 
 ## 5. Fleet, release and feature control
 
