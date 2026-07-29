@@ -11,7 +11,6 @@ import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.shared.context.AssuranceLevel
 import com.mwombeki.peak.shared.context.RequestContextHolder
-import com.mwombeki.peak.shared.context.RequestContextProperties
 import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.shared.secrets.SecretEnvelopeService
 import com.mwombeki.peak.usermanagement.api.AssignPlatformAdministratorCommand
@@ -77,7 +76,7 @@ class PlatformAdministrationService(
     private val meterRegistry: MeterRegistry,
     private val secretEnvelopeService: SecretEnvelopeService,
     private val invitationSecurityProperties: TenantInvitationSecurityProperties,
-    private val requestContextProperties: RequestContextProperties,
+    private val stepUpPolicy: PrivilegedStepUpPolicy,
     private val clock: Clock = Clock.systemUTC(),
 ) : PlatformAdministrationPort {
 
@@ -862,34 +861,10 @@ class PlatformAdministrationService(
      * they actually did for this request.
      */
     private fun requireFreshStepUpForRootChange() {
-        // Trusted header identity carries no token and therefore no ceremony
-        // evidence, so a strict gate would make root changes impossible in
-        // local and controlled runtimes. A runtime that enables header identity
-        // has already declared itself non-production: ProductionReadinessValidator
-        // fails startup when allow-header-identity is true under prod. Gating
-        // this carve-out on that existing, production-enforced invariant keeps
-        // development usable without creating a bypass that can exist in
-        // production.
-        if (requestContextProperties.allowHeaderIdentity) {
-            return
-        }
-
-        val evidence = requestContextHolder.current().authentication
-        if (evidence.issuer.isNullOrBlank()) {
-            throw IllegalStateException(
-                "Platform emergency administrator changes require a validated platform token",
-            )
-        }
-        if (!evidence.level.satisfies(AssuranceLevel.PHISHING_RESISTANT)) {
-            throw IllegalStateException(
-                "Platform emergency administrator changes require phishing-resistant authentication",
-            )
-        }
-        if (!evidence.isFreshWithin(ROOT_STEP_UP_MAX_AGE, Instant.now(clock))) {
-            throw IllegalStateException(
-                "Platform emergency administrator changes require a recent step-up authentication",
-            )
-        }
+        stepUpPolicy.require(
+            required = AssuranceLevel.PHISHING_RESISTANT,
+            maxAge = ROOT_STEP_UP_MAX_AGE,
+        ) { message -> IllegalStateException(message) }
     }
 
     override fun assignPlatformAdministrator(

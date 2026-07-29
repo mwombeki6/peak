@@ -44,6 +44,7 @@ class BreakGlassAccessService(
     private val auditPort: AuditPort,
     private val outboxPort: OutboxPort,
     private val objectMapper: ObjectMapper,
+    private val stepUpPolicy: PrivilegedStepUpPolicy,
 ) : BreakGlassAccessPort {
 
     @Transactional(readOnly = true)
@@ -416,31 +417,19 @@ class BreakGlassAccessService(
      * satisfied it. `mfa_enabled` is now informational only and must never
      * authorize privileged access.
      */
-    private fun requireAssurance(required: AssuranceLevel): AssuranceLevel {
-        val evidence = requestContextHolder.current().authentication
-
-        if (evidence.issuer.isNullOrBlank() || evidence.subject.isNullOrBlank()) {
-            throw BreakGlassConflictException(
-                "Privileged access requires a validated platform token",
-            )
+    /**
+     * Verifies the ceremony behind this request through the shared policy.
+     *
+     * The previous implementation read `platform_users.mfa_enabled`, which
+     * records that an operator once enrolled a second factor and proves nothing
+     * about the current request: a token minted through a password-only flow
+     * satisfied it. `mfa_enabled` is now informational only and must never
+     * authorize privileged access.
+     */
+    private fun requireAssurance(required: AssuranceLevel): AssuranceLevel =
+        stepUpPolicy.require(required, STEP_UP_MAX_AGE) { message ->
+            BreakGlassConflictException(message)
         }
-        if (evidence.level == AssuranceLevel.NONE) {
-            throw BreakGlassConflictException(
-                "Privileged access requires proven multi-factor authentication",
-            )
-        }
-        if (!evidence.level.satisfies(required)) {
-            throw BreakGlassConflictException(
-                "Privileged access requires phishing-resistant authentication",
-            )
-        }
-        if (!evidence.isFreshWithin(STEP_UP_MAX_AGE, Instant.now())) {
-            throw BreakGlassConflictException(
-                "Privileged access requires a recent step-up authentication",
-            )
-        }
-        return evidence.level
-    }
 
     private fun AssuranceLevel.databaseValue(): String = when (this) {
         AssuranceLevel.PHISHING_RESISTANT -> "phishing_resistant"

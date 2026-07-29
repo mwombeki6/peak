@@ -118,10 +118,15 @@ exceptional path and is refused while any effective root can sign in.
 Stated because a control described more strongly than it is enforced is worse
 than an absent one.
 
-- When trusted header identity is enabled, root changes skip the step-up check,
-  since such a runtime carries no token. This is safe only because production
-  readiness validation rejects header identity under `prod`; that coupling is
-  documented rather than asserted by a test.
+- When trusted header identity is enabled, privileged operations skip the
+  step-up check, since such a runtime carries no token. This is safe only
+  because production readiness validation rejects header identity under `prod`.
+  That coupling is asserted: `PrivilegedStepUpPolicyTests` proves the carve-out
+  is unreachable when header identity is disabled, and the production validator
+  has its own test rejecting header identity under `prod`. Relaxing either
+  breaks a test that names the dependency. Support access and emergency
+  administration share one implementation of this rule, so they cannot diverge
+  under identical configuration.
 - Realm reconciliation still authenticates with a master-realm administrator
   password grant rather than a least-privileged service account.
 - The reverse proxy that must block `/admin/**` and `/realms/master/**` on the
