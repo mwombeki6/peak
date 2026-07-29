@@ -9,6 +9,7 @@ import com.mwombeki.peak.reliability.api.IdempotencyReservation
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
+import com.mwombeki.peak.shared.context.AssuranceLevel
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.usermanagement.api.BreakGlassAccessPort
@@ -24,6 +25,7 @@ import com.mwombeki.peak.usermanagement.api.SupportPrivilegedAccessEventCommand
 import com.mwombeki.peak.usermanagement.api.SupportPrivilegedAccessEvidencePort
 import java.sql.ResultSet
 import java.sql.Timestamp
+import java.time.Duration
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
@@ -81,11 +83,12 @@ class BreakGlassAccessService(
         }
         require(command.maxUses in 1..1000) { "Privileged access max uses must be between 1 and 1000" }
         require(command.actionCode.matches(PERMISSION_CODE)) { "Invalid privileged access action code" }
-        val assurance = command.assuranceLevel.trim().lowercase().also {
-            require(it in ASSURANCE_LEVELS) { "Invalid assurance level" }
-        }
+        // The requested level is a ceiling request, never proof. What is stored
+        // and enforced is the level the validated token actually achieved.
+        val requested = AssuranceLevel.fromPolicy(command.assuranceLevel)
+        val achieved = requireAssurance(requested)
+        val assurance = achieved.databaseValue()
         val platformUserId = currentPlatformUser()
-        requireMfa(platformUserId)
         return mutate(
             "platform.support.access.request", command, BreakGlassAccessSummary::class.java,
         ) { reservationId ->
@@ -134,7 +137,9 @@ class BreakGlassAccessService(
             candidate.tenantId, "platform.support.impersonate", "platform.support.access.decide",
         )
         val approver = currentPlatformUser()
-        requireMfa(approver)
+        // Approving is itself a privileged act and needs a proven fresh
+        // ceremony at least as strong as the access being approved.
+        requireAssurance(AssuranceLevel.fromPolicy(candidate.assuranceLevel))
         if (approver == candidate.platformUserId) {
             throw BreakGlassConflictException("Privileged access cannot be self-approved")
         }
@@ -191,7 +196,9 @@ class BreakGlassAccessService(
         require(actor == candidate.platformUserId) {
             "Only the requesting operator can activate privileged access"
         }
-        requireMfa(actor)
+        // Activation starts the clock on real access, so it requires a fresh
+        // ceremony at the strength the grant was approved for.
+        requireAssurance(AssuranceLevel.fromPolicy(candidate.assuranceLevel))
         return mutate(
             "platform.support.access.activate", mapOf("accessId" to accessId),
             BreakGlassAccessSummary::class.java,
@@ -323,13 +330,47 @@ class BreakGlassAccessService(
         platformAccess.requireAuthorized(PlatformAccessRequest(tenantId, permission, operation))
     }
 
-    private fun requireMfa(platformUserId: UUID) {
-        val enabled = jdbcTemplate.queryForObject(
-            "SELECT mfa_enabled FROM platform_users WHERE id = ? AND status = 'active' AND deleted_at IS NULL",
-            Boolean::class.java, platformUserId,
-        ) == true
-        if (!enabled) throw BreakGlassConflictException(
-            "Active multi-factor authentication is required for privileged support access",
+    /**
+     * Verifies the authentication ceremony behind this request against a policy
+     * requirement and returns the level actually achieved.
+     *
+     * The previous implementation read `platform_users.mfa_enabled`, which
+     * records that an operator once enrolled a second factor. It proves nothing
+     * about the current request: a token minted through a password-only flow
+     * satisfied it. `mfa_enabled` is now informational only and must never
+     * authorize privileged access.
+     */
+    private fun requireAssurance(required: AssuranceLevel): AssuranceLevel {
+        val evidence = requestContextHolder.current().authentication
+
+        if (evidence.issuer.isNullOrBlank() || evidence.subject.isNullOrBlank()) {
+            throw BreakGlassConflictException(
+                "Privileged access requires a validated platform token",
+            )
+        }
+        if (evidence.level == AssuranceLevel.NONE) {
+            throw BreakGlassConflictException(
+                "Privileged access requires proven multi-factor authentication",
+            )
+        }
+        if (!evidence.level.satisfies(required)) {
+            throw BreakGlassConflictException(
+                "Privileged access requires phishing-resistant authentication",
+            )
+        }
+        if (!evidence.isFreshWithin(STEP_UP_MAX_AGE, Instant.now())) {
+            throw BreakGlassConflictException(
+                "Privileged access requires a recent step-up authentication",
+            )
+        }
+        return evidence.level
+    }
+
+    private fun AssuranceLevel.databaseValue(): String = when (this) {
+        AssuranceLevel.PHISHING_RESISTANT -> "phishing_resistant"
+        AssuranceLevel.MFA -> "mfa"
+        AssuranceLevel.NONE -> throw BreakGlassConflictException(
+            "Privileged access requires proven multi-factor authentication",
         )
     }
 
@@ -343,8 +384,16 @@ class BreakGlassAccessService(
     }
 
     private companion object {
-        val ACCESS_STATUSES = setOf("requested", "approved", "active", "denied", "revoked", "expired")
-        val ASSURANCE_LEVELS = setOf("mfa", "phishing_resistant")
+        val ACCESS_STATUSES = setOf(
+            "requested", "approved", "active", "denied", "revoked", "expired", "exhausted",
+        )
+
+        /**
+         * How recently the authentication ceremony must have happened for a
+         * privileged action. Short enough that a walked-away session cannot
+         * request, approve or activate access.
+         */
+        val STEP_UP_MAX_AGE: Duration = Duration.ofMinutes(5)
         val PERMISSION_CODE = Regex("[a-z][a-z0-9_.-]{2,99}")
         val ACCESS_SELECT = """
             SELECT access.id, access.platform_user_id, access.tenant_id,
