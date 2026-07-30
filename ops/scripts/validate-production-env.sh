@@ -582,6 +582,17 @@ if [ "$(value_of KEYCLOAK_ADMIN_BASE_URL)" = "$(value_of KEYCLOAK_BASE_URL)" ]; 
   fail "KEYCLOAK_ADMIN_BASE_URL must differ from KEYCLOAK_BASE_URL"
 fi
 
+# Steady-state reconciliation must use the least-privileged service account, not
+# a master-realm administrator password grant. The bootstrap escape hatch is
+# refused here so it cannot become the normal path by omission.
+if [ -z "$(value_of KEYCLOAK_RECONCILER_SECRET)" ]; then
+  fail "KEYCLOAK_RECONCILER_SECRET is required so realm reconciliation uses the least-privileged service account instead of a master-realm administrator password grant"
+fi
+
+if [ "$(value_of KEYCLOAK_ALLOW_BOOTSTRAP_ADMIN)" = "true" ]; then
+  fail "KEYCLOAK_ALLOW_BOOTSTRAP_ADMIN must not be true in steady-state production; it is a first-install and recovery ceremony switch only"
+fi
+
 if [ "$failures" -gt 0 ]; then
   exit 1
 fi

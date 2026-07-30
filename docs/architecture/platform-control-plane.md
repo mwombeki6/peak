@@ -127,8 +127,22 @@ than an absent one.
   breaks a test that names the dependency. Support access and emergency
   administration share one implementation of this rule, so they cannot diverge
   under identical configuration.
-- Realm reconciliation still authenticates with a master-realm administrator
-  password grant rather than a least-privileged service account.
+- Realm reconciliation authenticates as the per-realm `peak-realm-reconciler`
+  service account using client credentials. Each realm's client can administer
+  only that realm, so a compromised reconciliation credential cannot administer
+  the server. The master-realm password grant remains only for first
+  installation, before the service account exists to authenticate with, and is
+  refused unless `KEYCLOAK_ALLOW_BOOTSTRAP_ADMIN=true`; production validation
+  rejects that switch.
+
+  One step is not automated and must be performed once per realm by an operator:
+  granting the service account its roles. It needs `manage-clients` and
+  `view-clients` from that realm's `realm-management` client, plus
+  `manage-authentication` for required actions. It must not receive
+  `realm-admin`, which would restore the broad authority this replaces. The
+  grant is not expressed in the realm templates because those drive a partial
+  client reconciliation rather than a full realm import, so a role assignment
+  written there would be silently ignored rather than applied.
 - The reverse proxy that must block `/admin/**` and `/realms/master/**` on the
   public hostname is not configured in this repository, so nothing here proves
   that isolation. Environment validation asserts the configuration that makes
