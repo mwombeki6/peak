@@ -47,8 +47,15 @@ if [ -z "$EXPECTED_WEBAUTHN_RP_ID" ]; then
   exit 1
 fi
 
+# The master token is fetched from the administrative host, not the public one.
+# Two reasons, and either alone is sufficient. Production's reverse proxy blocks
+# /realms/master/** on the public hostname, so a token fetched from BASE_URL
+# would not be obtainable there. And keeping the token and the admin calls it
+# authorises on one host makes it impossible to present a token minted by one
+# Keycloak to a different one, which is what happens when a caller pins only
+# KEYCLOAK_BASE_URL and KEYCLOAK_ADMIN_BASE_URL still points at another instance.
 TOKEN_RESPONSE="$(curl -fsS \
-  -X POST "$BASE_URL/realms/master/protocol/openid-connect/token" \
+  -X POST "$ADMIN_BASE_URL/realms/master/protocol/openid-connect/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   --data-urlencode "client_id=admin-cli" \
   --data-urlencode "grant_type=password" \
@@ -238,10 +245,23 @@ def verify_realm(name: str, actions_name: str, *, platform: bool):
     for alias in ("VERIFY_EMAIL", "CONFIGURE_TOTP", "webauthn-register", "webauthn-register-passwordless"):
         if actions.get(alias, {}).get("enabled") is not True:
             raise SystemExit(f"{realm.get('realm')} must enable required action {alias}")
-    expected_totp_default = platform
-    if actions["CONFIGURE_TOTP"].get("defaultAction") is not expected_totp_default:
+    # Platform operators must be steered to a phishing-resistant authenticator.
+    # TOTP stays enabled so it remains available for recovery, but it must not be
+    # the default enrolment on either realm, and passwordless WebAuthn must be
+    # the default on the platform realm.
+    if actions["CONFIGURE_TOTP"].get("defaultAction") is not False:
         raise SystemExit(
-            f"{realm.get('realm')} CONFIGURE_TOTP defaultAction must be {expected_totp_default}"
+            f"{realm.get('realm')} CONFIGURE_TOTP defaultAction must be False so "
+            "operators are not enrolled onto a phishable factor by default"
+        )
+    expected_passwordless_default = platform
+    if (
+        actions["webauthn-register-passwordless"].get("defaultAction")
+        is not expected_passwordless_default
+    ):
+        raise SystemExit(
+            f"{realm.get('realm')} webauthn-register-passwordless defaultAction "
+            f"must be {expected_passwordless_default}"
         )
 
 

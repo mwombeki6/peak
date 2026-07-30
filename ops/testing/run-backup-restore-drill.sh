@@ -4,6 +4,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/ops/production/.env}"
 COMPOSE_FILE="${COMPOSE_FILE:-$ROOT_DIR/ops/production/compose.yaml}"
+# The restore stack is a fresh Keycloak, so it needs the same temporary
+# bootstrap administrator the other acceptance stacks use. Production compose
+# deliberately omits it.
+KEYCLOAK_ADMIN_OVERLAY="${KEYCLOAK_ADMIN_OVERLAY:-$ROOT_DIR/ops/testing/compose.keycloak-bootstrap-admin.yaml}"
 SOURCE_PROJECT="${SOURCE_PROJECT:-peak}"
 RESTORE_PROJECT="${RESTORE_PROJECT:-peak-restore-drill}"
 EVIDENCE_DIR="${EVIDENCE_DIR:-$ROOT_DIR/build/evidence/backup-restore}"
@@ -16,27 +20,27 @@ set +a
 
 cleanup() {
   podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" \
-    -f "$COMPOSE_FILE" down -v --remove-orphans >/dev/null 2>&1 || true
+    -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" down -v --remove-orphans >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
 source_db() {
-  podman compose -p "$SOURCE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
+  podman compose -p "$SOURCE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
     exec -T postgres psql -XAt -U "$POSTGRES_MIGRATOR_USER" -d "$POSTGRES_DB" -c "$1"
 }
 
 restored_db() {
-  podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
+  podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
     exec -T postgres psql -XAt -U "$POSTGRES_MIGRATOR_USER" -d "$POSTGRES_DB" -c "$1"
 }
 
 source_keycloak_db() {
-  podman compose -p "$SOURCE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
+  podman compose -p "$SOURCE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
     exec -T keycloak-db psql -XAt -U "$KEYCLOAK_DB_USER" -d "$KEYCLOAK_DB" -c "$1"
 }
 
 restored_keycloak_db() {
-  podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
+  podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
     exec -T keycloak-db psql -XAt -U "$KEYCLOAK_DB_USER" -d "$KEYCLOAK_DB" -c "$1"
 }
 
@@ -55,20 +59,20 @@ source_clients="$(source_keycloak_db "SELECT count(*) FROM client")"
 source_users="$(source_keycloak_db "SELECT count(*) FROM user_entity")"
 
 export COMPOSE_PROJECT_NAME="$RESTORE_PROJECT"
-podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
+podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
   up -d postgres keycloak-db
 for _ in $(seq 1 60); do
-  if podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
+  if podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
       exec -T postgres pg_isready -U "$POSTGRES_MIGRATOR_USER" -d "$POSTGRES_DB" >/dev/null 2>&1 &&
-    podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
+    podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
       exec -T keycloak-db pg_isready -U "$KEYCLOAK_DB_USER" -d "$KEYCLOAK_DB" >/dev/null 2>&1; then
     break
   fi
   sleep 2
 done
-podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
+podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
   exec -T postgres pg_isready -U "$POSTGRES_MIGRATOR_USER" -d "$POSTGRES_DB" >/dev/null
-podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
+podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
   exec -T keycloak-db pg_isready -U "$KEYCLOAK_DB_USER" -d "$KEYCLOAK_DB" >/dev/null
 $ROOT_DIR/ops/scripts/restore-postgres.sh "$postgres_backup" \
   > "$EVIDENCE_DIR/postgres-restore.log"
@@ -193,7 +197,7 @@ restored_initial_admin_owner_memberships="$(restored_db "
 KEYCLOAK_BIND_ADDRESS=127.0.0.2 \
 KEYCLOAK_HOSTNAME=http://127.0.0.2:8081 \
 KEYCLOAK_ADMIN_HOSTNAME=http://127.0.0.2:8081 \
-podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" \
+podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
   up -d keycloak
 for _ in $(seq 1 60); do
   if curl -fsS \
@@ -211,7 +215,12 @@ done
   echo "Restored Keycloak did not publish both Peak realms" >&2
   exit 1
 }
+# Both hosts are pinned to the restored stack. The environment file exports
+# KEYCLOAK_ADMIN_BASE_URL for the source stack, so overriding only the public
+# URL would send the restored instance's token to the source instance's admin
+# API, which rejects it as an unknown issuer.
 KEYCLOAK_BASE_URL=http://127.0.0.2:8081 \
+KEYCLOAK_ADMIN_BASE_URL=http://127.0.0.2:8081 \
 PEAK_PLATFORM_JWT_ISSUER_URI="http://127.0.0.2:8081/realms/$KEYCLOAK_PLATFORM_REALM" \
 PEAK_SECURITY_JWT_ISSUER_URI="http://127.0.0.2:8081/realms/$KEYCLOAK_HOSPITALITY_REALM" \
   "$ROOT_DIR/ops/scripts/verify-keycloak-realms.sh" \

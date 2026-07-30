@@ -54,6 +54,21 @@ BEGIN
     ALTER ROLE pms_initial_admin_owner
       NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
   END IF;
+
+  -- Owner of the privileged-access consumption function. Roles are cluster
+  -- level, so a database dump references this owner without containing it. It
+  -- must exist before a restore, otherwise recovery fails on an unknown role.
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_roles
+    WHERE rolname = 'pms_privileged_access_owner'
+  ) THEN
+    CREATE ROLE pms_privileged_access_owner
+      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+  ELSE
+    ALTER ROLE pms_privileged_access_owner
+      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+  END IF;
 END;
 $$;
 

@@ -216,7 +216,7 @@
     {
       "clientId": "peak-realm-reconciler",
       "name": "Peak Realm Reconciler",
-      "description": "Least-privileged automation identity for realm reconciliation. Confidential client-credentials service account. Replaces the master-realm administrator password grant, which held full server administration for a task that only needs to manage clients and required actions in this realm.",
+      "description": "Least-privileged automation identity for realm reconciliation. Client-credentials service account scoped to this realm, replacing the master-realm administrator password grant.",
       "protocol": "openid-connect",
       "enabled": true,
       "publicClient": false,

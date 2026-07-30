@@ -1,5 +1,15 @@
 # Object storage required by close and reporting acceptance.
 services:
+  # Acceptance builds a brand-new Keycloak on every run, which is precisely the
+  # first-install case where a temporary bootstrap administrator is legitimate.
+  # Production compose omits these entirely; supplying them here keeps the test
+  # topology working without weakening the deployed posture, and exercises the
+  # same ceremony path operators use once.
+  keycloak:
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+
   minio:
     image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     command: server /data --console-address ":9001"

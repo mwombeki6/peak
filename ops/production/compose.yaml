@@ -43,13 +43,12 @@ services:
       - --http-max-queued-requests=${KEYCLOAK_HTTP_MAX_QUEUED_REQUESTS}
       - --shutdown-delay=${KEYCLOAK_SHUTDOWN_DELAY}
     environment:
-      # Bootstrap administrators are temporary by design. Keycloak creates one
-      # only when these are non-empty, so leaving them unset on ordinary starts
-      # means no permanent master-realm human admin is re-provisioned on every
-      # restart. Set them deliberately for first installation or for an offline
-      # recovery ceremony, then unset them and remove the account.
-      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_BOOTSTRAP_ADMIN:-}
-      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:-}
+      # Bootstrap administrator credentials are deliberately absent here.
+      # Keycloak treats an environment variable that is present but empty as
+      # set, and refuses to start when a bootstrap username has no password, so
+      # a placeholder cannot express "unset". Steady state therefore omits them
+      # entirely, and a first-install or recovery ceremony adds them by layering
+      # compose.bootstrap-admin.yaml. The account is removed afterwards.
       KC_DB: postgres
       KC_DB_URL_HOST: keycloak-db
       KC_DB_URL_DATABASE: ${KEYCLOAK_DB}
@@ -150,6 +149,12 @@ services:
       PEAK_PLATFORM_BOOTSTRAP_EMAIL: ${PEAK_PLATFORM_BOOTSTRAP_EMAIL}
       PEAK_PLATFORM_BOOTSTRAP_ISSUER: ${PEAK_PLATFORM_BOOTSTRAP_ISSUER}
       PEAK_PLATFORM_BOOTSTRAP_SUBJECT: ${PEAK_PLATFORM_BOOTSTRAP_SUBJECT}
+      # Production provisions two emergency administrator custodians in
+      # one transaction, so dual control holds from the first minute.
+      PEAK_PLATFORM_BOOTSTRAP_SECOND_FULL_NAME: ${PEAK_PLATFORM_BOOTSTRAP_SECOND_FULL_NAME}
+      PEAK_PLATFORM_BOOTSTRAP_SECOND_EMAIL: ${PEAK_PLATFORM_BOOTSTRAP_SECOND_EMAIL}
+      PEAK_PLATFORM_BOOTSTRAP_SECOND_ISSUER: ${PEAK_PLATFORM_BOOTSTRAP_SECOND_ISSUER}
+      PEAK_PLATFORM_BOOTSTRAP_SECOND_SUBJECT: ${PEAK_PLATFORM_BOOTSTRAP_SECOND_SUBJECT}
       PEAK_MIGRATION_DB_POOL_MAX_SIZE: ${PEAK_MIGRATION_DB_POOL_MAX_SIZE}
       PEAK_MIGRATION_DB_POOL_MIN_IDLE: ${PEAK_MIGRATION_DB_POOL_MIN_IDLE}
     depends_on:

@@ -248,6 +248,12 @@ root_password="${TENANT_PROPERTY_ROOT_PASSWORD:-$(random_password)}"
 tenant_password="${TENANT_PROPERTY_TENANT_PASSWORD:-$(random_password)}"
 other_password="${TENANT_PROPERTY_OTHER_PASSWORD:-$(random_password)}"
 root_subject="$(ensure_keycloak_user "$PLATFORM_REALM" "acceptance-platform-root" "acceptance.root@example.com" "$root_password")"
+# Production bootstrap provisions two distinct emergency administrator
+# custodians in one transaction, so dual control holds from the first minute.
+# The acceptance stack is a production-shaped first install and performs the
+# same ceremony rather than a development single-custodian shortcut.
+second_root_password="${TENANT_PROPERTY_SECOND_ROOT_PASSWORD:-$(random_password)}"
+second_root_subject="$(ensure_keycloak_user "$PLATFORM_REALM" "acceptance-platform-root-two" "acceptance.root.two@example.com" "$second_root_password")"
 tenant_subject="$(ensure_keycloak_user "$HOSPITALITY_REALM" "acceptance-tenant-admin" "acceptance.tenant@example.com" "$tenant_password")"
 other_subject="$(ensure_keycloak_user "$HOSPITALITY_REALM" "acceptance-other-admin" "acceptance.other@example.com" "$other_password")"
 
@@ -257,6 +263,10 @@ other_subject="$(ensure_keycloak_user "$HOSPITALITY_REALM" "acceptance-other-adm
   -e PEAK_PLATFORM_BOOTSTRAP_EMAIL="acceptance.root@example.com" \
   -e PEAK_PLATFORM_BOOTSTRAP_ISSUER="$PEAK_PLATFORM_JWT_ISSUER_URI" \
   -e PEAK_PLATFORM_BOOTSTRAP_SUBJECT="$root_subject" \
+  -e PEAK_PLATFORM_BOOTSTRAP_SECOND_FULL_NAME="Foundation Platform Root Two" \
+  -e PEAK_PLATFORM_BOOTSTRAP_SECOND_EMAIL="acceptance.root.two@example.com" \
+  -e PEAK_PLATFORM_BOOTSTRAP_SECOND_ISSUER="$PEAK_PLATFORM_JWT_ISSUER_URI" \
+  -e PEAK_PLATFORM_BOOTSTRAP_SECOND_SUBJECT="$second_root_subject" \
   peak-bootstrap
 
 if ! curl -fsS http://localhost:8090/health >/dev/null 2>&1; then

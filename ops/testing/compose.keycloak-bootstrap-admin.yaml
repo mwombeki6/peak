@@ -1,0 +1,12 @@
+# Supplies a temporary Keycloak bootstrap administrator for acceptance stacks.
+#
+# Production compose omits these variables entirely, because Keycloak treats a
+# present-but-empty variable as set and refuses to start when a username has no
+# password. Acceptance stacks, including the backup and restore drill, build a
+# fresh Keycloak on every run, which is the first-install case where a temporary
+# bootstrap administrator is legitimate.
+services:
+  keycloak:
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
