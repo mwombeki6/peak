@@ -146,7 +146,9 @@ than an absent one.
 - The reverse proxy that must block `/admin/**` and `/realms/master/**` on the
   public hostname is not configured in this repository, so nothing here proves
   that isolation. Environment validation asserts the configuration that makes
-  the block possible, not the block itself.
+  the block possible, not the block itself. A test that stood up a mock proxy
+  would prove the mock behaves, not the production ingress, which is the kind of
+  evidence this document exists to avoid claiming.
 
 ## 5. Fleet, release and feature control
 
