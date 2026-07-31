@@ -19,8 +19,12 @@
 | Privileged support | Tenant support access | Open ticket, exact permission, MFA, separate approver, bounded duration/uses, exact session selector and immutable evidence |
 | Commercial capacity | Properties, rooms, users, outlets | Database advisory lock plus effective plan/override entitlement assertion in the owning write transaction |
 | Configuration rollout | Portfolio and feature control | Immutable hashed revisions, deterministic precedence, canary/apply/rollback states and attributable approvals |
+| Definer name resolution | Every `SECURITY DEFINER` function | `SET search_path = pg_catalog, public, pg_temp`. Omitting `pg_temp` searches it first, letting a caller shadow the tables the body reads; a catalog assertion fails the build if any function omits it |
 
 Applied migrations `V1–V74` are immutable. `V75` adds evidence-backed tenant
 activation and secure initial-administrator bootstrap; `V74` added authenticated
 frontend session bootstrap route contracts. Later database remediation starts at
-`V76`; application-only boundary fixes do not create empty migrations.
+`V76`; application-only boundary fixes do not create empty migrations. `V76–V84`
+harden privileged access; `V85` closes the last tenant-bearing table without
+row-level security and indexes the entity trails; `V86` fixes definer name
+resolution.
