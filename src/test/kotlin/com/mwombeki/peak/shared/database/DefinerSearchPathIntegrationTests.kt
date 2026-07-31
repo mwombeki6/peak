@@ -133,4 +133,93 @@ class DefinerSearchPathIntegrationTests @Autowired constructor(
                 "caller can shadow the tables they read: ${unsafe.joinToString(", ")}",
         )
     }
+
+    /**
+     * A definer function executes with its owner's rights, and the migration
+     * role that owns most of them is SUPERUSER and BYPASSRLS. Naming pg_temp
+     * stopped a caller from choosing what those functions read, but it did not
+     * reduce what they are permitted to do once they read it.
+     *
+     * Fixing that means giving each one a dedicated NOBYPASSRLS owner and the
+     * narrow policies its body needs, which is per-function work rather than a
+     * sweep: [LEGACY_SUPERUSER_OWNED_DEFINERS] is the outstanding debt, not an
+     * approved design. The pattern to follow is pms_privileged_access_owner in
+     * V76 and its accommodation in V78.
+     *
+     * This asserts in both directions on purpose. A new definer function
+     * defaulting to the superuser owner fails, so the debt cannot grow. An
+     * entry that has since been rehomed also fails, so the list cannot rot into
+     * a record of problems that were fixed years ago.
+     */
+    @Test
+    fun `security definer ownership debt neither grows nor goes stale`() {
+        val superuserOwned = jdbcTemplate.queryForList(
+            """
+            SELECT function_name.proname
+            FROM pg_catalog.pg_proc AS function_name
+            JOIN pg_catalog.pg_namespace AS schema_name
+              ON schema_name.oid = function_name.pronamespace
+            JOIN pg_catalog.pg_roles AS owner_role
+              ON owner_role.oid = function_name.proowner
+            WHERE schema_name.nspname = 'public'
+              AND function_name.prosecdef
+              AND owner_role.rolsuper
+            ORDER BY function_name.proname
+            """.trimIndent(),
+            String::class.java,
+        ).toSet()
+
+        val newlyUnsafe = superuserOwned - LEGACY_SUPERUSER_OWNED_DEFINERS
+        assertTrue(
+            newlyUnsafe.isEmpty(),
+            "these SECURITY DEFINER functions run as a superuser that bypasses row-level " +
+                "security. Give them a dedicated NOBYPASSRLS owner rather than adding them " +
+                "to the legacy list: ${newlyUnsafe.joinToString(", ")}",
+        )
+
+        val alreadyRehomed = LEGACY_SUPERUSER_OWNED_DEFINERS - superuserOwned
+        assertTrue(
+            alreadyRehomed.isEmpty(),
+            "these no longer run as a superuser, so remove them from the legacy list " +
+                "to keep it an accurate record of what is left: " +
+                alreadyRehomed.joinToString(", "),
+        )
+    }
+
+    private companion object {
+        /** Outstanding debt, not an approved design. Shrink it; never extend it. */
+        val LEGACY_SUPERUSER_OWNED_DEFINERS = setOf(
+            "active_contract_mock_provider_counts",
+            "append_realtime_event",
+            "assert_tenant_capacity",
+            "assert_tenant_entitlement_enabled",
+            "can_access_public_module",
+            "can_platform_admin_access_tenant",
+            "can_support_session_access_tenant",
+            "claim_expired_report_artifacts",
+            "claim_outbox_events",
+            "complete_outbox_event",
+            "dead_letter_outbox_event",
+            "delete_expired_realtime_events",
+            "effective_tenant_entitlement",
+            "enqueue_report_delivery_outbox_event",
+            "fail_outbox_event",
+            "latest_realtime_event_sequence",
+            "maintain_idempotency_keys",
+            "mirror_property_outbox_to_realtime_journal",
+            "phase3_operational_metrics",
+            "platform_user_has_permission",
+            "platform_user_holds_permission",
+            "poll_realtime_events",
+            "production_provider_readiness_counts",
+            "provision_tenant_administrator",
+            "reclaim_stale_outbox_events",
+            "replay_realtime_events",
+            "resolve_oidc_identity_link",
+            "resolve_payment_webhook_scope",
+            "resolve_public_property_scope",
+            "sync_corporate_account_balance_from_ar",
+            "verify_tenant_business_profile",
+        )
+    }
 }
