@@ -19,11 +19,55 @@ This directory contains the Podman Compose deployment baseline for Peak.
 2. Create `ops/production/.env` from `.env.example` and replace every placeholder secret.
 3. Validate the env file: `ops/scripts/validate-production-env.sh ops/production/.env`.
 4. Start PostgreSQL and Keycloak: `podman compose --env-file ops/production/.env -f ops/production/compose.yaml up -d postgres keycloak-db keycloak`.
-5. Reconcile and verify both Keycloak realms: `set -a; . ops/production/.env; set +a; KEYCLOAK_BASE_URL=http://localhost:8081 python3 ops/scripts/reconcile-keycloak-realms.py && KEYCLOAK_BASE_URL=http://localhost:8081 ops/scripts/verify-keycloak-realms.sh`.
+5. Reconcile and verify both Keycloak realms. Override both URLs, not only the
+   public one: `set -a; . ops/production/.env; set +a; KEYCLOAK_BASE_URL=http://localhost:8081 KEYCLOAK_ADMIN_BASE_URL=http://localhost:8081 python3 ops/scripts/reconcile-keycloak-realms.py && KEYCLOAK_BASE_URL=http://localhost:8081 KEYCLOAK_ADMIN_BASE_URL=http://localhost:8081 ops/scripts/verify-keycloak-realms.sh`.
+   Administrative calls read `KEYCLOAK_ADMIN_BASE_URL`, which the env file points
+   at the public administrative hostname. Overriding only `KEYCLOAK_BASE_URL`
+   sends those calls back through the reverse proxy while the token comes from
+   the container port, which fails, or silently addresses a different Keycloak
+   than the one being reconciled.
+
+   On a first installation no service account exists yet to authenticate with,
+   so set `KEYCLOAK_ALLOW_BOOTSTRAP_ADMIN=true` for this step alone and start
+   Keycloak in step 4 with `-f ops/production/compose.bootstrap-admin.yaml`
+   layered in. Return it to `false` afterwards; production validation rejects it.
+
+   Reconciliation creates a `peak-realm-reconciler` client in each realm whose
+   secret Keycloak generates, because committing one to the realm templates
+   would publish it. Read each secret from the admin console under Clients,
+   `peak-realm-reconciler`, Credentials, and record it as
+   `KEYCLOAK_RECONCILER_SECRET` so later runs authenticate as the service
+   account rather than the bootstrap administrator. Each client also needs
+   `manage-clients`, `view-clients` and `manage-authentication` from that realm's
+   `realm-management` client, granted once per realm. Do not grant `realm-admin`.
 6. Bootstrap production login roles: `ops/scripts/bootstrap-db-roles.sh`.
 7. Start PostgreSQL and wait for its health check, then run Flyway through the migration profile: `podman compose --env-file ops/production/.env -f ops/production/compose.yaml --profile migration run --rm --no-deps peak-migration`. The `--no-deps` flag is required with Podman Compose so a one-shot migration does not reconcile or replace already-running services.
-8. On the first installation only, create the initial operator in Keycloak, set `PEAK_PLATFORM_BOOTSTRAP_ENABLED=true` plus the operator name, email, exact issuer, and Keycloak subject, then run `ops/scripts/bootstrap-platform.sh`. Immediately set the flag back to `false` and clear the four bootstrap identity values. The command refuses to create a different root after platform initialization.
-9. If every platform root has lost effective access, use the audited offline recovery procedure: configure the replacement Keycloak identity, set both `PEAK_PLATFORM_BOOTSTRAP_ENABLED=true` and `PEAK_PLATFORM_RECOVERY_ENABLED=true`, then run `ops/scripts/recover-platform-root.sh`. Recovery refuses to run if any effective root remains. Immediately disable both flags and clear the identity values after success.
+8. On the first installation only, create **two** emergency administrator
+   custodians in Keycloak. Production requires both: appointing or revoking a
+   root needs approval from two distinct custodians, so provisioning one would
+   leave a window in which a single account could appoint another root
+   unilaterally. They must have distinct emails and distinct Keycloak subjects.
+
+   Set `PEAK_PLATFORM_BOOTSTRAP_ENABLED=true` and all eight identity values —
+   `PEAK_PLATFORM_BOOTSTRAP_FULL_NAME`, `_EMAIL`, `_ISSUER`, `_SUBJECT` and
+   `PEAK_PLATFORM_BOOTSTRAP_SECOND_FULL_NAME`, `_SECOND_EMAIL`,
+   `_SECOND_ISSUER`, `_SECOND_SUBJECT` — then run
+   `ops/scripts/bootstrap-platform.sh`. Both custodians are created in one
+   transaction. Immediately set the flag back to `false` and clear all eight
+   values. The command refuses to create a different root after platform
+   initialization, and production readiness validation refuses to start the
+   bootstrap runtime unless the four `second-*` values are present.
+9. If every platform root has lost effective access, use the audited offline
+   recovery procedure. Configure **two** replacement Keycloak identities, not
+   one: recovery provisions custodians on the same terms as a first
+   installation, so restoring a single root would recreate the window dual
+   control exists to close. Set all eight identity values as in step 8, set both
+   `PEAK_PLATFORM_BOOTSTRAP_ENABLED=true` and
+   `PEAK_PLATFORM_RECOVERY_ENABLED=true`, then run
+   `ops/scripts/recover-platform-root.sh`. The script refuses to start if any of
+   the eight is missing, and recovery itself refuses to run if any effective root
+   remains. Immediately disable both flags and clear all eight values after
+   success.
 10. Start tenant API, isolated platform API, and worker: `podman compose --env-file ops/production/.env -f ops/production/compose.yaml up -d peak-api peak-platform peak-worker`.
 11. Configure a host reverse proxy to terminate TLS for the tenant API,
     platform API, `KEYCLOAK_HOSTNAME` and `KEYCLOAK_ADMIN_HOSTNAME`. Forward

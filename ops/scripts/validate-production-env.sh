@@ -337,19 +337,48 @@ if [ "$(value_of PEAK_PLATFORM_RECOVERY_ENABLED)" = "true" ] && \
 fi
 
 if [ "$(value_of PEAK_PLATFORM_BOOTSTRAP_ENABLED)" = "true" ]; then
+  # Both custodians, on every path that sets the flag. Production provisions two
+  # Platform Emergency Administrators so that no window exists in which a single
+  # account can appoint another root, and offline recovery restores them on the
+  # same terms rather than reinstating a lone root.
+  #
+  # Checked here because this runs before any container starts. The runtime
+  # validator also rejects a partial set, but only once the bootstrap process is
+  # up, and it reports a Spring property path rather than the variable an
+  # operator actually set.
   for name in \
     PEAK_PLATFORM_BOOTSTRAP_FULL_NAME \
     PEAK_PLATFORM_BOOTSTRAP_EMAIL \
     PEAK_PLATFORM_BOOTSTRAP_ISSUER \
-    PEAK_PLATFORM_BOOTSTRAP_SUBJECT
+    PEAK_PLATFORM_BOOTSTRAP_SUBJECT \
+    PEAK_PLATFORM_BOOTSTRAP_SECOND_FULL_NAME \
+    PEAK_PLATFORM_BOOTSTRAP_SECOND_EMAIL \
+    PEAK_PLATFORM_BOOTSTRAP_SECOND_ISSUER \
+    PEAK_PLATFORM_BOOTSTRAP_SECOND_SUBJECT
   do
     require_var "$name"
     reject_placeholder "$name"
   done
 
-  if [ "$(value_of PEAK_PLATFORM_BOOTSTRAP_ISSUER)" != "$(value_of PEAK_PLATFORM_JWT_ISSUER_URI)" ]; then
-    fail "PEAK_PLATFORM_BOOTSTRAP_ISSUER must equal PEAK_PLATFORM_JWT_ISSUER_URI"
+  # Two custodians who are the same person satisfy the letter of dual control
+  # and defeat it. The runtime rejects this too; catching it here means the
+  # ceremony is not started with an arrangement that cannot complete.
+  if [ "$(value_of PEAK_PLATFORM_BOOTSTRAP_EMAIL)" = \
+       "$(value_of PEAK_PLATFORM_BOOTSTRAP_SECOND_EMAIL)" ]; then
+    fail "PEAK_PLATFORM_BOOTSTRAP_EMAIL and PEAK_PLATFORM_BOOTSTRAP_SECOND_EMAIL must differ"
   fi
+  if [ "$(value_of PEAK_PLATFORM_BOOTSTRAP_ISSUER)" = \
+       "$(value_of PEAK_PLATFORM_BOOTSTRAP_SECOND_ISSUER)" ] && \
+     [ "$(value_of PEAK_PLATFORM_BOOTSTRAP_SUBJECT)" = \
+       "$(value_of PEAK_PLATFORM_BOOTSTRAP_SECOND_SUBJECT)" ]; then
+    fail "the two bootstrap custodians must have distinct identity subjects"
+  fi
+
+  for name in PEAK_PLATFORM_BOOTSTRAP_ISSUER PEAK_PLATFORM_BOOTSTRAP_SECOND_ISSUER; do
+    if [ "$(value_of "$name")" != "$(value_of PEAK_PLATFORM_JWT_ISSUER_URI)" ]; then
+      fail "$name must equal PEAK_PLATFORM_JWT_ISSUER_URI"
+    fi
+  done
 fi
 
 if [ "$(value_of PEAK_ALLOW_HEADER_IDENTITY)" != "false" ]; then
