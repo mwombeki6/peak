@@ -186,6 +186,51 @@ class DefinerSearchPathIntegrationTests @Autowired constructor(
         )
     }
 
+    /**
+     * PostgreSQL grants EXECUTE on a new function to PUBLIC unless told
+     * otherwise, so a definer function is callable by every role in the cluster
+     * by default. Every one here already revokes that and grants explicitly,
+     * which is the third property these functions depend on alongside their
+     * search_path and their owner.
+     *
+     * It costs nothing to keep, and the default is the failure mode: forgetting
+     * a REVOKE is silent, and the function still works for the roles that were
+     * supposed to have it.
+     */
+    @Test
+    fun `no security definer function is executable by PUBLIC`() {
+        val publiclyExecutable = jdbcTemplate.queryForList(
+            """
+            SELECT DISTINCT function_name.proname
+            FROM pg_catalog.pg_proc AS function_name
+            JOIN pg_catalog.pg_namespace AS schema_name
+              ON schema_name.oid = function_name.pronamespace
+            WHERE schema_name.nspname = 'public'
+              AND function_name.prosecdef
+              AND (
+                  -- A null ACL means the built-in default, which includes PUBLIC.
+                  function_name.proacl IS NULL
+                  -- Grantee zero is PUBLIC. Matching the ACL text instead would
+                  -- also match any named role holding EXECUTE.
+                  OR EXISTS (
+                      SELECT 1
+                      FROM aclexplode(function_name.proacl) AS entry
+                      WHERE entry.grantee = 0
+                  )
+              )
+            ORDER BY 1
+            """.trimIndent(),
+            String::class.java,
+        )
+
+        assertTrue(
+            publiclyExecutable.isEmpty(),
+            "these SECURITY DEFINER functions can be executed by any role. Revoke " +
+                "EXECUTE from PUBLIC and grant it to the roles that need it: " +
+                publiclyExecutable.joinToString(", "),
+        )
+    }
+
     private companion object {
         /** Outstanding debt, not an approved design. Shrink it; never extend it. */
         val LEGACY_SUPERUSER_OWNED_DEFINERS = setOf(
