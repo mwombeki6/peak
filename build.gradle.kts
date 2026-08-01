@@ -7,9 +7,9 @@ plugins {
 
     // 4.0.7 manages spring-framework 7.0.8, which fixes CVE-2026-41850: denial of
     // service through specially crafted SpEL expressions, rated HIGH and reachable
-    // through spring-expression and spring-webmvc under 7.0.7. Unrelated to
-    // anything else on this branch; the container scan reports it against any
-    // build still on 4.0.6.
+    // through spring-expression and spring-webmvc under 7.0.7. Unrelated to the
+    // tenant activation work on this branch; the container scan reports it against
+    // any build still on 4.0.6, master included.
     id("org.springframework.boot") version "4.0.7"
     id("io.spring.dependency-management") version "1.1.7"
 }
