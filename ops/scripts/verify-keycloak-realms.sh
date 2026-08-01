@@ -54,6 +54,20 @@ fi
 # authorises on one host makes it impossible to present a token minted by one
 # Keycloak to a different one, which is what happens when a caller pins only
 # KEYCLOAK_BASE_URL and KEYCLOAK_ADMIN_BASE_URL still points at another instance.
+# Checked before the token request so the failure names its own cause. A caller
+# that pins only KEYCLOAK_BASE_URL leaves this address wherever the environment
+# put it, which in a production environment file is the real administrative
+# hostname. Reaching that from a test harness fails as a connection reset, which
+# says nothing about which variable is wrong.
+if ! curl -fsS -o /dev/null \
+    "$ADMIN_BASE_URL/realms/master/.well-known/openid-configuration" 2>/dev/null; then
+  echo "Keycloak administrative host is unreachable: $ADMIN_BASE_URL" >&2
+  echo "Administrative calls read KEYCLOAK_ADMIN_BASE_URL, which falls back to" >&2
+  echo "KEYCLOAK_BASE_URL ($BASE_URL) only when it is unset. Pin both when" >&2
+  echo "targeting a specific instance." >&2
+  exit 1
+fi
+
 TOKEN_RESPONSE="$(curl -fsS \
   -X POST "$ADMIN_BASE_URL/realms/master/protocol/openid-connect/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
