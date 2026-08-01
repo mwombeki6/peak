@@ -129,7 +129,10 @@ python3 "$ROOT_DIR/ops/scripts/legacy-keycloak-realm-migration.py" build \
 echo "Starting Keycloak, reconciling target realms, and importing preserved identities"
 compose up -d --no-deps keycloak
 attempt=1
-until curl -fsS "$KEYCLOAK_BASE_URL/realms/master/.well-known/openid-configuration" >/dev/null 2>&1; do
+# The master realm answers on the administrative host, not the public one,
+# which is expected to block /realms/master/**. Probing the public host would
+# never observe readiness in a correctly configured production.
+until curl -fsS "$KEYCLOAK_ADMIN_BASE_URL/realms/master/.well-known/openid-configuration" >/dev/null 2>&1; do
   if [ "$attempt" -ge 90 ]; then
     echo "Keycloak did not become ready after the offline export" >&2
     exit 1

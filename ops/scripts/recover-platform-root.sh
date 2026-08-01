@@ -21,7 +21,12 @@ if [ "${PEAK_PLATFORM_RECOVERY_ENABLED:-false}" != "true" ]; then
   exit 1
 fi
 
+# Recovery provisions two custodians, exactly as a first installation does, so
+# restoring a single root cannot recreate the window dual control exists to
+# close. validate-production-env.sh above already requires all eight identity
+# values and rejects two custodians who are the same person, which is why that
+# is not repeated here.
 podman compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --profile bootstrap \
   run --rm --no-deps peak-bootstrap
 
-echo "Platform root recovery completed. Disable both flags and clear the four identity values."
+echo "Platform root recovery completed. Disable both flags and clear all eight identity values."

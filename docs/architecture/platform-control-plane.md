@@ -143,6 +143,16 @@ than an absent one.
   grant is not expressed in the realm templates because those drive a partial
   client reconciliation rather than a full realm import, so a role assignment
   written there would be silently ignored rather than applied.
+- Most `SECURITY DEFINER` functions are still owned by the migration role, which
+  is `SUPERUSER` and `BYPASSRLS`, so they execute with more authority than their
+  bodies need. A caller can no longer influence what they read, since `V86` names
+  `pg_temp` last in every definer's `search_path` and a test fails for any that
+  omits it. What remains is blast radius rather than a reachable defect. Removing
+  it means a dedicated `NOBYPASSRLS` owner and narrow accommodation policies per
+  function, following `pms_privileged_access_owner`, which is per-function work
+  and not yet done. The outstanding set is listed in
+  `DefinerSearchPathIntegrationTests`, which fails both when a new function joins
+  it and when a rehomed one is left behind, so the list stays accurate.
 - The reverse proxy that must block `/admin/**` and `/realms/master/**` on the
   public hostname is not configured in this repository, so nothing here proves
   that isolation. Environment validation asserts the configuration that makes

@@ -44,10 +44,19 @@ done
 set -a
 . "$ENV_FILE"
 set +a
-export KEYCLOAK_BASE_URL
+# Resolved after the environment file is read, not alongside KEYCLOAK_BASE_URL
+# at the top. The file may set either or both, and defaulting before it is
+# sourced would pin the administrative host to the built-in localhost default
+# even when the file points the public host somewhere else.
+KEYCLOAK_ADMIN_BASE_URL="${KEYCLOAK_ADMIN_BASE_URL:-$KEYCLOAK_BASE_URL}"
+export KEYCLOAK_BASE_URL KEYCLOAK_ADMIN_BASE_URL
 
+# Everything on the administrative plane goes to the administrative host. The
+# public hostname is expected to block /admin/** and /realms/master/**, so a
+# token fetched there would be unobtainable in a correctly configured
+# production, and the two admin calls below would be refused.
 ADMIN_TOKEN="$(
-  curl -fsS -X POST "$KEYCLOAK_BASE_URL/realms/master/protocol/openid-connect/token" \
+  curl -fsS -X POST "$KEYCLOAK_ADMIN_BASE_URL/realms/master/protocol/openid-connect/token" \
     -H "Content-Type: application/x-www-form-urlencoded" \
     --data-urlencode "client_id=admin-cli" \
     --data-urlencode "grant_type=password" \
@@ -59,14 +68,14 @@ TEMP_FILE="$(mktemp)"
 legacy_status="$(
   curl -sS -o "$TEMP_FILE" -w '%{http_code}' \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    "$KEYCLOAK_BASE_URL/admin/realms/peak/users/count"
+    "$KEYCLOAK_ADMIN_BASE_URL/admin/realms/peak/users/count"
 )"
 if [ "$legacy_status" = "200" ]; then
   legacy_users="$(jq -er '.' "$TEMP_FILE")"
   realm_status="$(
     curl -sS -o "$TEMP_FILE" -w '%{http_code}' \
       -H "Authorization: Bearer $ADMIN_TOKEN" \
-      "$KEYCLOAK_BASE_URL/admin/realms/peak"
+      "$KEYCLOAK_ADMIN_BASE_URL/admin/realms/peak"
   )"
   if [ "$realm_status" != "200" ]; then
     echo "Could not inspect legacy realm peak" >&2
