@@ -238,7 +238,13 @@ ADMIN_TOKEN="$(
     jq -r '.access_token'
 )"
 
+# Both URLs are pinned to the harness Keycloak, which serves the public and
+# administrative planes on one port. The environment file supplies a real
+# administrative hostname for production, so overriding only the public URL
+# would send the verifier's master token request to that hostname instead of to
+# the container under test.
 KEYCLOAK_BASE_URL="$KEYCLOAK_URL" \
+KEYCLOAK_ADMIN_BASE_URL="$KEYCLOAK_URL" \
   "$ROOT_DIR/ops/scripts/verify-keycloak-realms.sh"
 
 ensure_acceptance_client "$PLATFORM_REALM"
