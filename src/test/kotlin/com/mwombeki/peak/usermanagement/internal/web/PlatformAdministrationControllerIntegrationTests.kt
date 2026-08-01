@@ -21,6 +21,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.context.annotation.Import
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt as mockJwt
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
@@ -856,6 +857,199 @@ class PlatformAdministrationControllerIntegrationTests {
             tenantId,
         )
         check(verificationStatus == "verified")
+    }
+
+    @Test
+    fun invitesAndAcceptsInitialTenantAdministratorWithoutDatabaseBootstrap() {
+        val actorId = insertPlatformActorWithPermissions(
+            "platform.security.manage",
+            "platform.tenants.manage",
+        )
+        val tenantId = insertTenantForProvisioning()
+        val email = "invited-admin-$tenantId@example.com"
+
+        val invitationResult = mockMvc.perform(
+            post("/api/v1/platform/tenants/$tenantId/administrator-invitations")
+                .platform(
+                    actorId,
+                    "corr-initial-admin-invite",
+                    "idem-initial-admin-invite",
+                )
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "fullName": "Invited Tenant Administrator",
+                      "email": "$email",
+                      "expiresInHours": 24
+                    }
+                    """.trimIndent(),
+                ),
+        )
+            .andExpect(status().isCreated)
+            .andExpect(jsonPath("$.tenantId").value(tenantId.toString()))
+            .andExpect(jsonPath("$.invitationToken").isString)
+            .andReturn()
+
+        val invitationToken = JsonPath.read<String>(
+            invitationResult.response.contentAsString,
+            "$.invitationToken",
+        )
+        val tenantRoleId = UUID.fromString(
+            JsonPath.read(invitationResult.response.contentAsString, "$.tenantRoleId"),
+        )
+
+        mockMvc.perform(
+            post("/api/v1/invitations/accept")
+                .with(
+                    mockJwt().jwt { jwt ->
+                        jwt
+                            .issuer("https://keycloak.example.com/realms/hospitality")
+                            .subject("invited-admin-${UUID.randomUUID()}")
+                            .claim("email", email)
+                            .claim("email_verified", true)
+                    },
+                )
+                .header(PeakRequestHeaders.CORRELATION_ID, "corr-initial-admin-accept")
+                .header(PeakRequestHeaders.IDEMPOTENCY_KEY, "idem-initial-admin-accept")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"invitationToken":"$invitationToken"}"""),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.tenantId").value(tenantId.toString()))
+            .andExpect(jsonPath("$.tenantRoleId").value(tenantRoleId.toString()))
+
+        val administratorCount = jdbcTemplate.queryForObject(
+            """
+            SELECT count(*)
+            FROM users tenant_user
+            JOIN user_tenant_roles assignment
+              ON assignment.tenant_id = tenant_user.tenant_id
+             AND assignment.user_id = tenant_user.id
+            JOIN tenant_roles role
+              ON role.tenant_id = assignment.tenant_id
+             AND role.id = assignment.tenant_role_id
+            JOIN identity_links identity
+              ON identity.tenant_id = tenant_user.tenant_id
+             AND identity.user_id = tenant_user.id
+             AND identity.revoked_at IS NULL
+            WHERE tenant_user.tenant_id = ?
+              AND tenant_user.status = 'active'
+              AND tenant_user.is_active = true
+              AND role.code = 'tenant_admin'
+              AND role.is_system = true
+              AND role.is_active = true
+            """.trimIndent(),
+            Int::class.java,
+            tenantId,
+        )
+        check(administratorCount == 1)
+    }
+
+    @Test
+    fun serializesCompetingInitialTenantAdministratorAcceptances() {
+        val actorId = insertPlatformActorWithPermissions(
+            "platform.security.manage",
+            "platform.tenants.manage",
+        )
+        val tenantId = insertTenantForProvisioning()
+        val invitations = (1..2).map { index ->
+            val email = "competing-admin-$index-$tenantId@example.com"
+            val response = mockMvc.perform(
+                post("/api/v1/platform/tenants/$tenantId/administrator-invitations")
+                    .platform(
+                        actorId,
+                        "corr-competing-admin-invite-$index",
+                        "idem-competing-admin-invite-$index",
+                    )
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        """
+                        {
+                          "fullName": "Competing Administrator $index",
+                          "email": "$email",
+                          "expiresInHours": 24
+                        }
+                        """.trimIndent(),
+                    ),
+            )
+                .andExpect(status().isCreated)
+                .andReturn()
+            email to JsonPath.read<String>(
+                response.response.contentAsString,
+                "$.invitationToken",
+            )
+        }
+
+        val ready = CountDownLatch(invitations.size)
+        val start = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(invitations.size)
+        try {
+            val results = invitations.mapIndexed { index, (email, token) ->
+                executor.submit<Int> {
+                    ready.countDown()
+                    check(start.await(10, TimeUnit.SECONDS))
+                    mockMvc.perform(
+                        post("/api/v1/invitations/accept")
+                            .with(
+                                mockJwt().jwt { jwt ->
+                                    jwt
+                                        .issuer("https://keycloak.example.com/realms/hospitality")
+                                        .subject("competing-admin-${index + 1}-${UUID.randomUUID()}")
+                                        .claim("email", email)
+                                        .claim("email_verified", true)
+                                },
+                            )
+                            .header(
+                                PeakRequestHeaders.CORRELATION_ID,
+                                "corr-competing-admin-accept-${index + 1}",
+                            )
+                            .header(
+                                PeakRequestHeaders.IDEMPOTENCY_KEY,
+                                "idem-competing-admin-accept-${index + 1}",
+                            )
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""{"invitationToken":"$token"}"""),
+                    ).andReturn().response.status
+                }
+            }
+            check(ready.await(10, TimeUnit.SECONDS))
+            start.countDown()
+
+            assertEquals(
+                listOf(200, 400),
+                results.map { it.get(20, TimeUnit.SECONDS) }.sorted(),
+            )
+        } finally {
+            start.countDown()
+            executor.shutdownNow()
+        }
+
+        val effectiveAdministrators = jdbcTemplate.queryForObject(
+            """
+            SELECT count(*)
+            FROM users tenant_user
+            JOIN user_tenant_roles assignment
+              ON assignment.tenant_id = tenant_user.tenant_id
+             AND assignment.user_id = tenant_user.id
+            JOIN tenant_roles role
+              ON role.tenant_id = assignment.tenant_id
+             AND role.id = assignment.tenant_role_id
+            JOIN identity_links identity
+              ON identity.tenant_id = tenant_user.tenant_id
+             AND identity.user_id = tenant_user.id
+             AND identity.revoked_at IS NULL
+            WHERE tenant_user.tenant_id = ?
+              AND tenant_user.status = 'active'
+              AND tenant_user.is_active = true
+              AND role.code = 'tenant_admin'
+              AND role.is_system = true
+              AND role.is_active = true
+            """.trimIndent(),
+            Int::class.java,
+            tenantId,
+        )
+        assertEquals(1, effectiveAdministrators)
     }
 
     @Test

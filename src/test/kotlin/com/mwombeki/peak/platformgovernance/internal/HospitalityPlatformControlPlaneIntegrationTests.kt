@@ -43,6 +43,8 @@ import com.mwombeki.peak.tenantmanagement.api.ProcessPrivacyRequestCommand
 import com.mwombeki.peak.tenantmanagement.api.ReviewIdentityConnectionCommand
 import com.mwombeki.peak.tenantmanagement.api.ReviewVerificationCaseCommand
 import com.mwombeki.peak.tenantmanagement.api.TenantTrustControlPort
+import com.mwombeki.peak.tenantmanagement.api.TenantControlAction
+import com.mwombeki.peak.tenantmanagement.api.TenantControlTransitionCommand
 import com.mwombeki.peak.tenantmanagement.api.UpsertIdentityConnectionCommand
 import com.mwombeki.peak.tenantmanagement.api.VerificationReviewAction
 import com.mwombeki.peak.usermanagement.api.BreakGlassAccessPort
@@ -53,6 +55,7 @@ import java.util.UUID
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import org.springframework.beans.factory.annotation.Autowired
@@ -259,6 +262,46 @@ class HospitalityPlatformControlPlaneIntegrationTests {
         assertEquals("02:00", effective?.config?.get("nightAuditDeadline"))
     }
 
+    @Test
+    fun projectsActivationBlockersAndCompletesTheEvidenceBackedOnboardingWorkflow() {
+        val root = UUID.randomUUID()
+        val approver = UUID.randomUUID()
+        val fixture = insertFixture(root, approver)
+
+        platform(root)
+        val blocked = tenantControl.tenantOverview(fixture.tenantId)
+        assertFalse(blocked.activation.ready)
+        assertEquals("missing", blocked.activation.administratorStatus)
+        assertTrue("business_verified" in blocked.activation.blockerCodes)
+        assertTrue("administrator_ready" in blocked.activation.blockerCodes)
+
+        insertActivationEvidence(fixture, root)
+
+        platform(root)
+        val ready = tenantControl.tenantOverview(fixture.tenantId)
+        assertTrue(ready.activation.ready)
+        assertEquals("ready", ready.activation.administratorStatus)
+        assertEquals(5, ready.onboardingWorkflow?.completedSteps)
+        assertEquals("activate", ready.onboardingWorkflow?.currentStep)
+
+        platform(root)
+        val activation = tenantControl.transitionLifecycle(
+            TenantControlTransitionCommand(
+                tenantId = fixture.tenantId,
+                action = TenantControlAction.ACTIVATE,
+                reason = "All Acquire readiness evidence is complete",
+                expectedVersion = ready.tenant.version,
+            ),
+        )
+        assertEquals("active", activation.lifecycleStatus)
+
+        platform(root)
+        val activated = tenantControl.tenantOverview(fixture.tenantId)
+        assertTrue(activated.activation.ready)
+        assertEquals("succeeded", activated.onboardingWorkflow?.status)
+        assertEquals(6, activated.onboardingWorkflow?.completedSteps)
+    }
+
     private fun insertFixture(root: UUID, approver: UUID): Fixture {
         insertPlatformOperator(root, "root", mfa = true)
         insertPlatformOperator(approver, "approver", mfa = true)
@@ -308,18 +351,43 @@ class HospitalityPlatformControlPlaneIntegrationTests {
         jdbc.update(
             """
             INSERT INTO tenant_workflows (
-                id, tenant_id, workflow_type, status, total_steps, completed_steps,
+                id, tenant_id, workflow_type, status, current_step,
+                total_steps, completed_steps,
                 requested_by_platform_user_id
-            ) VALUES (?, ?, 'onboarding', 'running', 1, 0, ?)
+            ) VALUES (
+                ?, ?, 'onboarding', 'running', 'register_tenant', 6, 1, ?
+            )
             """.trimIndent(), workflowId, tenantId, root,
         )
-        jdbc.update(
-            """
-            INSERT INTO tenant_workflow_steps (
-                tenant_id, workflow_id, step_key, sequence, status
-            ) VALUES (?, ?, 'verify_business', 1, 'pending')
-            """.trimIndent(), tenantId, workflowId,
-        )
+        listOf(
+            "register_tenant" to "succeeded",
+            "verify_business" to "pending",
+            "provision_administrator" to "pending",
+            "configure_entitlements" to "pending",
+            "verify_readiness" to "pending",
+            "activate" to "pending",
+        ).forEachIndexed { index, (stepKey, status) ->
+            jdbc.update(
+                """
+                INSERT INTO tenant_workflow_steps (
+                    tenant_id, workflow_id, step_key, sequence, status,
+                    attempt_count, started_at, completed_at
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?,
+                    CASE WHEN ? = 'succeeded' THEN now() ELSE NULL END,
+                    CASE WHEN ? = 'succeeded' THEN now() ELSE NULL END
+                )
+                """.trimIndent(),
+                tenantId,
+                workflowId,
+                stepKey,
+                index + 1,
+                status,
+                if (status == "succeeded") 1 else 0,
+                status,
+                status,
+            )
+        }
         jdbc.update(
             "INSERT INTO properties (id, tenant_id, name, code) VALUES (?, ?, 'Control Property', 'CTRL')",
             propertyId, tenantId,
@@ -365,6 +433,125 @@ class HospitalityPlatformControlPlaneIntegrationTests {
             tenantUserId, tenantId, tenantRoleId,
         )
         return Fixture(tenantId, tenantUserId, propertyId)
+    }
+
+    private fun insertActivationEvidence(fixture: Fixture, verifierId: UUID) {
+        val contactId = UUID.randomUUID()
+        val channelId = UUID.randomUUID()
+        val reportSubscriptionId = UUID.randomUUID()
+        jdbc.update(
+            """
+            UPDATE tenant_profiles
+            SET verification_status = 'verified',
+                verified_at = now(),
+                verified_by_platform_user_id = ?
+            WHERE tenant_id = ?
+            """.trimIndent(),
+            verifierId,
+            fixture.tenantId,
+        )
+        jdbc.update(
+            """
+            INSERT INTO identity_links (
+                identity_mode, provider, issuer, subject,
+                tenant_id, user_id, email, linked_by_user_id
+            ) VALUES (
+                'tenant', 'oidc', 'https://identity.example/realms/hospitality',
+                ?, ?, ?, ?, ?
+            )
+            """.trimIndent(),
+            "control-admin-${fixture.tenantUserId}",
+            fixture.tenantId,
+            fixture.tenantUserId,
+            "admin-${fixture.tenantId}@example.com",
+            fixture.tenantUserId,
+        )
+        jdbc.update(
+            """
+            INSERT INTO tenant_modules (
+                tenant_id, module_id, is_enabled, is_configured,
+                source, configured_at
+            ) VALUES (?, 'tenant_admin', true, true, 'system', now())
+            ON CONFLICT (tenant_id, module_id)
+            DO UPDATE SET is_enabled = true, is_configured = true
+            """.trimIndent(),
+            fixture.tenantId,
+        )
+        jdbc.update(
+            """
+            INSERT INTO tenant_contacts (
+                id, tenant_id, full_name, job_title, status, is_primary_contact
+            ) VALUES (
+                ?, ?, 'Control Managing Director',
+                'Managing Director', 'active', true
+            )
+            """.trimIndent(),
+            contactId,
+            fixture.tenantId,
+        )
+        jdbc.update(
+            """
+            INSERT INTO tenant_contact_roles (
+                tenant_id, contact_id, role_code, is_primary_for_role, created_by
+            ) VALUES (?, ?, 'owner_managing_director', true, ?)
+            """.trimIndent(),
+            fixture.tenantId,
+            contactId,
+            fixture.tenantUserId,
+        )
+        jdbc.update(
+            """
+            INSERT INTO contact_channels (
+                id, tenant_id, contact_id, channel_type, address,
+                normalized_address, is_primary, verification_status
+            ) VALUES (?, ?, ?, 'email', ?, ?, true, 'verified')
+            """.trimIndent(),
+            channelId,
+            fixture.tenantId,
+            contactId,
+            "reports-${fixture.tenantId}@example.com",
+            "reports-${fixture.tenantId}@example.com",
+        )
+        jdbc.update(
+            """
+            INSERT INTO communication_consents (
+                tenant_id, contact_id, contact_channel_id, purpose,
+                status, policy_version, capture_source, captured_by
+            ) VALUES (
+                ?, ?, ?, 'operational_reports', 'active', 'v1', 'api', ?
+            )
+            """.trimIndent(),
+            fixture.tenantId,
+            contactId,
+            channelId,
+            fixture.tenantUserId,
+        )
+        jdbc.update(
+            """
+            INSERT INTO report_subscriptions (
+                id, tenant_id, report_code, subscription_name,
+                scope, frequency, created_by
+            ) VALUES (
+                ?, ?, 'monthly_executive_summary',
+                'Acquire readiness', 'tenant', 'monthly', ?
+            )
+            """.trimIndent(),
+            reportSubscriptionId,
+            fixture.tenantId,
+            fixture.tenantUserId,
+        )
+        jdbc.update(
+            """
+            INSERT INTO report_subscription_recipients (
+                tenant_id, subscription_id, contact_id,
+                contact_channel_id, delivery_format, is_enabled
+            ) VALUES (?, ?, ?, ?, 'pdf', true)
+            """.trimIndent(),
+            fixture.tenantId,
+            reportSubscriptionId,
+            contactId,
+            channelId,
+        )
     }
 
     private fun insertPlatformOperator(id: UUID, label: String, mfa: Boolean) {

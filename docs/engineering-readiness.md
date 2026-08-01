@@ -1,10 +1,11 @@
 # Engineering Readiness Record
 
 This record consolidates the six independently releasable hardening slices for
-the existing V1 backend. Applied migrations `V1–V73` remain immutable. The
-additive `V74` migration introduces authenticated frontend session contracts;
-`V71`–`V73` introduced the hospitality control plane, tenant-continuity lock and
-audit IP-address alignment.
+the existing V1 backend. Applied migrations `V1–V74` remain immutable. The
+additive `V75` migration introduces evidence-backed tenant activation and secure
+initial-administrator bootstrap; `V74` introduced authenticated frontend session
+contracts, while `V71`–`V73` introduced the hospitality control plane,
+tenant-continuity lock and audit IP-address alignment.
 
 ## Slice closure
 
@@ -12,7 +13,7 @@ audit IP-address alignment.
 |---|---|---|
 | Architecture and boundaries | Canonical 22-module inventory, 230-table ownership catalog, SQL mutation ownership enforcement, named tenant lifecycle/module mutation and property staff-directory ports, audit bootstrap port, generated Modulith canvases | `ModulithArchitectureTests`, `ModulithDocumentationTests`, `DatabaseOwnershipArchitectureTests` |
 | Real-hotel acceptance | Product-named tenant/property, stay/finance, department operations, API-security/DAST, concurrent financial writes, mixed-load, and close/reporting runners; separate department identities; API/worker-only business transitions; deliberate failure paths; Daily Control Brief; signed simulators; deterministic evidence | `run-real-hotel-acceptance.sh` |
-| Data integrity and migrations | Immutable `V1–V73`, additive V74, clean/current validation, populated V49/V53/V67 paths, PostgreSQL 16/18 CI matrix, isolated runtime roles, RLS, quota locking, financial-concurrency, generated economic invariants, 64-way numbering, and 125,000-row plan gates | migration/database CI matrix and integration tests |
+| Data integrity and migrations | Immutable `V1–V74`, additive V75, clean/current validation, populated V49/V53/V67 paths, PostgreSQL 16/18 CI matrix, isolated runtime roles, RLS, quota locking, financial-concurrency, generated economic invariants, 64-way numbering, and 125,000-row plan gates | migration/database CI matrix and integration tests |
 | Operational readiness | Separate migration/tenant-API/platform-API/worker/bootstrap topology, pinned production images, domain dashboards/alerts, fail-fast populated PostgreSQL/Keycloak restore, worker/identity/API/storage/database recovery injection, recovery/degradation/rotation procedures, and weekly/manual soak | operations CI job, resilience-soak workflow, and `run-backup-restore-drill.sh` |
 | API and contracts | Checked-in OpenAPI V1 baseline, additive compatibility test, authenticated session bootstrap, runtime route isolation, effective bearer/webhook security assertions, linting, isolated platform and hospitality TypeScript clients, RFC 9457 problem correlation and redaction | architecture/contract CI job |
 | Release and supply chain | Parallel required CI jobs, Node 24-compatible actions, direct Podman GHCR login, Trivy filesystem/JAR/OS/config/secret gates, SBOM, provenance attestation, digest equality checks, semantic `v1.x.y` releases | required release gate and container release workflow |

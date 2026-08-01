@@ -17,6 +17,7 @@ import com.mwombeki.peak.tenantmanagement.api.PlatformControlConflictException
 import com.mwombeki.peak.tenantmanagement.api.PlatformControlInProgressException
 import com.mwombeki.peak.tenantmanagement.api.PlatformControlNotFoundException
 import com.mwombeki.peak.tenantmanagement.api.PlatformTenantControlPort
+import com.mwombeki.peak.tenantmanagement.api.PlatformTenantActivationPort
 import com.mwombeki.peak.tenantmanagement.api.TenantCatalogItem
 import com.mwombeki.peak.tenantmanagement.api.TenantCatalogPage
 import com.mwombeki.peak.tenantmanagement.api.TenantCatalogQuery
@@ -50,6 +51,7 @@ class PlatformTenantControlService(
     private val outboxPort: OutboxPort,
     private val requestContextHolder: RequestContextHolder,
     private val objectMapper: ObjectMapper,
+    private val activationPort: PlatformTenantActivationPort,
 ) : PlatformTenantControlPort {
 
     override fun listTenants(query: TenantCatalogQuery): TenantCatalogPage {
@@ -113,6 +115,7 @@ class PlatformTenantControlService(
         return requireNotNull(
             transactionTemplate.execute {
                 requirePlatformAccess(tenantId, VIEW, "platform.tenants.control.overview")
+                val activation = activationPort.readiness(tenantId)
                 val tenant = jdbcTemplate.query(
                     "$CATALOG_SELECT WHERE tenant.id = ? AND tenant.deleted_at IS NULL",
                     ::mapCatalogItem,
@@ -152,6 +155,7 @@ class PlatformTenantControlService(
                     """.trimIndent(),
                     tenantId,
                 )
+                val onboardingWorkflow = latestOnboardingWorkflow(tenantId)
 
                 TenantControlOverview(
                     tenant = tenant,
@@ -166,6 +170,8 @@ class PlatformTenantControlService(
                     unresolvedAlerts = (counts["unresolved_alerts"] as Number).toInt(),
                     configurationDrift = configuration["desired_configuration_version"] !=
                         configuration["actual_configuration_version"],
+                    activation = activation,
+                    onboardingWorkflow = onboardingWorkflow,
                 )
             },
         )
@@ -194,6 +200,24 @@ class PlatformTenantControlService(
                 }
             },
         )
+    }
+
+    private fun latestOnboardingWorkflow(tenantId: UUID): TenantWorkflowSummary? {
+        return jdbcTemplate.query(
+            """
+            SELECT id, workflow_type, status, current_step, completed_steps,
+                   total_steps, reason, error_code, created_at, updated_at
+            FROM tenant_workflows
+            WHERE tenant_id = ?
+              AND workflow_type = 'onboarding'
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """.trimIndent(),
+            { resultSet, _ -> workflowWithoutSteps(resultSet) },
+            tenantId,
+        ).singleOrNull()?.let { workflow ->
+            workflow.copy(steps = workflowSteps(tenantId, workflow.workflowId))
+        }
     }
 
     override fun auditTimeline(tenantId: UUID, limit: Int): List<PlatformAuditTimelineEntry> {
@@ -257,6 +281,9 @@ class PlatformTenantControlService(
 
             val workflowId = createLifecycleWorkflow(command, target)
             val after = lockedState(command.tenantId)
+            if (command.action == TenantControlAction.ACTIVATE) {
+                activationPort.readiness(command.tenantId)
+            }
             recordSideEffects(
                 action = "platform.tenants.lifecycle.${command.action.name.lowercase()}",
                 tenantId = command.tenantId,
@@ -381,6 +408,20 @@ class PlatformTenantControlService(
                 "Tenant cannot perform ${command.action.name.lowercase()} from ${state.lifecycleStatus}",
             )
         }
+        if (command.action == TenantControlAction.ACTIVATE) {
+            jdbcTemplate.queryForObject(
+                """
+                SELECT id
+                FROM tenants
+                WHERE id = ?
+                  AND deleted_at IS NULL
+                FOR UPDATE
+                """.trimIndent(),
+                UUID::class.java,
+                command.tenantId,
+            ) ?: throw PlatformControlNotFoundException("Tenant was not found")
+            activationPort.requireReady(command.tenantId)
+        }
 
         if (command.action in setOf(TenantControlAction.ARCHIVE, TenantControlAction.COMPLETE_OFFBOARDING)) {
             val inHouse = jdbcTemplate.queryForObject(
@@ -474,13 +515,33 @@ class PlatformTenantControlService(
         command: TenantControlTransitionCommand,
         target: ControlState,
     ): UUID {
+        if (command.action == TenantControlAction.ACTIVATE) {
+            return jdbcTemplate.query(
+                """
+                SELECT id
+                FROM tenant_workflows
+                WHERE tenant_id = ?
+                  AND workflow_type = 'onboarding'
+                ORDER BY created_at DESC
+                LIMIT 1
+                """.trimIndent(),
+                { resultSet, _ -> resultSet.getObject("id", UUID::class.java) },
+                command.tenantId,
+            ).singleOrNull() ?: createCompletedWorkflow(
+                tenantId = command.tenantId,
+                workflowType = "onboarding",
+                reason = command.reason,
+                stepKeys = listOf("validate_readiness", "activate"),
+            )
+        }
         val type = when (command.action) {
             TenantControlAction.START_OFFBOARDING,
             TenantControlAction.COMPLETE_OFFBOARDING,
             TenantControlAction.CANCEL_OFFBOARDING -> "offboarding"
             TenantControlAction.ARCHIVE -> "archive"
             TenantControlAction.RESTORE -> "restore"
-            TenantControlAction.REACTIVATE, TenantControlAction.ACTIVATE -> "reactivation"
+            TenantControlAction.REACTIVATE -> "reactivation"
+            TenantControlAction.ACTIVATE -> error("Initial activation workflow is handled above")
             TenantControlAction.FREEZE, TenantControlAction.SUSPEND, TenantControlAction.RESTRICT -> "freeze"
         }
         if (command.action == TenantControlAction.START_OFFBOARDING) {

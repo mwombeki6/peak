@@ -12,6 +12,9 @@ import com.mwombeki.peak.tenantmanagement.api.PlatformControlConflictException
 import com.mwombeki.peak.tenantmanagement.api.PlatformControlInProgressException
 import com.mwombeki.peak.tenantmanagement.api.PlatformControlNotFoundException
 import com.mwombeki.peak.tenantmanagement.api.PlatformTenantControlPort
+import com.mwombeki.peak.tenantmanagement.api.PlatformTenantActivationPort
+import com.mwombeki.peak.tenantmanagement.api.TenantActivationReadiness
+import com.mwombeki.peak.tenantmanagement.api.TenantActivationNotReadyException
 import com.mwombeki.peak.tenantmanagement.api.ReplacePlanEntitlementsCommand
 import com.mwombeki.peak.tenantmanagement.api.TenantCatalogPage
 import com.mwombeki.peak.tenantmanagement.api.TenantCatalogQuery
@@ -55,6 +58,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice
 @RequestMapping("/api/v1/platform/tenants")
 class PlatformTenantControlController(
     private val controlPort: PlatformTenantControlPort,
+    private val activationPort: PlatformTenantActivationPort,
 ) {
     @GetMapping
     fun listTenants(
@@ -75,6 +79,11 @@ class PlatformTenantControlController(
     @GetMapping("/{tenantId}/control")
     fun overview(@PathVariable tenantId: UUID): TenantControlOverview =
         controlPort.tenantOverview(tenantId)
+
+    @GetMapping("/{tenantId}/activation-readiness")
+    fun activationReadiness(
+        @PathVariable tenantId: UUID,
+    ): TenantActivationReadiness = activationPort.readiness(tenantId)
 
     @GetMapping("/{tenantId}/control/workflows")
     fun workflows(
@@ -224,6 +233,10 @@ class PlatformControlExceptionAdvice(
     @ExceptionHandler(PlatformControlInProgressException::class)
     fun inProgress(ex: PlatformControlInProgressException): ResponseEntity<ProblemDetail> =
         problemFactory.response(HttpStatus.CONFLICT, "Platform control command in progress", ex.safeMessage())
+
+    @ExceptionHandler(TenantActivationNotReadyException::class)
+    fun activationNotReady(ex: TenantActivationNotReadyException): ResponseEntity<ProblemDetail> =
+        problemFactory.response(HttpStatus.CONFLICT, "Tenant activation is not ready", ex.safeMessage())
 
     @ExceptionHandler(IllegalArgumentException::class)
     fun invalid(ex: IllegalArgumentException): ResponseEntity<ProblemDetail> =

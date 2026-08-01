@@ -169,6 +169,7 @@ class TenantGovernanceService(
                 newStatus = newStatus,
                 eventType = lifecycleEventType,
                 reason = reason,
+                requireActivationReadiness = newStatus == "active",
             ),
         )
 

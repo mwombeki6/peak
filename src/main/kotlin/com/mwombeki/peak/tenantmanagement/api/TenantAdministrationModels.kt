@@ -72,6 +72,7 @@ data class TenantLifecycleTransitionCommand(
     val newStatus: String,
     val eventType: String,
     val reason: String,
+    val requireActivationReadiness: Boolean = false,
 )
 
 @NamedInterface("api")
