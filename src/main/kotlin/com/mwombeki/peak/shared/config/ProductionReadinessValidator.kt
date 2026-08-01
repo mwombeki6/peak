@@ -226,6 +226,14 @@ class ProductionReadinessValidator(
                     "peak.bootstrap.platform.email",
                     "peak.bootstrap.platform.issuer",
                     "peak.bootstrap.platform.subject",
+                    // Production provisions two Platform Emergency Administrator
+                    // custodians in one transaction. A single-custodian bootstrap
+                    // would leave one account able to appoint another root
+                    // unilaterally, which is exactly what dual control prevents.
+                    "peak.bootstrap.platform.second-full-name",
+                    "peak.bootstrap.platform.second-email",
+                    "peak.bootstrap.platform.second-issuer",
+                    "peak.bootstrap.platform.second-subject",
                 ).forEach { property ->
                     requirePresent(environment.getProperty(property)) {
                         "$property is required for bootstrap runtime"

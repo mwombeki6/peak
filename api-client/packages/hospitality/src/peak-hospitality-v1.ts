@@ -4034,6 +4034,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tenants/{tenantId}/privileged-access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Privileged Access
+         * @description List Privileged Access
+         */
+        get: operations["listPrivilegedAccess"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tenants/{tenantId}/portfolio": {
         parameters: {
             query?: never;
@@ -6992,6 +7012,28 @@ export interface components {
             lockedUntil?: string;
             hasActiveIdentity?: boolean;
             active?: boolean;
+        };
+        TenantPrivilegedAccessEvent: {
+            /** Format: uuid */
+            accessId?: string;
+            /** Format: uuid */
+            supportTicketId?: string;
+            operatorName?: string;
+            actionCode?: string;
+            operationCode?: string;
+            reason?: string;
+            eventType?: string;
+            /** Format: date-time */
+            occurredAt?: string;
+            /** Format: date-time */
+            startsAt?: string;
+            /** Format: date-time */
+            expiresAt?: string;
+            /** Format: int32 */
+            maxUses?: number;
+            /** Format: int32 */
+            useCount?: number;
+            denialReason?: string;
         };
         PortfolioOverview: {
             units?: components["schemas"]["OrganizationUnitSummary"][];
@@ -23725,6 +23767,66 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["PropertyAdministratorHttpResponse"][];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    listPrivilegedAccess: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["TenantPrivilegedAccessEvent"][];
                 };
             };
             /** @description Invalid request */

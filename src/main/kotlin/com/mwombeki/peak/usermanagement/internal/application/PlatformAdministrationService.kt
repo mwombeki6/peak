@@ -9,6 +9,7 @@ import com.mwombeki.peak.reliability.api.IdempotencyReservation
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
+import com.mwombeki.peak.shared.context.AssuranceLevel
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.shared.secrets.SecretEnvelopeService
@@ -21,7 +22,10 @@ import com.mwombeki.peak.usermanagement.api.LinkPlatformOidcIdentityCommand
 import com.mwombeki.peak.usermanagement.api.InviteTenantAdministratorCommand
 import com.mwombeki.peak.usermanagement.api.PlatformAdministrationConflictException
 import com.mwombeki.peak.usermanagement.api.PlatformAdministrationInProgressException
+import com.mwombeki.peak.usermanagement.api.DecidePlatformAdministratorChangeCommand
+import com.mwombeki.peak.usermanagement.api.PlatformAdministratorChangeReceipt
 import com.mwombeki.peak.usermanagement.api.PlatformAdministrationNotFoundException
+import com.mwombeki.peak.usermanagement.api.RequestPlatformAdministratorChangeCommand
 import com.mwombeki.peak.usermanagement.api.PlatformAdministrationPort
 import com.mwombeki.peak.usermanagement.api.PlatformAdministratorSummary
 import com.mwombeki.peak.usermanagement.api.PlatformAccessPort
@@ -48,6 +52,7 @@ import io.micrometer.core.instrument.MeterRegistry
 import java.sql.Array
 import java.sql.ResultSet
 import java.sql.Timestamp
+import java.time.Duration
 import java.time.Instant
 import java.time.Clock
 import java.time.temporal.ChronoUnit
@@ -71,6 +76,7 @@ class PlatformAdministrationService(
     private val meterRegistry: MeterRegistry,
     private val secretEnvelopeService: SecretEnvelopeService,
     private val invitationSecurityProperties: TenantInvitationSecurityProperties,
+    private val stepUpPolicy: PrivilegedStepUpPolicy,
     private val clock: Clock = Clock.systemUTC(),
 ) : PlatformAdministrationPort {
 
@@ -604,6 +610,263 @@ class PlatformAdministrationService(
         }
     }
 
+    override fun requestPlatformAdministratorChange(
+        command: RequestPlatformAdministratorChangeCommand,
+    ): PlatformAdministratorChangeReceipt {
+        return mutate(
+            operationType = "platform.administrator.change.request",
+            permissionCode = PLATFORM_ADMINISTRATOR_MANAGE_PERMISSION,
+            requestPayload = command,
+            resourceType = "platform_root_appointment_requests",
+            replayType = PlatformAdministratorChangeReceipt::class.java,
+        ) { reservationId ->
+            val actorId = currentPlatformActorId()
+            requireCurrentPlatformPermission(
+                PLATFORM_ADMINISTRATOR_MANAGE_PERMISSION,
+                "Platform operator lacks platform administrator management permission",
+            )
+            require(command.durationMinutes in 15..1440) {
+                "Platform administrator change request must last between 15 and 1440 minutes"
+            }
+            requireActivePlatformUser(command.targetPlatformUserId)
+
+            val requestId = UUID.randomUUID()
+            val expiresAt = Instant.now(clock).plus(
+                command.durationMinutes.toLong(), ChronoUnit.MINUTES,
+            )
+            // The schema rejects a requester who is also the target, so a
+            // self-appointment attempt fails here rather than in service logic
+            // that a later refactor could drop.
+            jdbcTemplate.update(
+                """
+                INSERT INTO platform_root_appointment_requests (
+                    id, action, target_platform_user_id,
+                    requested_by_platform_user_id, reason, approval_policy_code,
+                    expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+                requestId,
+                command.action.databaseValue(),
+                command.targetPlatformUserId,
+                actorId,
+                command.reason.trim(),
+                ROOT_APPROVAL_POLICY,
+                Timestamp.from(expiresAt),
+            )
+
+            recordPlatformSideEffects(
+                action = "platform.administrator.change.requested",
+                resourceType = "platform_root_appointment_requests",
+                resourceId = requestId,
+                payload = mapOf(
+                    "requestId" to requestId,
+                    "action" to command.action.databaseValue(),
+                    "targetPlatformUserId" to command.targetPlatformUserId,
+                ),
+                idempotencyKeyId = reservationId,
+            )
+            rootAppointmentReceipt(requestId)
+        }
+    }
+
+    override fun decidePlatformAdministratorChange(
+        command: DecidePlatformAdministratorChangeCommand,
+    ): PlatformAdministratorChangeReceipt {
+        return mutate(
+            operationType = "platform.administrator.change.decide",
+            permissionCode = PLATFORM_SECURITY_MANAGE_PERMISSION,
+            requestPayload = command,
+            resourceType = "platform_root_appointment_requests",
+            replayType = PlatformAdministratorChangeReceipt::class.java,
+        ) { reservationId ->
+            val actorId = currentPlatformActorId()
+            requireCurrentPlatformPermission(
+                PLATFORM_SECURITY_MANAGE_PERMISSION,
+                "Platform operator lacks platform security management permission",
+            )
+            // Deciding is itself a privileged act on emergency authority.
+            requireFreshStepUpForRootChange()
+
+            val current = rootAppointmentState(command.requestId)
+                ?: throw PlatformAdministrationNotFoundException(
+                    "Platform administrator change request was not found",
+                )
+
+            // Requester and target exclusion, seat membership, seat permission
+            // and approver effectiveness are all enforced by the database
+            // trigger, so an inadmissible decision never becomes evidence.
+            jdbcTemplate.update(
+                """
+                INSERT INTO platform_root_appointment_approvals (
+                    request_id, seat_code, approver_platform_user_id, decision,
+                    decision_reason, approved_request_version,
+                    approved_request_hash, expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+                command.requestId,
+                command.seatCode,
+                actorId,
+                if (command.approve) "approved" else "denied",
+                command.reason?.trim(),
+                current.version,
+                current.hash,
+                Timestamp.from(Instant.now(clock).plus(1, ChronoUnit.HOURS)),
+            )
+
+            if (quorumSatisfied(command.requestId)) {
+                jdbcTemplate.update(
+                    """
+                    UPDATE platform_root_appointment_requests
+                    SET status = 'approved'
+                    WHERE id = ? AND status = 'requested'
+                    """.trimIndent(),
+                    command.requestId,
+                )
+            }
+
+            recordPlatformSideEffects(
+                action = if (command.approve) {
+                    "platform.administrator.change.approved"
+                } else {
+                    "platform.administrator.change.denied"
+                },
+                resourceType = "platform_root_appointment_requests",
+                resourceId = command.requestId,
+                payload = mapOf(
+                    "requestId" to command.requestId,
+                    "seatCode" to command.seatCode,
+                ),
+                idempotencyKeyId = reservationId,
+            )
+            rootAppointmentReceipt(command.requestId)
+        }
+    }
+
+    private fun quorumSatisfied(requestId: UUID): Boolean =
+        jdbcTemplate.queryForObject(
+            "SELECT root_appointment_quorum_satisfied(?)",
+            Boolean::class.java,
+            requestId,
+        ) == true
+
+    private data class RootAppointmentState(val version: Int, val hash: String)
+
+    private fun rootAppointmentState(requestId: UUID): RootAppointmentState? =
+        jdbcTemplate.query(
+            """
+            SELECT request_version, request_hash
+            FROM platform_root_appointment_requests
+            WHERE id = ?
+            FOR UPDATE
+            """.trimIndent(),
+            { rs, _ ->
+                RootAppointmentState(
+                    rs.getInt("request_version"),
+                    rs.getString("request_hash"),
+                )
+            },
+            requestId,
+        ).singleOrNull()
+
+    private fun rootAppointmentReceipt(requestId: UUID): PlatformAdministratorChangeReceipt =
+        requireNotNull(
+            jdbcTemplate.query(
+                """
+                SELECT id, action, target_platform_user_id, status,
+                       request_version, expires_at
+                FROM platform_root_appointment_requests
+                WHERE id = ?
+                """.trimIndent(),
+                { rs, _ ->
+                    PlatformAdministratorChangeReceipt(
+                        requestId = rs.getObject("id", UUID::class.java),
+                        action = rs.getString("action"),
+                        targetPlatformUserId = rs.getObject(
+                            "target_platform_user_id", UUID::class.java,
+                        ),
+                        status = rs.getString("status"),
+                        requestVersion = rs.getInt("request_version"),
+                        quorumSatisfied = quorumSatisfied(requestId),
+                        expiresAt = rs.getTimestamp("expires_at").toInstant(),
+                    )
+                },
+                requestId,
+            ).singleOrNull(),
+        ) { "Platform administrator change request was not found" }
+
+    /**
+     * Locates the approved appointment request authorising this change and
+     * locks it, so two concurrent applications of the same request cannot both
+     * proceed.
+     *
+     * Quorum is re-evaluated here rather than trusted from the request status.
+     * An approver disabled or stripped of the seat permission after approving
+     * must not still count, and the status column alone cannot know that.
+     */
+    private fun requireApprovedRootAppointment(
+        targetPlatformUserId: UUID,
+        action: String,
+    ): UUID {
+        val requestId = jdbcTemplate.query(
+            """
+            SELECT id
+            FROM platform_root_appointment_requests
+            WHERE target_platform_user_id = ?
+              AND action = ?
+              AND status IN ('requested', 'approved')
+              AND cancelled_at IS NULL
+              AND expires_at > now()
+            ORDER BY requested_at DESC
+            FOR UPDATE
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("id", UUID::class.java) },
+            targetPlatformUserId,
+            action,
+        ).singleOrNull()
+            ?: throw IllegalStateException(
+                "An approved platform emergency administrator request is required for this change",
+            )
+
+        val satisfied = jdbcTemplate.queryForObject(
+            "SELECT root_appointment_quorum_satisfied(?)",
+            Boolean::class.java,
+            requestId,
+        ) == true
+
+        if (!satisfied) {
+            throw IllegalStateException(
+                "Platform emergency administrator request has not met its approval quorum",
+            )
+        }
+        return requestId
+    }
+
+    private fun markRootAppointmentApplied(requestId: UUID, actorId: UUID) {
+        jdbcTemplate.update(
+            """
+            UPDATE platform_root_appointment_requests
+            SET status = 'applied',
+                applied_at = now(),
+                applied_by_platform_user_id = ?
+            WHERE id = ?
+            """.trimIndent(),
+            actorId,
+            requestId,
+        )
+    }
+
+    /**
+     * Changing emergency authority requires a proven, recent ceremony. The
+     * database records what an operator enrolled; only the token records what
+     * they actually did for this request.
+     */
+    private fun requireFreshStepUpForRootChange() {
+        stepUpPolicy.require(
+            required = AssuranceLevel.PHISHING_RESISTANT,
+            maxAge = ROOT_STEP_UP_MAX_AGE,
+        ) { message -> IllegalStateException(message) }
+    }
+
     override fun assignPlatformAdministrator(
         command: AssignPlatformAdministratorCommand,
     ): PlatformUserRoleMutationReceipt {
@@ -622,7 +885,16 @@ class PlatformAdministrationService(
             require(actorId != command.platformUserId) {
                 "Platform operator cannot assign own platform administrator access"
             }
+            // Emergency authority is dual-controlled. The grant below is
+            // unreachable without a request an independent quorum has already
+            // approved at its current version, and without a fresh step-up
+            // ceremony by the operator applying it.
+            requireFreshStepUpForRootChange()
             lockPlatformAdministratorContinuity()
+            val appointmentRequestId = requireApprovedRootAppointment(
+                targetPlatformUserId = command.platformUserId,
+                action = "appoint",
+            )
             requireActivePlatformUser(command.platformUserId)
             val platformRoleId = requireSystemPlatformRootRole()
             val inserted = jdbcTemplate.update(
@@ -635,6 +907,7 @@ class PlatformAdministrationService(
                 platformRoleId,
                 actorId,
             ) == 1
+            markRootAppointmentApplied(appointmentRequestId, actorId)
 
             PlatformUserRoleMutationReceipt(
                 platformUserId = command.platformUserId,
@@ -677,6 +950,12 @@ class PlatformAdministrationService(
             require(actorId != command.platformUserId) {
                 "Platform operator cannot revoke own platform administrator access"
             }
+            // Revocation is dual-controlled for the same reason as appointment,
+            // and arguably a sharper one: removing a co-custodian is how an
+            // operator becomes sole root. Gating only appointment would invite
+            // the assumption that root changes are dual-controlled when only
+            // half of them are.
+            requireFreshStepUpForRootChange()
             lockPlatformAdministratorContinuity()
             requirePlatformUser(command.platformUserId)
             val platformRoleId = requireSystemPlatformRootRole()
@@ -684,6 +963,14 @@ class PlatformAdministrationService(
                 command.platformUserId,
                 platformRoleId,
             )
+            val revocationRequestId = if (assigned) {
+                requireApprovedRootAppointment(
+                    targetPlatformUserId = command.platformUserId,
+                    action = "revoke",
+                )
+            } else {
+                null
+            }
             if (assigned) {
                 requireAnotherEffectivePlatformAdministrator(command.platformUserId)
             }
@@ -696,6 +983,7 @@ class PlatformAdministrationService(
                 command.platformUserId,
                 platformRoleId,
             ) == 1
+            revocationRequestId?.let { markRootAppointmentApplied(it, actorId) }
 
             PlatformUserRoleMutationReceipt(
                 platformUserId = command.platformUserId,
@@ -1780,6 +2068,11 @@ class PlatformAdministrationService(
     )
 
     private companion object {
+        /** Step-up freshness required to change emergency authority. */
+        val ROOT_STEP_UP_MAX_AGE: Duration = Duration.ofMinutes(5)
+        /** Two distinct security custodians, reused from the V77 quorum seats. */
+        const val ROOT_APPROVAL_POLICY = "identity_mutation"
+
         private const val PLATFORM_ADMINISTRATOR_LOCK_KEY = "peak.platform.administrator.continuity"
         private const val PLATFORM_ADMINISTRATOR_MANAGE_PERMISSION = "platform.administrators.manage"
         private const val PLATFORM_IDENTITY_LINK_MANAGE_PERMISSION = "platform.identity_links.manage"

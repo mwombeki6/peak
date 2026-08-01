@@ -1,6 +1,8 @@
 package com.mwombeki.peak.shared.context
 
 import jakarta.servlet.http.HttpServletRequest
+import java.time.Instant
+import java.util.Date
 import java.util.UUID
 import org.springframework.security.authentication.AnonymousAuthenticationToken
 import org.springframework.security.core.Authentication
@@ -37,6 +39,41 @@ class RequestContextResolver(
                 ?.trim()
                 ?.take(MAX_USER_AGENT_LENGTH)
                 ?.takeIf(String::isNotEmpty),
+            authentication = resolveAssurance(authentication),
+        )
+    }
+
+    /**
+     * Derives the achieved authentication strength from the validated token
+     * only. Requests without a JWT carry no assurance, so a privileged
+     * operation cannot be satisfied by header or body content.
+     */
+    private fun resolveAssurance(
+        authentication: Authentication?,
+    ): AuthenticationAssurance {
+        val token = (authentication as? JwtAuthenticationToken)
+            ?.takeIf { it.isAuthenticated }
+            ?.token
+            ?: return AuthenticationAssurance.UNAUTHENTICATED
+
+        val acr = token.stringClaim("acr")
+        val amr = token.stringListClaim("amr")
+        val phishingResistant =
+            acr != null && acr in properties.phishingResistantAcrValues ||
+                amr.any { it in properties.phishingResistantAmrValues }
+        val secondFactor = acr != null && acr in properties.mfaAcrValues
+
+        return AuthenticationAssurance(
+            level = when {
+                phishingResistant -> AssuranceLevel.PHISHING_RESISTANT
+                secondFactor -> AssuranceLevel.MFA
+                else -> AssuranceLevel.NONE
+            },
+            acr = acr,
+            amr = amr,
+            authTime = token.authTimeClaim(),
+            issuer = token.stringClaim("iss"),
+            subject = token.stringClaim("sub"),
         )
     }
 
@@ -262,6 +299,41 @@ class RequestContextResolver(
 
     private fun Jwt.stringClaim(name: String): String? {
         return claims[name]?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
+    /**
+     * `amr` is a JSON array, but some providers emit a single string. Both are
+     * normalised so a phishing-resistant method is not missed by shape.
+     */
+    private fun Jwt.stringListClaim(name: String): List<String> {
+        return when (val value = claims[name]) {
+            is Collection<*> -> value.mapNotNull {
+                it?.toString()?.trim()?.lowercase()?.takeIf(String::isNotEmpty)
+            }
+
+            is String -> value.split(' ', ',')
+                .map { it.trim().lowercase() }
+                .filter(String::isNotEmpty)
+
+            else -> emptyList()
+        }
+    }
+
+    /**
+     * `auth_time` is a NumberDate in seconds. Spring may already have parsed it
+     * to an Instant; otherwise it arrives as a number. Anything unparseable is
+     * treated as absent so a malformed value cannot pass a freshness gate.
+     */
+    private fun Jwt.authTimeClaim(): Instant? {
+        return when (val value = claims["auth_time"]) {
+            is Instant -> value
+            is Date -> value.toInstant()
+            is Number -> runCatching { Instant.ofEpochSecond(value.toLong()) }.getOrNull()
+            is String -> value.trim().toLongOrNull()
+                ?.let { runCatching { Instant.ofEpochSecond(it) }.getOrNull() }
+
+            else -> null
+        }
     }
 
     private fun Jwt.booleanClaim(name: String): Boolean {

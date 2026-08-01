@@ -9,6 +9,7 @@ import com.mwombeki.peak.reliability.api.IdempotencyReservation
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
+import com.mwombeki.peak.shared.context.AssuranceLevel
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.usermanagement.api.BreakGlassAccessPort
@@ -24,6 +25,7 @@ import com.mwombeki.peak.usermanagement.api.SupportPrivilegedAccessEventCommand
 import com.mwombeki.peak.usermanagement.api.SupportPrivilegedAccessEvidencePort
 import java.sql.ResultSet
 import java.sql.Timestamp
+import java.time.Duration
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
@@ -42,6 +44,7 @@ class BreakGlassAccessService(
     private val auditPort: AuditPort,
     private val outboxPort: OutboxPort,
     private val objectMapper: ObjectMapper,
+    private val stepUpPolicy: PrivilegedStepUpPolicy,
 ) : BreakGlassAccessPort {
 
     @Transactional(readOnly = true)
@@ -51,7 +54,7 @@ class BreakGlassAccessService(
         limit: Int,
     ): List<BreakGlassAccessSummary> {
         require(limit in 1..200) { "Access request limit must be between 1 and 200" }
-        requirePlatform(tenantId, "platform.support.impersonate", "platform.support.access.list")
+        requirePlatform(tenantId, "platform.support.access.view", "platform.support.access.list")
         val clauses = mutableListOf<String>()
         val args = mutableListOf<Any>()
         tenantId?.let { clauses += "access.tenant_id = ?"; args += it }
@@ -70,7 +73,7 @@ class BreakGlassAccessService(
     @Transactional
     override fun requestAccess(command: RequestBreakGlassAccessCommand): BreakGlassAccessSummary {
         requirePlatform(
-            command.tenantId, "platform.support.impersonate", "platform.support.access.request",
+            command.tenantId, "platform.support.access.request", "platform.support.access.request",
         )
         requirePlatform(command.tenantId, command.actionCode, "platform.support.target_permission")
         require(command.reason.isNotBlank() && command.reason.length <= 1000) {
@@ -81,11 +84,12 @@ class BreakGlassAccessService(
         }
         require(command.maxUses in 1..1000) { "Privileged access max uses must be between 1 and 1000" }
         require(command.actionCode.matches(PERMISSION_CODE)) { "Invalid privileged access action code" }
-        val assurance = command.assuranceLevel.trim().lowercase().also {
-            require(it in ASSURANCE_LEVELS) { "Invalid assurance level" }
-        }
+        // The requested level is a ceiling request, never proof. What is stored
+        // and enforced is the level the validated token actually achieved.
+        val requested = AssuranceLevel.fromPolicy(command.assuranceLevel)
+        val achieved = requireAssurance(requested)
+        val assurance = achieved.databaseValue()
         val platformUserId = currentPlatformUser()
-        requireMfa(platformUserId)
         return mutate(
             "platform.support.access.request", command, BreakGlassAccessSummary::class.java,
         ) { reservationId ->
@@ -131,10 +135,12 @@ class BreakGlassAccessService(
         require(command.reason.isNotBlank()) { "Privileged access decision reason is required" }
         val candidate = access(command.accessId)
         requirePlatform(
-            candidate.tenantId, "platform.support.impersonate", "platform.support.access.decide",
+            candidate.tenantId, "platform.support.access.approve", "platform.support.access.decide",
         )
         val approver = currentPlatformUser()
-        requireMfa(approver)
+        // Approving is itself a privileged act and needs a proven fresh
+        // ceremony at least as strong as the access being approved.
+        requireAssurance(AssuranceLevel.fromPolicy(candidate.assuranceLevel))
         if (approver == candidate.platformUserId) {
             throw BreakGlassConflictException("Privileged access cannot be self-approved")
         }
@@ -185,13 +191,15 @@ class BreakGlassAccessService(
     override fun activateAccess(accessId: UUID): BreakGlassAccessSummary {
         val candidate = access(accessId)
         requirePlatform(
-            candidate.tenantId, "platform.support.impersonate", "platform.support.access.activate",
+            candidate.tenantId, "platform.support.access.activate", "platform.support.access.activate",
         )
         val actor = currentPlatformUser()
         require(actor == candidate.platformUserId) {
             "Only the requesting operator can activate privileged access"
         }
-        requireMfa(actor)
+        // Activation starts the clock on real access, so it requires a fresh
+        // ceremony at the strength the grant was approved for.
+        requireAssurance(AssuranceLevel.fromPolicy(candidate.assuranceLevel))
         return mutate(
             "platform.support.access.activate", mapOf("accessId" to accessId),
             BreakGlassAccessSummary::class.java,
@@ -219,6 +227,11 @@ class BreakGlassAccessService(
             ))
             access(accessId).also {
                 record(it, "platform.support.access.activated", "Approved access activated", reservationId)
+                // Activation is the moment access becomes usable, so it is the
+                // moment the tenant is told. Enqueued in the same transaction
+                // as the state change, so a notice cannot be lost by a later
+                // failure, and the worker supplies retry and delivery evidence.
+                notifyTenantOfPrivilegedAccess(it, reservationId)
             }
         }
     }
@@ -228,7 +241,7 @@ class BreakGlassAccessService(
         require(reason.isNotBlank()) { "Privileged access revocation reason is required" }
         val candidate = access(accessId)
         requirePlatform(
-            candidate.tenantId, "platform.support.impersonate", "platform.support.access.revoke",
+            candidate.tenantId, "platform.support.access.revoke", "platform.support.access.revoke",
         )
         return mutate(
             "platform.support.access.revoke", mapOf("accessId" to accessId, "reason" to reason),
@@ -275,6 +288,77 @@ class BreakGlassAccessService(
         rs.getTimestamp("last_used_at")?.toInstant(), rs.getString("assurance_level"),
         rs.getString("decision_reason"),
     )
+
+    /**
+     * Tells the tenant that Peak staff access to their data has become active.
+     *
+     * Routed through the ordinary notification outbox so the notice inherits
+     * durability, retry and per-attempt delivery evidence rather than being a
+     * best-effort side call. The purpose is `security_notifications`, whose
+     * delivery basis is legitimate interest, so a recipient cannot silence it
+     * by withholding consent; the worker still re-checks eligibility, so a
+     * deactivated or unverified channel is dropped.
+     *
+     * The content is deliberately factual: which ticket, which operation, when
+     * it expires. Internal decision notes and the operator's reasoning are not
+     * included.
+     */
+    private fun notifyTenantOfPrivilegedAccess(
+        access: BreakGlassAccessSummary,
+        reservationId: UUID,
+    ) {
+        val channelIds = jdbcTemplate.query(
+            """
+            SELECT channel.id
+            FROM contact_channels channel
+            JOIN tenant_contacts contact
+              ON contact.tenant_id = channel.tenant_id
+             AND contact.id = channel.contact_id
+             AND contact.status = 'active'
+             AND contact.deleted_at IS NULL
+            WHERE channel.tenant_id = ?
+              AND channel.is_active = true
+              AND channel.verification_status = 'verified'
+              AND channel.deleted_at IS NULL
+              AND contact_channel_can_receive(
+                    channel.tenant_id, channel.contact_id, channel.id,
+                    'security_notifications'
+                  )
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("id", UUID::class.java) },
+            access.tenantId,
+        )
+
+        channelIds.forEach { channelId ->
+            outboxPort.enqueue(
+                OutboxEventCommand(
+                    aggregateType = "platform_break_glass_access",
+                    aggregateId = access.accessId,
+                    tenantId = access.tenantId,
+                    eventType = "platform.support.access.tenant_notified",
+                    destination = OutboxDestination.NOTIFICATION,
+                    payload = mapOf(
+                        "contactChannelId" to channelId,
+                        "purpose" to "security_notifications",
+                        "subject" to "Peak support access to your account is active",
+                        "content" to buildString {
+                            append("Peak support has activated approved access to your account ")
+                            append("under support ticket ")
+                            append(access.supportTicketId)
+                            append(". Permitted operation: ")
+                            append(access.actionCode)
+                            append(". Access expires at ")
+                            append(access.expiresAt)
+                            append(". You can review the full access record in your ")
+                            append("privileged access evidence timeline.")
+                        },
+                    ),
+                    idempotencyKeyId = reservationId,
+                    priority = 2,
+                ),
+            )
+        }
+    }
 
     private fun record(
         access: BreakGlassAccessSummary, action: String, reason: String, reservationId: UUID,
@@ -323,13 +407,35 @@ class BreakGlassAccessService(
         platformAccess.requireAuthorized(PlatformAccessRequest(tenantId, permission, operation))
     }
 
-    private fun requireMfa(platformUserId: UUID) {
-        val enabled = jdbcTemplate.queryForObject(
-            "SELECT mfa_enabled FROM platform_users WHERE id = ? AND status = 'active' AND deleted_at IS NULL",
-            Boolean::class.java, platformUserId,
-        ) == true
-        if (!enabled) throw BreakGlassConflictException(
-            "Active multi-factor authentication is required for privileged support access",
+    /**
+     * Verifies the authentication ceremony behind this request against a policy
+     * requirement and returns the level actually achieved.
+     *
+     * The previous implementation read `platform_users.mfa_enabled`, which
+     * records that an operator once enrolled a second factor. It proves nothing
+     * about the current request: a token minted through a password-only flow
+     * satisfied it. `mfa_enabled` is now informational only and must never
+     * authorize privileged access.
+     */
+    /**
+     * Verifies the ceremony behind this request through the shared policy.
+     *
+     * The previous implementation read `platform_users.mfa_enabled`, which
+     * records that an operator once enrolled a second factor and proves nothing
+     * about the current request: a token minted through a password-only flow
+     * satisfied it. `mfa_enabled` is now informational only and must never
+     * authorize privileged access.
+     */
+    private fun requireAssurance(required: AssuranceLevel): AssuranceLevel =
+        stepUpPolicy.require(required, STEP_UP_MAX_AGE) { message ->
+            BreakGlassConflictException(message)
+        }
+
+    private fun AssuranceLevel.databaseValue(): String = when (this) {
+        AssuranceLevel.PHISHING_RESISTANT -> "phishing_resistant"
+        AssuranceLevel.MFA -> "mfa"
+        AssuranceLevel.NONE -> throw BreakGlassConflictException(
+            "Privileged access requires proven multi-factor authentication",
         )
     }
 
@@ -343,8 +449,16 @@ class BreakGlassAccessService(
     }
 
     private companion object {
-        val ACCESS_STATUSES = setOf("requested", "approved", "active", "denied", "revoked", "expired")
-        val ASSURANCE_LEVELS = setOf("mfa", "phishing_resistant")
+        val ACCESS_STATUSES = setOf(
+            "requested", "approved", "active", "denied", "revoked", "expired", "exhausted",
+        )
+
+        /**
+         * How recently the authentication ceremony must have happened for a
+         * privileged action. Short enough that a walked-away session cannot
+         * request, approve or activate access.
+         */
+        val STEP_UP_MAX_AGE: Duration = Duration.ofMinutes(5)
         val PERMISSION_CODE = Regex("[a-z][a-z0-9_.-]{2,99}")
         val ACCESS_SELECT = """
             SELECT access.id, access.platform_user_id, access.tenant_id,

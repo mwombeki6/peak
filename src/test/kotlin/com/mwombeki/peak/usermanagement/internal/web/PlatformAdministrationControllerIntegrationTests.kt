@@ -266,6 +266,8 @@ class PlatformAdministrationControllerIntegrationTests {
         val targetUserId = insertPlatformUser()
         insertPlatformIdentityLink(targetUserId)
 
+        approveRootChange(targetUserId, "appoint", actorId)
+
         mockMvc.perform(
             post("/api/v1/platform/administrators/$targetUserId/assign")
                 .platform(actorId, "corr-platform-admin-assign", "idem-platform-admin-assign"),
@@ -289,6 +291,8 @@ class PlatformAdministrationControllerIntegrationTests {
             .andExpect(status().isOk)
             .andExpect(jsonPath("$[*].platformUserId", hasItem(targetUserId.toString())))
             .andExpect(jsonPath("$[*].effective", hasItem(true)))
+
+        approveRootChange(targetUserId, "revoke", actorId)
 
         mockMvc.perform(
             post("/api/v1/platform/administrators/$targetUserId/revoke")
@@ -316,6 +320,8 @@ class PlatformAdministrationControllerIntegrationTests {
         val identityLinkId = insertPlatformIdentityLink(targetUserId)
         val expectedDetail =
             "Platform administrator access cannot be removed without another effective administrator"
+
+        approveRootChange(targetUserId, "revoke", actorId)
 
         mockMvc.perform(
             post("/api/v1/platform/administrators/$targetUserId/revoke")
@@ -417,6 +423,12 @@ class PlatformAdministrationControllerIntegrationTests {
         insertPlatformUserRole(secondRootId, rootRoleId, actorId)
         insertPlatformIdentityLink(firstRootId)
         insertPlatformIdentityLink(secondRootId)
+        // Each target needs its own approved request. The open-request index is
+        // scoped to target and action, so two distinct revocations coexist and
+        // the race is still decided by the continuity guard rather than by
+        // approval availability.
+        approveRootChange(firstRootId, "revoke", actorId)
+        approveRootChange(secondRootId, "revoke", actorId)
         val start = CountDownLatch(1)
         val executor = Executors.newFixedThreadPool(2)
 
@@ -1125,6 +1137,60 @@ class PlatformAdministrationControllerIntegrationTests {
             "platform-${platformUserId.toString().take(8)}@example.com",
         )
         return platformUserId
+    }
+
+    /**
+     * Creates and fully approves a Platform Emergency Administrator change
+     * request so a dual-controlled assign or revoke can proceed.
+     *
+     * Approvals are inserted directly, but every database trigger still runs:
+     * requester and target exclusion, seat membership, seat permission and
+     * approver effectiveness are all enforced, so this fixture exercises the
+     * real constraints rather than bypassing them.
+     */
+    private fun approveRootChange(
+        targetPlatformUserId: UUID,
+        action: String,
+        requestedBy: UUID,
+    ) {
+        val requestId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO platform_root_appointment_requests (
+                id, action, target_platform_user_id,
+                requested_by_platform_user_id, reason, approval_policy_code,
+                expires_at
+            ) VALUES (?, ?, ?, ?, ?, 'identity_mutation', now() + interval '1 hour')
+            """.trimIndent(),
+            requestId,
+            action,
+            targetPlatformUserId,
+            requestedBy,
+            "Dual-controlled $action for integration coverage",
+        )
+        val state = jdbcTemplate.queryForMap(
+            """
+            SELECT request_version, request_hash
+            FROM platform_root_appointment_requests WHERE id = ?
+            """.trimIndent(),
+            requestId,
+        )
+        listOf("security_custodian_a", "security_custodian_b").forEach { seat ->
+            val approver = insertPlatformActorWithPermissions("platform.security.manage")
+            jdbcTemplate.update(
+                """
+                INSERT INTO platform_root_appointment_approvals (
+                    request_id, seat_code, approver_platform_user_id, decision,
+                    approved_request_version, approved_request_hash, expires_at
+                ) VALUES (?, ?, ?, 'approved', ?, ?, now() + interval '1 hour')
+                """.trimIndent(),
+                requestId,
+                seat,
+                approver,
+                state["request_version"],
+                state["request_hash"],
+            )
+        }
     }
 
     private fun insertPlatformActorWithPermissions(vararg permissionCodes: String): UUID {

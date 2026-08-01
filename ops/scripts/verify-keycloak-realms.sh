@@ -47,8 +47,29 @@ if [ -z "$EXPECTED_WEBAUTHN_RP_ID" ]; then
   exit 1
 fi
 
+# The master token is fetched from the administrative host, not the public one.
+# Two reasons, and either alone is sufficient. Production's reverse proxy blocks
+# /realms/master/** on the public hostname, so a token fetched from BASE_URL
+# would not be obtainable there. And keeping the token and the admin calls it
+# authorises on one host makes it impossible to present a token minted by one
+# Keycloak to a different one, which is what happens when a caller pins only
+# KEYCLOAK_BASE_URL and KEYCLOAK_ADMIN_BASE_URL still points at another instance.
+# Checked before the token request so the failure names its own cause. A caller
+# that pins only KEYCLOAK_BASE_URL leaves this address wherever the environment
+# put it, which in a production environment file is the real administrative
+# hostname. Reaching that from a test harness fails as a connection reset, which
+# says nothing about which variable is wrong.
+if ! curl -fsS -o /dev/null \
+    "$ADMIN_BASE_URL/realms/master/.well-known/openid-configuration" 2>/dev/null; then
+  echo "Keycloak administrative host is unreachable: $ADMIN_BASE_URL" >&2
+  echo "Administrative calls read KEYCLOAK_ADMIN_BASE_URL, which falls back to" >&2
+  echo "KEYCLOAK_BASE_URL ($BASE_URL) only when it is unset. Pin both when" >&2
+  echo "targeting a specific instance." >&2
+  exit 1
+fi
+
 TOKEN_RESPONSE="$(curl -fsS \
-  -X POST "$BASE_URL/realms/master/protocol/openid-connect/token" \
+  -X POST "$ADMIN_BASE_URL/realms/master/protocol/openid-connect/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   --data-urlencode "client_id=admin-cli" \
   --data-urlencode "grant_type=password" \
@@ -238,10 +259,23 @@ def verify_realm(name: str, actions_name: str, *, platform: bool):
     for alias in ("VERIFY_EMAIL", "CONFIGURE_TOTP", "webauthn-register", "webauthn-register-passwordless"):
         if actions.get(alias, {}).get("enabled") is not True:
             raise SystemExit(f"{realm.get('realm')} must enable required action {alias}")
-    expected_totp_default = platform
-    if actions["CONFIGURE_TOTP"].get("defaultAction") is not expected_totp_default:
+    # Platform operators must be steered to a phishing-resistant authenticator.
+    # TOTP stays enabled so it remains available for recovery, but it must not be
+    # the default enrolment on either realm, and passwordless WebAuthn must be
+    # the default on the platform realm.
+    if actions["CONFIGURE_TOTP"].get("defaultAction") is not False:
         raise SystemExit(
-            f"{realm.get('realm')} CONFIGURE_TOTP defaultAction must be {expected_totp_default}"
+            f"{realm.get('realm')} CONFIGURE_TOTP defaultAction must be False so "
+            "operators are not enrolled onto a phishable factor by default"
+        )
+    expected_passwordless_default = platform
+    if (
+        actions["webauthn-register-passwordless"].get("defaultAction")
+        is not expected_passwordless_default
+    ):
+        raise SystemExit(
+            f"{realm.get('realm')} webauthn-register-passwordless defaultAction "
+            f"must be {expected_passwordless_default}"
         )
 
 

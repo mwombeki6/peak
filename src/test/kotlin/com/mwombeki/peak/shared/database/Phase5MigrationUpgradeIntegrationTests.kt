@@ -232,7 +232,7 @@ class Phase5MigrationUpgradeIntegrationTests @Autowired constructor(
                 .dataSource(url, postgres.username, postgres.password)
                 .load()
             flyway.migrate()
-            assertEquals("75", flyway.info().current().version.version)
+            assertEquals("84", flyway.info().current().version.version)
 
             DriverManager.getConnection(
                 url,
@@ -532,7 +532,25 @@ class Phase5MigrationUpgradeIntegrationTests @Autowired constructor(
                     """.trimIndent(),
                 ).use { rows ->
                     rows.next()
-                    assertEquals(3, rows.getInt(1))
+                    // Three original administrator routes plus the two
+                    // dual-control change-request routes added by V81.
+                    assertEquals(5, rows.getInt(1))
+                }
+                // Name the dual-control routes explicitly, so a future change
+                // that removes them fails with a meaningful message rather than
+                // an unexplained count mismatch.
+                connection.createStatement().executeQuery(
+                    """
+                    SELECT count(*)
+                    FROM module_access_matrix
+                    WHERE screen_key IN (
+                        'platform.administrators.change.request',
+                        'platform.administrators.change.decide'
+                    )
+                    """.trimIndent(),
+                ).use { rows ->
+                    rows.next()
+                    assertEquals(2, rows.getInt(1))
                 }
                 connection.prepareStatement(
                     """

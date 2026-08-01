@@ -18,6 +18,13 @@ PUBLIC_BASE = os.environ.get("KEYCLOAK_BASE_URL", "http://localhost:8081").rstri
 ADMIN_BASE = os.environ.get("KEYCLOAK_ADMIN_BASE_URL", PUBLIC_BASE).rstrip("/")
 ADMIN_USER = os.environ.get("KEYCLOAK_ADMIN", "admin")
 ADMIN_PASSWORD = os.environ.get("KEYCLOAK_ADMIN_PASSWORD", "")
+RECONCILER_CLIENT_ID = os.environ.get(
+    "KEYCLOAK_RECONCILER_CLIENT_ID", "peak-realm-reconciler"
+)
+RECONCILER_SECRET = os.environ.get("KEYCLOAK_RECONCILER_SECRET", "")
+ALLOW_BOOTSTRAP_ADMIN = (
+    os.environ.get("KEYCLOAK_ALLOW_BOOTSTRAP_ADMIN", "").strip().lower() == "true"
+)
 TEMPLATES = (
     ROOT / "ops/keycloak/peak-platform-realm.json",
     ROOT / "ops/keycloak/peak-hospitality-realm.json",
@@ -171,12 +178,57 @@ def reconcile_realm(desired: dict[str, object], token: str) -> None:
     print(f"Reconciled Keycloak realm {realm}")
 
 
-def main() -> int:
+def service_account_token(realm: str) -> str:
+    """Client-credentials token for the realm's own reconciler service account.
+
+    Scoped to one realm and to the roles that realm grants it, so a compromised
+    reconciliation credential cannot administer the server. This is the intended
+    path; the master-realm password grant below exists only for first
+    installation, before the service account exists to authenticate with.
+    """
+    _, payload = request(
+        "POST",
+        f"{ADMIN_BASE}/realms/{realm}/protocol/openid-connect/token",
+        form={
+            "client_id": RECONCILER_CLIENT_ID,
+            "grant_type": "client_credentials",
+            "client_secret": RECONCILER_SECRET,
+        },
+    )
+    token = str((payload or {}).get("access_token", ""))
+    if not token:
+        raise RuntimeError(
+            f"Reconciler token response for {realm} did not contain access_token",
+        )
+    return token
+
+
+def bootstrap_admin_token() -> str:
+    """Master-realm administrator password grant, for first installation only.
+
+    A permanent human master administrator holds full server administration for
+    a task that only needs to manage clients and required actions in one realm.
+    It is therefore refused unless explicitly enabled, so steady-state
+    reconciliation cannot silently fall back to it.
+
+    Administrative token acquisition uses the administration base, not the
+    public one. Keycloak documents that hostname-admin alone does not prevent
+    Admin REST access through the public frontend URL, so the reverse proxy is
+    expected to block /admin/** and /realms/master/** publicly. A script
+    authenticating over the public host would break the moment that block is
+    correctly applied, and until then it quietly depends on the gap being open.
+    """
+    if not ALLOW_BOOTSTRAP_ADMIN:
+        raise RuntimeError(
+            "Realm reconciliation requires KEYCLOAK_RECONCILER_SECRET. Set "
+            "KEYCLOAK_ALLOW_BOOTSTRAP_ADMIN=true only for a first-install or "
+            "recovery ceremony, before the reconciler service account exists.",
+        )
     if not ADMIN_PASSWORD:
         raise RuntimeError("KEYCLOAK_ADMIN_PASSWORD is required")
     _, token_payload = request(
         "POST",
-        f"{PUBLIC_BASE}/realms/master/protocol/openid-connect/token",
+        f"{ADMIN_BASE}/realms/master/protocol/openid-connect/token",
         form={
             "client_id": "admin-cli",
             "grant_type": "password",
@@ -187,8 +239,16 @@ def main() -> int:
     token = str((token_payload or {}).get("access_token", ""))
     if not token:
         raise RuntimeError("Keycloak admin token response did not contain access_token")
+    return token
+
+
+def main() -> int:
+    bootstrap_token = None if RECONCILER_SECRET else bootstrap_admin_token()
     for template in TEMPLATES:
-        reconcile_realm(load_template(template), token)
+        desired = load_template(template)
+        realm = str(desired["realm"])
+        token = bootstrap_token or service_account_token(realm)
+        reconcile_realm(desired, token)
     return 0
 
 

@@ -1088,6 +1088,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/administrators/change-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Platform Administrator Change
+         * @description Request Platform Administrator Change
+         */
+        post: operations["requestPlatformAdministratorChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/administrators/change-requests/{requestId}/decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decide Platform Administrator Change
+         * @description Decide Platform Administrator Change
+         */
+        post: operations["decidePlatformAdministratorChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/tenants/{tenantId}/verification-cases": {
         parameters: {
             query?: never;
@@ -1220,6 +1260,26 @@ export interface paths {
          * @description Overview
          */
         get: operations["overview_3"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/tenants/{tenantId}/activation-readiness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Activation Readiness
+         * @description Activation Readiness
+         */
+        get: operations["activationReadiness"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2157,6 +2217,33 @@ export interface components {
             /** Format: date-time */
             resolvedAt?: string;
         };
+        PlatformAdministratorChangeHttpRequest: {
+            /** Format: uuid */
+            targetPlatformUserId?: string;
+            /** @enum {string} */
+            action?: "APPOINT" | "REVOKE";
+            reason: string;
+            /** Format: int32 */
+            durationMinutes?: number;
+        };
+        PlatformAdministratorChangeReceipt: {
+            /** Format: uuid */
+            requestId?: string;
+            action?: string;
+            /** Format: uuid */
+            targetPlatformUserId?: string;
+            status?: string;
+            /** Format: int32 */
+            requestVersion?: number;
+            quorumSatisfied?: boolean;
+            /** Format: date-time */
+            expiresAt?: string;
+        };
+        PlatformAdministratorChangeDecisionHttpRequest: {
+            seatCode: string;
+            approve?: boolean;
+            reason?: string;
+        };
         TenantControlOverview: {
             tenant?: components["schemas"]["TenantCatalogItem"];
             legalName?: string;
@@ -2173,6 +2260,8 @@ export interface components {
             /** Format: int32 */
             unresolvedAlerts?: number;
             configurationDrift?: boolean;
+            activation?: components["schemas"]["TenantActivationReadiness"];
+            onboardingWorkflow?: components["schemas"]["TenantWorkflowSummary"];
         };
         TenantWorkflowSummary: {
             /** Format: uuid */
@@ -2212,6 +2301,22 @@ export interface components {
             subscription?: components["schemas"]["TenantSubscriptionSummary"];
             entitlements?: components["schemas"]["EntitlementSummary"][];
             latestUsage?: components["schemas"]["TenantUsageSummary"];
+        };
+        TenantActivationReadiness: {
+            /** Format: uuid */
+            tenantId?: string;
+            ready?: boolean;
+            lifecycleStatus?: string;
+            administratorStatus?: string;
+            /** Format: int32 */
+            effectiveAdministrators?: number;
+            /** Format: int32 */
+            pendingInitialInvitations?: number;
+            gates?: components["schemas"]["TenantActivationGate"][];
+            blockerCodes?: string[];
+            nextActions?: components["schemas"]["TenantActivationAction"][];
+            /** Format: date-time */
+            evaluatedAt?: string;
         };
         SupportTicketSummary: {
             /** Format: uuid */
@@ -2366,6 +2471,19 @@ export interface components {
             errorCode?: string;
             /** Format: date-time */
             completedAt?: string;
+        };
+        TenantActivationGate: {
+            code?: string;
+            label?: string;
+            satisfied?: boolean;
+            detail?: string;
+        };
+        TenantActivationAction: {
+            code?: string;
+            label?: string;
+            responsibleParty?: string;
+            method?: string;
+            path?: string;
         };
     };
     responses: never;
@@ -6346,6 +6464,134 @@ export interface operations {
             };
         };
     };
+    requestPlatformAdministratorChange: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformAdministratorChangeHttpRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PlatformAdministratorChangeReceipt"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    decidePlatformAdministratorChange: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                requestId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformAdministratorChangeDecisionHttpRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PlatformAdministratorChangeReceipt"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
     verificationCases_1: {
         parameters: {
             query?: never;
@@ -6716,6 +6962,64 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["TenantCommercialOverview"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    activationReadiness: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["TenantActivationReadiness"];
                 };
             };
             /** @description Invalid request */

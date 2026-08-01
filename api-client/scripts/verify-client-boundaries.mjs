@@ -22,9 +22,23 @@ for (const boundary of configuration.boundaries) {
   );
   const packageDocument = await readJson(`packages/${boundary.id}/package.json`);
   const keycloakTemplate = await readJson(boundary.keycloakTemplate);
+  // This set is compared against the boundary's declared frontend registrations,
+  // so it must contain only clients a human can authenticate through. Excluding
+  // bearer-only clients is not sufficient on its own: a confidential client that
+  // exists purely for a service account is not bearer-only either, yet has no
+  // interactive surface at all.
+  //
+  // A client is interactive if any browser or password flow can reach it.
+  // standardFlowEnabled defaults to true when absent, so only an explicit false
+  // rules it out.
+  const isInteractiveClient = (client) =>
+    client.bearerOnly !== true &&
+    (client.standardFlowEnabled !== false ||
+      client.directAccessGrantsEnabled === true ||
+      client.implicitFlowEnabled === true);
   const configuredInteractiveClients = new Set(
     (keycloakTemplate.clients ?? [])
-      .filter((client) => client.bearerOnly !== true)
+      .filter(isInteractiveClient)
       .map((client) => client.clientId),
   );
 

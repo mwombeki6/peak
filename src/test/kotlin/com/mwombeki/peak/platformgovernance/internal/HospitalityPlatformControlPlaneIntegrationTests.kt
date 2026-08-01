@@ -28,6 +28,8 @@ import com.mwombeki.peak.property.api.PortfolioRolloutTarget
 import com.mwombeki.peak.property.api.PortfolioTemplateAction
 import com.mwombeki.peak.property.api.RolloutPortfolioConfigCommand
 import com.mwombeki.peak.property.api.UpdatePortfolioRolloutCommand
+import com.mwombeki.peak.shared.context.AssuranceLevel
+import com.mwombeki.peak.shared.context.AuthenticationAssurance
 import com.mwombeki.peak.shared.context.RequestContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
@@ -50,6 +52,7 @@ import com.mwombeki.peak.tenantmanagement.api.VerificationReviewAction
 import com.mwombeki.peak.usermanagement.api.BreakGlassAccessPort
 import com.mwombeki.peak.usermanagement.api.DecideBreakGlassAccessCommand
 import com.mwombeki.peak.usermanagement.api.RequestBreakGlassAccessCommand
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 import kotlin.test.AfterTest
@@ -583,6 +586,17 @@ class HospitalityPlatformControlPlaneIntegrationTests {
         contextHolder.set(RequestContext(
             RequestIdentity.Platform(userId, "corr-$token"), "corr-$token", "idem-$token",
             "POST", "/api/v1/platform/control",
+            // Privileged operations are gated on the ceremony proven by the
+            // validated token, so a realistic platform context carries the
+            // assurance a real Keycloak session would supply.
+            authentication = AuthenticationAssurance(
+                level = AssuranceLevel.PHISHING_RESISTANT,
+                acr = "phishing-resistant",
+                amr = listOf("pwd", "hwk"),
+                authTime = Instant.now(),
+                issuer = "https://keycloak.test/realms/peak-platform",
+                subject = userId.toString(),
+            ),
         ))
     }
 

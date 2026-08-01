@@ -53,7 +53,7 @@ class ReportLinkDeliveryService(
                   AND contact_channel.deleted_at IS NULL
                   AND contact_channel.verification_status = 'verified'
                   AND contact_channel.channel_type IN ('email', 'whatsapp')
-                  AND contact_channel_has_active_consent(
+                  AND contact_channel_can_receive(
                         recipient.tenant_id,
                         recipient.contact_id,
                         recipient.contact_channel_id,

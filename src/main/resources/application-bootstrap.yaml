@@ -23,3 +23,11 @@ peak:
       email: ${PEAK_PLATFORM_BOOTSTRAP_EMAIL:}
       issuer: ${PEAK_PLATFORM_BOOTSTRAP_ISSUER:}
       subject: ${PEAK_PLATFORM_BOOTSTRAP_SUBJECT:}
+      # Second emergency administrator custodian. These need explicit mappings
+      # because the environment variable order, PEAK_PLATFORM_BOOTSTRAP_*, does
+      # not match the property path, peak.bootstrap.platform.*, so relaxed
+      # binding cannot connect them on its own.
+      second-full-name: ${PEAK_PLATFORM_BOOTSTRAP_SECOND_FULL_NAME:}
+      second-email: ${PEAK_PLATFORM_BOOTSTRAP_SECOND_EMAIL:}
+      second-issuer: ${PEAK_PLATFORM_BOOTSTRAP_SECOND_ISSUER:}
+      second-subject: ${PEAK_PLATFORM_BOOTSTRAP_SECOND_SUBJECT:}

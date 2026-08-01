@@ -11,4 +11,10 @@ data class RequestContext(
     val requestPath: String,
     val remoteAddress: String? = null,
     val userAgent: String? = null,
+    /**
+     * Authentication strength proven by the validated token. Never populated
+     * from a request body or header, so a caller cannot declare its own
+     * assurance.
+     */
+    val authentication: AuthenticationAssurance = AuthenticationAssurance.UNAUTHENTICATED,
 )

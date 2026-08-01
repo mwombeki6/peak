@@ -214,6 +214,7 @@ jobs:
             -e 's|^KEYCLOAK_DB_PASSWORD=.*|KEYCLOAK_DB_PASSWORD=ci-keycloak-db-password-1234|' \
             -e 's|^KEYCLOAK_SMTP_USER=.*|KEYCLOAK_SMTP_USER=ci-keycloak-smtp-user|' \
             -e 's|^KEYCLOAK_SMTP_PASSWORD=.*|KEYCLOAK_SMTP_PASSWORD=ci-keycloak-smtp-password-1234|' \
+            -e 's|^KEYCLOAK_RECONCILER_SECRET=.*|KEYCLOAK_RECONCILER_SECRET=ci-keycloak-reconciler-secret-1234|' \
             -e 's|^PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=.*|PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=ci-communication-key-1234|' \
             -e 's|^PEAK_ENVELOPE_KEY_BASE64=.*|PEAK_ENVELOPE_KEY_BASE64=cGVhay1jaS1lbnZlbG9wZS1rZXktMzItYnl0ZXMhISE=|' \
             -e 's|^PEAK_PAYMENT_GATEWAY_CREDENTIAL=.*|PEAK_PAYMENT_GATEWAY_CREDENTIAL=ci-payment-credential-1234|' \
@@ -320,6 +321,7 @@ jobs:
             -e 's|^KEYCLOAK_DB_PASSWORD=.*|KEYCLOAK_DB_PASSWORD=acceptance-keycloak-db-password|' \
             -e 's|^KEYCLOAK_SMTP_USER=.*|KEYCLOAK_SMTP_USER=acceptance-keycloak-smtp-user|' \
             -e 's|^KEYCLOAK_SMTP_PASSWORD=.*|KEYCLOAK_SMTP_PASSWORD=acceptance-keycloak-smtp-password|' \
+            -e 's|^KEYCLOAK_RECONCILER_SECRET=.*|KEYCLOAK_RECONCILER_SECRET=acceptance-reconciler-secret|' \
             -e 's|^PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=.*|PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=acceptance-communication-key|' \
             -e 's|^PEAK_ENVELOPE_KEY_BASE64=.*|PEAK_ENVELOPE_KEY_BASE64=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=|' \
             -e 's|^PEAK_PAYMENT_GATEWAY_CREDENTIAL=.*|PEAK_PAYMENT_GATEWAY_CREDENTIAL=acceptance-payment-credential|' \

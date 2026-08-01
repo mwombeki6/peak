@@ -55,7 +55,10 @@
   "otpPolicyCodeReusable": false,
   "passwordPolicy": "length(15) and digits(1) and upperCase(1) and lowerCase(1) and specialChars(1) and notUsername(undefined) and notEmail(undefined) and passwordHistory(5)",
   "webAuthnPolicyRpEntityName": "Peak Hospitality",
-  "webAuthnPolicySignatureAlgorithms": ["ES256", "RS256"],
+  "webAuthnPolicySignatureAlgorithms": [
+    "ES256",
+    "RS256"
+  ],
   "webAuthnPolicyRpId": "${KEYCLOAK_WEBAUTHN_RP_ID}",
   "webAuthnPolicyAttestationConveyancePreference": "none",
   "webAuthnPolicyAuthenticatorAttachment": "not specified",
@@ -65,7 +68,10 @@
   "webAuthnPolicyAvoidSameAuthenticatorRegister": true,
   "webAuthnPolicyAcceptableAaguids": [],
   "webAuthnPolicyPasswordlessRpEntityName": "Peak Hospitality",
-  "webAuthnPolicyPasswordlessSignatureAlgorithms": ["ES256", "RS256"],
+  "webAuthnPolicyPasswordlessSignatureAlgorithms": [
+    "ES256",
+    "RS256"
+  ],
   "webAuthnPolicyPasswordlessRpId": "${KEYCLOAK_WEBAUTHN_RP_ID}",
   "webAuthnPolicyPasswordlessAttestationConveyancePreference": "none",
   "webAuthnPolicyPasswordlessAuthenticatorAttachment": "not specified",
@@ -79,12 +85,29 @@
   "eventsEnabled": true,
   "eventsExpiration": 7776000,
   "enabledEventTypes": [
-    "LOGIN", "LOGIN_ERROR", "LOGOUT", "LOGOUT_ERROR", "REGISTER_ERROR",
-    "UPDATE_PASSWORD", "UPDATE_PASSWORD_ERROR", "UPDATE_TOTP", "UPDATE_TOTP_ERROR",
-    "REMOVE_TOTP", "REMOVE_TOTP_ERROR", "VERIFY_EMAIL", "VERIFY_EMAIL_ERROR",
-    "CODE_TO_TOKEN", "CODE_TO_TOKEN_ERROR", "REFRESH_TOKEN", "REFRESH_TOKEN_ERROR",
-    "REVOKE_GRANT", "REVOKE_GRANT_ERROR", "IDENTITY_PROVIDER_LOGIN",
-    "IDENTITY_PROVIDER_LOGIN_ERROR", "CLIENT_LOGIN", "CLIENT_LOGIN_ERROR"
+    "LOGIN",
+    "LOGIN_ERROR",
+    "LOGOUT",
+    "LOGOUT_ERROR",
+    "REGISTER_ERROR",
+    "UPDATE_PASSWORD",
+    "UPDATE_PASSWORD_ERROR",
+    "UPDATE_TOTP",
+    "UPDATE_TOTP_ERROR",
+    "REMOVE_TOTP",
+    "REMOVE_TOTP_ERROR",
+    "VERIFY_EMAIL",
+    "VERIFY_EMAIL_ERROR",
+    "CODE_TO_TOKEN",
+    "CODE_TO_TOKEN_ERROR",
+    "REFRESH_TOKEN",
+    "REFRESH_TOKEN_ERROR",
+    "REVOKE_GRANT",
+    "REVOKE_GRANT_ERROR",
+    "IDENTITY_PROVIDER_LOGIN",
+    "IDENTITY_PROVIDER_LOGIN_ERROR",
+    "CLIENT_LOGIN",
+    "CLIENT_LOGIN_ERROR"
   ],
   "adminEventsEnabled": true,
   "adminEventsDetailsEnabled": true,
@@ -164,7 +187,9 @@
         "${PEAK_HOSPITALITY_APP_ORIGIN}/auth/callback",
         "${PEAK_HOSPITALITY_APP_ORIGIN}/silent-check-sso.html"
       ],
-      "webOrigins": ["${PEAK_HOSPITALITY_APP_ORIGIN}"],
+      "webOrigins": [
+        "${PEAK_HOSPITALITY_APP_ORIGIN}"
+      ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
         "post.logout.redirect.uris": "${PEAK_HOSPITALITY_APP_ORIGIN}/*",
@@ -198,7 +223,9 @@
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
       "frontchannelLogout": false,
-      "redirectUris": ["${PEAK_POS_REDIRECT_URI}"],
+      "redirectUris": [
+        "${PEAK_POS_REDIRECT_URI}"
+      ],
       "webOrigins": [],
       "attributes": {
         "pkce.code.challenge.method": "S256",
@@ -221,6 +248,26 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "peak-realm-reconciler",
+      "name": "Peak Realm Reconciler",
+      "description": "Least-privileged automation identity for realm reconciliation. Client-credentials service account scoped to this realm, replacing the master-realm administrator password grant.",
+      "protocol": "openid-connect",
+      "enabled": true,
+      "publicClient": false,
+      "bearerOnly": false,
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "frontchannelLogout": false,
+      "attributes": {
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false",
+        "client.session.idle.timeout": "300",
+        "client.session.max.lifespan": "600"
+      }
     }
   ]
 }

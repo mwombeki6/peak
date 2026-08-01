@@ -1,0 +1,21 @@
+# First-install and recovery ceremony overlay.
+#
+# Keycloak bootstrap administrators are temporary. They exist only to create a
+# permanent, least-privileged administration path, and are removed once that
+# path works. Steady-state compose omits these variables entirely rather than
+# passing empty placeholders, because Keycloak treats a present-but-empty
+# variable as set and refuses to start when a username has no password.
+#
+# Layer this file only for the ceremony:
+#
+#   podman compose -f ops/production/compose.yaml \
+#                  -f ops/production/compose.bootstrap-admin.yaml up -d keycloak
+#
+# Then create the permanent administration identity, delete the bootstrap
+# account, and restart without this overlay. Production environment validation
+# rejects KEYCLOAK_BOOTSTRAP_ADMIN being present in steady state.
+services:
+  keycloak:
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_BOOTSTRAP_ADMIN}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD}

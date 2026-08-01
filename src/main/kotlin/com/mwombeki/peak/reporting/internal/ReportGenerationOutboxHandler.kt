@@ -345,7 +345,7 @@ class ReportGenerationOutboxHandler(
                     subscription.property_id = ?
                     OR subscription.property_id IS NULL
                   )
-              AND contact_channel_has_active_consent(
+              AND contact_channel_can_receive(
                     recipient.tenant_id,
                     recipient.contact_id,
                     recipient.contact_channel_id,
