@@ -75,8 +75,16 @@ This directory contains the Podman Compose deployment baseline for Peak.
     `X-Forwarded-For`, `X-Forwarded-Proto`, and `Host`, overwrite any
     client-supplied forwarding headers, and restrict direct listener access.
     Expose the Keycloak administration hostname only to the operator network.
-    Never proxy the Keycloak management port `9000` publicly.
-12. Verify the deployment: `ops/scripts/smoke-test.sh http://localhost:8080 http://localhost:8081 http://localhost:8082`.
+    Never proxy the Keycloak management port `9000` publicly. `nginx.conf.example`
+    is a complete, validating starting point: the public Keycloak hostname there
+    returns 404 for `/admin/**` and `/realms/master/**`, and the administrative
+    hostname allows them behind an operator-network `allow`/`deny`.
+12. Verify the deployment, including that the public Keycloak hostname blocks the
+    administrative surface: `ops/scripts/smoke-test.sh http://localhost:8080 http://localhost:8081 http://localhost:8082 https://auth.peak.example.com`.
+    The fourth argument is the proxy-served public Keycloak hostname; the
+    isolation check runs only against it, because the loopback listeners bypass
+    the proxy. Omitting it leaves that isolation unverified and the smoke test
+    says so.
 
 The standard deploy script performs steps 3, 7, 8, and 10:
 

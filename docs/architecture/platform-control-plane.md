@@ -154,11 +154,18 @@ than an absent one.
   `DefinerSearchPathIntegrationTests`, which fails both when a new function joins
   it and when a rehomed one is left behind, so the list stays accurate.
 - The reverse proxy that must block `/admin/**` and `/realms/master/**` on the
-  public hostname is not configured in this repository, so nothing here proves
-  that isolation. Environment validation asserts the configuration that makes
-  the block possible, not the block itself. A test that stood up a mock proxy
-  would prove the mock behaves, not the production ingress, which is the kind of
-  evidence this document exists to avoid claiming.
+  public hostname is external to the application, so the running backend cannot
+  prove that isolation by itself. Two things now narrow the gap without claiming
+  more than is true. `nginx.conf.example` ships a complete, `nginx -t`-validated
+  configuration whose public Keycloak hostname returns 404 for those paths; that
+  block was exercised against a serving upstream, so it is the proxy rules that
+  refuse, not the upstream. And `ops/scripts/verify-ingress-isolation.sh`, wired
+  into the production smoke test, probes the real proxied hostname and fails if
+  the administrative surface is reachable there, treating even a `401` as
+  exposure because the surface must be unreachable rather than merely guarded.
+  What remains an operator responsibility, and is deliberately not asserted here,
+  is that the deployed ingress actually is that configuration: the probe proves
+  the endpoint an operator points it at, not that they pointed it at production.
 
 ## 5. Fleet, release and feature control
 

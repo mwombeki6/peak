@@ -76,4 +76,20 @@ case "$platform_status" in
     ;;
 esac
 
+# Public Keycloak isolation. The checks above use the loopback listeners, which
+# bypass the reverse proxy, so they cannot see whether the public hostname
+# blocks the administrative surface. That is only observable against the real
+# proxied hostname, so it runs only when one is supplied. Left unset it prints a
+# warning rather than passing silently, because an unverified isolation control
+# is exactly what should not be assumed.
+PUBLIC_KEYCLOAK_URL="${4:-${PEAK_PUBLIC_KEYCLOAK_URL:-}}"
+if [ -n "$PUBLIC_KEYCLOAK_URL" ]; then
+  "$ROOT_DIR/ops/scripts/verify-ingress-isolation.sh" "$PUBLIC_KEYCLOAK_URL"
+else
+  echo "NOTE: public Keycloak isolation was not checked." >&2
+  echo "      Pass the proxy-served hostname as the 4th argument, or set" >&2
+  echo "      PEAK_PUBLIC_KEYCLOAK_URL, to verify /admin/** and /realms/master/**" >&2
+  echo "      are blocked publicly." >&2
+fi
+
 echo "Peak production smoke test passed"
