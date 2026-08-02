@@ -18,7 +18,19 @@ import urllib.request
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
+
+# The token lifecycle is shared with api_load_test.py rather than owned here.
+# It used to live in this file, which is why the read harness never got it and
+# ran a hundred thousand requests on one expiring token. Re-exported so callers
+# and tests that reach for these names through this module keep working.
+from keycloak_tokens import (  # noqa: F401  (re-exported for existing callers)
+    Clock,
+    KeycloakTokenManager,
+    TokenError,
+    TokenRequest,
+    request_token,
+)
 
 
 class WriteLoadFailure(RuntimeError):
@@ -26,8 +38,6 @@ class WriteLoadFailure(RuntimeError):
 
 
 HOSPITALITY_REALM = os.environ.get("KEYCLOAK_HOSPITALITY_REALM", "peak-hospitality")
-TokenRequest = Callable[[str, dict[str, str]], dict[str, Any]]
-Clock = Callable[[], float]
 
 
 @dataclass
@@ -35,113 +45,6 @@ class Call:
     operation: str
     status: int
     duration_ms: float
-
-
-def request_token(keycloak_url: str, form: dict[str, str]) -> dict[str, Any]:
-    data = urllib.parse.urlencode({"client_id": "peak-acceptance", **form}).encode()
-    request = urllib.request.Request(
-        f"{keycloak_url.rstrip('/')}/realms/{HOSPITALITY_REALM}/protocol/openid-connect/token",
-        method="POST",
-        data=data,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-    )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        payload = json.load(response)
-    if not payload.get("access_token"):
-        raise WriteLoadFailure("Keycloak token response did not contain access_token")
-    return payload
-
-
-class KeycloakTokenManager:
-    """Share one rotation-safe refresh-token lifecycle across load workers."""
-
-    def __init__(
-        self,
-        keycloak_url: str,
-        username: str,
-        password: str,
-        *,
-        token_request: TokenRequest = request_token,
-        clock: Clock = time.monotonic,
-    ) -> None:
-        self.keycloak_url = keycloak_url
-        self.username = username
-        self.password = password
-        self.token_request = token_request
-        self.clock = clock
-        self.lock = threading.Lock()
-        self.current_access_token: str | None = None
-        self.current_refresh_token: str | None = None
-        self.refresh_at = 0.0
-        self.password_grant_count = 0
-        self.refresh_grant_count = 0
-
-    def access_token(self) -> str:
-        with self.lock:
-            if self.current_access_token and self.clock() < self.refresh_at:
-                return self.current_access_token
-            return self._renew_locked()
-
-    def refresh_after_unauthorized(self, rejected_token: str) -> str:
-        with self.lock:
-            # Another worker may already have rotated the refresh token. Never
-            # reuse the previous refresh token or invalidate the newer access token.
-            if self.current_access_token != rejected_token:
-                if not self.current_access_token:
-                    return self._renew_locked()
-                return self.current_access_token
-            self.refresh_at = 0.0
-            return self._renew_locked()
-
-    def _renew_locked(self) -> str:
-        payload: dict[str, Any]
-        if self.current_refresh_token:
-            try:
-                payload = self.token_request(
-                    self.keycloak_url,
-                    {
-                        "grant_type": "refresh_token",
-                        "refresh_token": self.current_refresh_token,
-                    },
-                )
-                self.refresh_grant_count += 1
-            except urllib.error.HTTPError as error:
-                if error.code not in (400, 401):
-                    raise
-                error.close()
-                payload = self._password_grant()
-        else:
-            payload = self._password_grant()
-        return self._install(payload)
-
-    def _password_grant(self) -> dict[str, Any]:
-        payload = self.token_request(
-            self.keycloak_url,
-            {
-                "grant_type": "password",
-                "username": self.username,
-                "password": self.password,
-            },
-        )
-        self.password_grant_count += 1
-        return payload
-
-    def _install(self, payload: dict[str, Any]) -> str:
-        access_token = str(payload.get("access_token", ""))
-        refresh_token = str(payload.get("refresh_token", ""))
-        try:
-            expires_in = float(payload.get("expires_in", 0))
-        except (TypeError, ValueError) as error:
-            raise WriteLoadFailure("Keycloak token response has invalid expires_in") from error
-        if not access_token or not refresh_token or expires_in <= 0:
-            raise WriteLoadFailure(
-                "Keycloak token response requires access_token, refresh_token, and positive expires_in",
-            )
-        refresh_skew = min(30.0, max(1.0, expires_in * 0.1))
-        self.current_access_token = access_token
-        self.current_refresh_token = refresh_token
-        self.refresh_at = self.clock() + max(0.0, expires_in - refresh_skew)
-        return access_token
 
 
 def request_json(
