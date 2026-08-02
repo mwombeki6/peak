@@ -7,68 +7,62 @@ import argparse
 import concurrent.futures
 import json
 import math
-import os
 import statistics
 import sys
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 from collections import Counter
 from pathlib import Path
 from typing import Any
+
+# Shared with api_write_load_test.py. This harness used to hold one token for
+# the whole run, which survives the 800 requests CI issues and not the 100,000
+# the weekly soak issues.
+from keycloak_tokens import KeycloakTokenManager
 
 
 class LoadFailure(RuntimeError):
     pass
 
 
-HOSPITALITY_REALM = os.environ.get("KEYCLOAK_HOSPITALITY_REALM", "peak-hospitality")
-
-
-def token_for(keycloak_url: str, username: str, password: str) -> str:
-    body = urllib.parse.urlencode(
-        {
-            "grant_type": "password",
-            "client_id": "peak-acceptance",
-            "username": username,
-            "password": password,
-        }
-    ).encode()
-    request = urllib.request.Request(
-        f"{keycloak_url.rstrip('/')}/realms/{HOSPITALITY_REALM}/protocol/openid-connect/token",
-        method="POST",
-        data=body,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-    )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        return json.load(response)["access_token"]
-
-
 def call(
     base_url: str,
     role: str,
-    token: str,
+    token_manager: KeycloakTokenManager,
     path: str,
     sequence: int,
 ) -> tuple[str, str, int, float, int]:
-    request = urllib.request.Request(
-        f"{base_url.rstrip('/')}{path}",
-        method="GET",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json",
-            "X-Correlation-Id": f"load-{role}-{sequence}",
-        },
-    )
     started = time.perf_counter()
+
+    def send(access_token: str) -> tuple[int, bytes]:
+        request = urllib.request.Request(
+            f"{base_url.rstrip('/')}{path}",
+            method="GET",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Accept": "application/json",
+                "X-Correlation-Id": f"load-{role}-{sequence}",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=15) as response:
+                return response.status, response.read()
+        except urllib.error.HTTPError as error:
+            try:
+                return error.code, error.read()
+            finally:
+                error.close()
+
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
-            raw = response.read()
-            status = response.status
-    except urllib.error.HTTPError as error:
-        raw = error.read()
-        status = error.code
+        token = token_manager.access_token()
+        status, raw = send(token)
+        # The manager renews ahead of expiry, so a 401 means this worker raced
+        # past the renewal window or the token was revoked. One retry with a
+        # fresh token. The elapsed time deliberately spans both attempts,
+        # because that is what a real client would have waited.
+        if status == 401:
+            status, raw = send(token_manager.refresh_after_unauthorized(token))
     except (TimeoutError, urllib.error.URLError):
         return role, path, 0, (time.perf_counter() - started) * 1000, 0
     return role, path, status, (time.perf_counter() - started) * 1000, len(raw)
@@ -117,25 +111,19 @@ def main() -> int:
     purchase_order_id = departments["inventoryAndProcurement"]["purchaseOrderId"]
     supplier_id = departments["inventoryAndProcurement"]["supplierId"]
     run_id = departments["runId"].lower()
-    tokens = {
-        "management": token_for(
-            args.keycloak_url, "acceptance-tenant-admin", args.tenant_password
-        ),
-        "housekeeping": token_for(
-            args.keycloak_url, f"real-hotel-housekeeper-{run_id}", args.staff_password
-        ),
-        "maintenance": token_for(
-            args.keycloak_url, f"real-hotel-maintenance-{run_id}", args.staff_password
-        ),
-        "stores-procurement": token_for(
-            args.keycloak_url, f"real-hotel-stores-{run_id}", args.staff_password
-        ),
-        "restaurant": token_for(
-            args.keycloak_url, f"real-hotel-restaurant-{run_id}", args.staff_password
-        ),
-        "supervision": token_for(
-            args.keycloak_url, f"real-hotel-supervisor-{run_id}", args.staff_password
-        ),
+    # One manager per role, shared across every worker. Each is internally
+    # locked, so concurrent workers renew once between them rather than racing
+    # to spend the same rotated refresh token.
+    token_managers = {
+        role: KeycloakTokenManager(args.keycloak_url, username, password)
+        for role, username, password in (
+            ("management", "acceptance-tenant-admin", args.tenant_password),
+            ("housekeeping", f"real-hotel-housekeeper-{run_id}", args.staff_password),
+            ("maintenance", f"real-hotel-maintenance-{run_id}", args.staff_password),
+            ("stores-procurement", f"real-hotel-stores-{run_id}", args.staff_password),
+            ("restaurant", f"real-hotel-restaurant-{run_id}", args.staff_password),
+            ("supervision", f"real-hotel-supervisor-{run_id}", args.staff_password),
+        )
     }
 
     paths = [
@@ -176,7 +164,7 @@ def main() -> int:
     for sequence in range(args.warmup):
         role, path = paths[sequence % len(paths)]
         _, _, status, _, _ = call(
-            args.base_url, role, tokens[role], path, -sequence
+            args.base_url, role, token_managers[role], path, -sequence
         )
         require(status == 200, f"Warmup path failed with HTTP {status}: {role} {path}")
 
@@ -187,7 +175,7 @@ def main() -> int:
                 call,
                 args.base_url,
                 paths[sequence % len(paths)][0],
-                tokens[paths[sequence % len(paths)][0]],
+                token_managers[paths[sequence % len(paths)][0]],
                 paths[sequence % len(paths)][1],
                 sequence,
             )
@@ -230,8 +218,8 @@ def main() -> int:
             "concurrency": args.concurrency,
             "warmupRequests": args.warmup,
             "endpointCount": len(paths),
-            "actorRoleCount": len(tokens),
-            "actorRoles": sorted(tokens),
+            "actorRoleCount": len(token_managers),
+            "actorRoles": sorted(token_managers),
             "durationSeconds": round(elapsed, 3),
             "throughputRequestsPerSecond": round(throughput, 2),
             "responseBytes": sum(size for _, _, _, _, size in results),
