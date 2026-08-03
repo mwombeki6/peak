@@ -1,0 +1,154 @@
+# Example reverse proxy for a Peak deployment.
+#
+# This is a starting point, not a drop-in. Replace every peak.example.com
+# hostname and every TLS certificate path, and review it against your own
+# platform's conventions before serving traffic. It exists so the isolation the
+# architecture requires is expressed as configuration an operator can copy and
+# ops/scripts/verify-ingress-isolation.sh can check, rather than as prose.
+#
+# It is a complete nginx.conf so `nginx -t -c` validates it as written.
+#
+# Topology. Four public hostnames terminate here and forward to three loopback
+# listeners the containers bind:
+#
+#   api.peak.example.com          -> 127.0.0.1:8080   tenant API
+#   platform.peak.example.com     -> 127.0.0.1:8082   isolated platform API
+#   auth.peak.example.com         -> 127.0.0.1:8081   Keycloak, PUBLIC surface
+#   auth-admin.peak.example.com   -> 127.0.0.1:8081   Keycloak, ADMIN surface
+#
+# The two Keycloak hostnames reach the same listener. The difference is entirely
+# in what each server block allows: the public one refuses /admin/** and
+# /realms/master/**; the administrative one allows them and is reachable only
+# from the operator network. Keycloak's management port 9000 is never proxied.
+
+user  nginx;
+worker_processes auto;
+events {
+    worker_connections 1024;
+}
+
+http {
+    # Forwarded headers are set here and here only. Any value a client supplies
+    # is discarded by assigning from $remote_addr and $scheme rather than
+    # appending, so a request cannot spoof its origin address or claim https over
+    # a plaintext hop.
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_http_version 1.1;
+
+    # -----------------------------------------------------------------------
+    # Tenant API
+    # -----------------------------------------------------------------------
+    server {
+        listen 443 ssl;
+        http2 on;
+        server_name api.peak.example.com;
+
+        ssl_certificate     /etc/ssl/peak/api.crt;
+        ssl_certificate_key /etc/ssl/peak/api.key;
+
+        location / {
+            proxy_pass http://127.0.0.1:8080;
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # Isolated platform API
+    # -----------------------------------------------------------------------
+    server {
+        listen 443 ssl;
+        http2 on;
+        server_name platform.peak.example.com;
+
+        ssl_certificate     /etc/ssl/peak/platform.crt;
+        ssl_certificate_key /etc/ssl/peak/platform.key;
+
+        # The platform console is an operator surface. Restricting it to the
+        # operator network as well is defence in depth; token validation is
+        # still the control.
+        # allow 10.0.0.0/8;
+        # deny all;
+
+        location / {
+            proxy_pass http://127.0.0.1:8082;
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # Keycloak, PUBLIC hostname
+    #
+    # Browser and native clients complete authorization code flows against the
+    # two Peak realms here. The administrative surface is refused. `^~` stops
+    # nginx evaluating other locations once the prefix matches, so the deny
+    # rules win over the catch-all.
+    # -----------------------------------------------------------------------
+    server {
+        listen 443 ssl;
+        http2 on;
+        server_name auth.peak.example.com;
+
+        ssl_certificate     /etc/ssl/peak/auth.crt;
+        ssl_certificate_key /etc/ssl/peak/auth.key;
+
+        # Administrative console and REST API. Returned 404 rather than 403 so
+        # the public hostname does not even confirm the surface exists.
+        location ^~ /admin/ {
+            return 404;
+        }
+
+        # The master realm is Keycloak's own administrative realm. No Peak
+        # client authenticates against it, so it is not reachable publicly.
+        location ^~ /realms/master/ {
+            return 404;
+        }
+
+        # Management endpoints are never exposed publicly.
+        location ^~ /metrics {
+            return 404;
+        }
+        location ^~ /health {
+            return 404;
+        }
+
+        location / {
+            proxy_pass http://127.0.0.1:8081;
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # Keycloak, ADMINISTRATIVE hostname
+    #
+    # The reconciler, the realm verifier, and human operators use this. It
+    # allows the administrative surface and is reachable only from the operator
+    # network. It must never be added to public DNS.
+    # -----------------------------------------------------------------------
+    server {
+        listen 443 ssl;
+        http2 on;
+        server_name auth-admin.peak.example.com;
+
+        ssl_certificate     /etc/ssl/peak/auth-admin.crt;
+        ssl_certificate_key /etc/ssl/peak/auth-admin.key;
+
+        # Operator network only. Adjust to your management CIDR. Without this the
+        # administrative hostname is as exposed as the public one, which defeats
+        # the separation entirely.
+        allow 10.0.0.0/8;
+        deny all;
+
+        location / {
+            proxy_pass http://127.0.0.1:8081;
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # Plaintext redirect. No application traffic is served over http.
+    # -----------------------------------------------------------------------
+    server {
+        listen 80 default_server;
+        server_name _;
+        return 308 https://$host$request_uri;
+    }
+}
