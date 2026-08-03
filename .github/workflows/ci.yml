@@ -233,6 +233,14 @@ jobs:
           bash -n ops/testing/*.sh
           python3 -m py_compile ops/scripts/*.py
           python3 -m py_compile ops/testing/*.py
+          # py_compile above only checks syntax; it resolves no names, so an
+          # undefined reference in a function nothing imports sails through it and
+          # through the unit tests, then fails at runtime. A real load-test bug of
+          # exactly that shape reached a 76-minute soak once. Ruff's F rules are
+          # the static name-resolution check that stops the next one at commit.
+          # pipx runs it in an ephemeral environment, which avoids the system
+          # Python being externally managed on the runner.
+          pipx run ruff==0.16.1 check --no-cache --select F ops/scripts ops/testing
           python3 -m unittest discover -s ops/testing -p 'test_*.py'
           find ops/keycloak -name '*-realm.json' -print0 | \
             xargs -0 -n1 python3 -m json.tool >/dev/null
