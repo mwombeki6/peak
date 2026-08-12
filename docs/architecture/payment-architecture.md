@@ -189,20 +189,28 @@ the provider health contributor states this rather than implying full coverage.
 
 ## Data model
 
-**`plans`** — replace `monthly_usd` and `annual_usd` with `base_monthly_tzs`,
-`included_rooms`, `price_per_extra_room_tzs`, `included_outlets`,
-`price_per_extra_outlet_tzs`, `trial_days`. Existing capacity columns remain as
-entitlement limits. Free is a price of zero, not a special case, so introducing a
-Starter price later is a data change.
+**`plans`** — unchanged, and deliberately so. `monthly_usd` and `annual_usd` are
+deprecated in place rather than replaced with TZS pricing columns: putting a price on a
+plan would make the plan the product, and a product's contents change over time while an
+already-sold purchase must not. Capacity columns stay as entitlement limits, which is
+what the `limit.*` synthesis in `effective_tenant_entitlement` reads.
+
+Pricing lives in `peak_product_prices`, keyed by `(product, term)`. See `V89` and `V92`.
 
 **`payment_provider_accounts`** — unchanged. Already per tenant and property, already
 stores credentials by reference, already rejects inline secrets in production.
 
-**V88** — `production_provider_readiness_counts`, introduced in `V43`, hardcodes
-`pp.provider_code <> 'clickpesa'`, so any other provider's active production account
-is counted unsafe and the runtime refuses to start. The preceding line already enforces
-the approved-codes allowlist, making the comparison redundant. Replace it with a
-denylist, matching the pattern the fiscal branch uses.
+**Latent, not blocking** — `production_provider_readiness_counts`, introduced in `V43`,
+hardcodes `pp.provider_code <> 'clickpesa'`, so an active production account for any
+other payment provider is counted unsafe and the runtime refuses to start. The preceding
+line already enforces the approved-codes allowlist, which makes the comparison redundant;
+the fiscal branch of the same function uses a denylist and is the pattern to follow.
+
+This does not block anything today. Guest payments stay cash and manual, so no second
+provider account is configured, and Peak's own subscription credentials come from
+configuration rather than `payment_provider_accounts`, so the readiness guard never sees
+them. It becomes a blocker the moment a second payment provider is introduced for guest
+collections.
 
 ## Provider connection
 
@@ -274,11 +282,22 @@ decision.
 
 ## Build order
 
-1. **V88** — unhardcode the activation guard. Blocks everything else.
-2. **AzamPay adapter** — serves both flows.
-3. **`platformbilling`** — plans in TZS, subscription lifecycle, collection through the
-   adapter from step 2.
-4. **Status sweep**.
+Guest payments (Flow 1) need no build: cash and manual recording work today, and no
+Tanzanian provider offers the split settlement that would let Peak route guest money to
+a property without holding it.
+
+The subscription side (Flow 2) is `platformbilling`:
+
+1. **V88** — runtime grants and row policies, so the worker can apply a paid
+   subscription. The API runtime stays read-only on subscriptions.
+2. **V89** — commercial schema and the module.
+3. **V90** — entitlement resolution taught about grants, with the `plans.is_active` and
+   `tenants.plan_id` fallback bugs fixed.
+4. **V91** — selective restriction, so a lapsed subscription has a consequence without
+   stranding a guest.
+5. **V92** — the catalog: tiers, add-ons, prices, permissions and routes.
+6. **Services** — catalog and quoting, purchases, provider adapters, webhook settlement,
+   the entitlement reconciler and the lifecycle loops.
 
 ## Open with AzamPay
 
