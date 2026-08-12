@@ -51,22 +51,36 @@ Subscription only. Priced in TZS. Metered transaction fees are deferred — with
 provider-side split, a percentage fee cannot be collected at source, and invoicing a
 property for money it has already received costs more to chase than it returns.
 
-```
-monthly = base
-        + max(0, rooms   − included_rooms)   × price_per_extra_room
-        + max(0, outlets − included_outlets) × price_per_extra_outlet
-```
+The model is **base tiers plus add-ons**, implemented by the `platformbilling` module.
+An earlier revision of this document specified per-room and per-outlet metering against
+columns added to `plans`; that was replaced because pricing on a technical module makes
+an already-sold purchase change when the bundle changes. Products are a commercial
+concept of their own, and price lives on `(product, term)`.
 
-| | Starter | Pro | Enterprise |
-|---|---|---|---|
-| Base | 30,000 TZS | 150,000 TZS | Contract |
-| Rooms included / extra | 10 / 3,000 | 50 / 2,500 | — |
-| Outlets included / extra | 1 / 10,000 | 5 / 8,000 | — |
+| Tier | Monthly | Notes |
+|---|---|---|
+| Peak Core | 30,000 TZS | The hotel operating loop |
+| Peak Pro | 120,000 TZS | Adds maintenance, analytics, capacity |
+| Peak Group | Contract | Multi-property; not self-serve |
 
-A 20-room lodge with two outlets pays 70,000 TZS. A 50-room hotel pays 150,000 TZS,
-roughly 0.17% of the revenue it processes. Capacity changes reprice at renewal;
-mid-cycle proration is deliberately not implemented, because the disputes it generates
-exceed the amounts involved.
+| Add-on | Monthly | Scope |
+|---|---|---|
+| Peak POS | 35,000 TZS | Per property |
+| Peak Inventory & Procurement | 25,000 TZS | Per property, requires POS |
+| Peak Direct | 40,000 TZS | Per tenant |
+| Peak Revenue Assurance | 50,000 TZS | Per tenant |
+
+Terms are 1, 3, 6 and 12 months, with the longer term stored as its own price rather
+than a discount rate. Twelve months costs nine, which matters more than it looks:
+mobile money has no mandate, so every renewal needs the owner to approve a PIN, and an
+annual term buys one approval instead of twelve.
+
+Capacity changes reprice at renewal. Mid-cycle proration is deliberately not
+implemented, because the disputes it generates exceed the amounts involved.
+
+The full commercial and enforcement design — catalog, purchase orders, grants, the
+reconciler and the restriction lifecycle — is in the `platformbilling` module and its
+migrations `V88`–`V92`.
 
 ## Components
 
