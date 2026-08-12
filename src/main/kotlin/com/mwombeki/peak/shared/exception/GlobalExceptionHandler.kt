@@ -74,15 +74,20 @@ class GlobalExceptionHandler {
             PublicErrorSanitizer.sanitize(customizedMessage),
         )
 
+        // UNPROCESSABLE_CONTENT replaces the deprecated UNPROCESSABLE_ENTITY. The
+        // status is 422 either way; only the reason phrase changes, from
+        // "Unprocessable Entity" to the RFC 9110 name "Unprocessable Content".
+        // That phrase reaches clients in the `error` field, and no test, OpenAPI
+        // baseline or generated client asserts the old text.
         val errorResponse = ErrorResponse(
-            status = HttpStatus.UNPROCESSABLE_ENTITY.value(),
-            error = HttpStatus.UNPROCESSABLE_ENTITY.reasonPhrase,
+            status = HttpStatus.UNPROCESSABLE_CONTENT.value(),
+            error = HttpStatus.UNPROCESSABLE_CONTENT.reasonPhrase,
             errorCode = "INVALID_REQUEST_PAYLOAD",
             message = customizedMessage,
             path = request.requestURI,
             traceId = traceId
         )
-        return ResponseEntity(errorResponse, HttpStatus.UNPROCESSABLE_ENTITY)
+        return ResponseEntity(errorResponse, HttpStatus.UNPROCESSABLE_CONTENT)
     }
 
     @ExceptionHandler(HttpMediaTypeNotSupportedException::class)

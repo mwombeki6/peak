@@ -1,16 +1,17 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
-    kotlin("jvm") version "2.3.21"
-    kotlin("plugin.spring") version "2.3.21"
-    kotlin("kapt") version "2.3.21"
+    kotlin("jvm") version "2.4.10"
+    kotlin("plugin.spring") version "2.4.10"
+    kotlin("kapt") version "2.4.10"
 
-    // 4.0.7 manages spring-framework 7.0.8, which fixes CVE-2026-41850: denial of
-    // service through specially crafted SpEL expressions, rated HIGH and reachable
-    // through spring-expression and spring-webmvc under 7.0.7. Unrelated to the
-    // tenant activation work on this branch; the container scan reports it against
-    // any build still on 4.0.6, master included.
-    id("org.springframework.boot") version "4.0.7"
+    // 4.1.0 still manages spring-framework 7.0.8, which fixes CVE-2026-41850:
+    // denial of service through specially crafted SpEL expressions, rated HIGH and
+    // reachable through spring-expression and spring-webmvc under 7.0.7. The minor
+    // bump is therefore CVE-neutral and is taken for the managed-dependency
+    // refresh, most consequentially flyway 11.14.1 -> 12.4.0. The migration matrix
+    // gates that major on PostgreSQL 16 and 18 before it can reach a release.
+    id("org.springframework.boot") version "4.1.0"
     id("io.spring.dependency-management") version "1.1.7"
 }
 
@@ -28,11 +29,20 @@ repositories {
     mavenCentral()
 }
 
-extra["springModulithVersion"] = "2.0.6"
-extra["jackson-2-bom.version"] = "2.21.4"
-extra["jackson-bom.version"] = "3.1.4"
-extra["tomcat.version"] = "11.0.22"
-extra["postgresql.version"] = "42.7.12"
+extra["springModulithVersion"] = "2.1.0"
+
+// Only an override that actually moves a version belongs here. jackson-2-bom
+// (2.21.4), jackson-bom (3.1.4) and tomcat (11.0.22) each restated the exact
+// value Spring Boot already manages, so they changed nothing while reading as
+// deliberate pins, and the first Boot release to ship a patched Tomcat or
+// Jackson would have been silently held back to the vulnerable version. The
+// postgresql override stays because 42.7.13 is genuinely ahead of the 42.7.11
+// the platform manages, and kotlin because Spring Boot 4.1.0 still manages the
+// 2.3.21 standard library. Leaving that in place would run the 2.4.10 compiler
+// against an older stdlib, which reports a version-skew warning that
+// allWarningsAsErrors turns into a build failure.
+extra["postgresql.version"] = "42.7.13"
+extra["kotlin.version"] = "2.4.10"
 
 dependencies {
     // Operations and observability
@@ -52,7 +62,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-webmvc")
     implementation("org.springframework.boot:spring-boot-starter-websocket")
     implementation("org.springframework.boot:spring-boot-starter-validation")
-    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.2")
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0")
 
     // Security
     implementation("org.springframework.boot:spring-boot-starter-security")
@@ -65,7 +75,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-mail")
 
     // Reporting and S3-compatible private object storage
-    implementation("org.apache.pdfbox:pdfbox:3.0.7")
+    implementation("org.apache.pdfbox:pdfbox:3.0.8")
     implementation("io.minio:minio:9.0.3")
     implementation("com.github.librepdf:openpdf-fonts-extra:3.0.5")
 
@@ -169,10 +179,14 @@ kotlin {
         jvmTarget.set(JvmTarget.JVM_25)
         allWarningsAsErrors.set(true)
 
+        // -Xannotation-default-target=param-property was dropped here: language
+        // version 2.4 already applies that targeting by default, so the flag became
+        // redundant and Kotlin reports it as a warning, which allWarningsAsErrors
+        // turns into a failed build. Removing it preserves the behaviour rather
+        // than changing it.
         freeCompilerArgs.addAll(
             "-Wextra",
             "-Xjsr305=strict",
-            "-Xannotation-default-target=param-property"
         )
     }
 }
