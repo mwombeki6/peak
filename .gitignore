@@ -8,6 +8,7 @@ docs/architecture/*
 !docs/architecture/platform-control-plane.md
 !docs/architecture/identity-and-access.md
 !docs/architecture/frontend-applications.md
+!docs/architecture/payment-architecture.md
 !docs/engineering-readiness.md
 .gradle
 api-client/node_modules/
