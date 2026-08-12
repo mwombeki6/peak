@@ -73,25 +73,99 @@ exceed the amounts involved.
 | Component | Module | Status |
 |---|---|---|
 | `PaymentProvider` SPI, `PaymentPort`, `PaymentService` | `payment` | Existing |
-| `AzamPayPaymentProvider`, `AzamPaySignature`, `AzamPayHealthIndicator` | `integrations` | New |
+| `AzamPayPaymentProvider`, `AzamPaySignature`, `AzamPayPublicKeyProvider`, `AzamPayHealthIndicator` | `integrations` | New |
 | `PaymentStatusSweep` | `payment` | New |
 | `PlanService`, `SubscriptionService`, `PlatformInvoiceService`, `PlatformCollectionService`, `SubscriptionLifecycle` | `platformbilling` | New module |
 
 `ClickPesaPaymentProvider` is retained and dormant. Removing it before launch is
 gratuitous risk; the SPI supports both and AzamPay becomes the default.
 
-`platformbilling` requires a `package-info.java` dependency declaration, an entry in
-`module-inventory.md`, and `database-ownership.csv` rows. All three are enforced by
-existing architecture tests.
+### Module boundaries
 
-## Provider mapping
+`integrations` and `payment` need no dependency changes. `integrations` already
+declares `payment::api`, so the AzamPay adapter sits where `ClickPesaPaymentProvider`
+already sits.
+
+`platformbilling` is the twenty-third module:
+
+```java
+@ApplicationModule(
+        id = "platformbilling",
+        displayName = "Platform Billing",
+        allowedDependencies = {
+                "shared::context", "shared::exception", "shared::secrets",
+                "audit::api", "reliability::api",
+                "payment::api", "tenantmanagement::api"
+        }
+)
+```
+
+It depends on `payment::api` for the `PaymentProvider` SPI rather than `PaymentPort`,
+because every `PaymentPort` method is property-scoped and writes to guest folios, which
+is wrong for Peak's own invoices. Collection uses the provider adapter directly with
+Peak's own credentials. No cycle results: `payment` does not depend on
+`platformbilling`, and `tenantmanagement` depends only on audit, reliability, shared and
+usermanagement.
+
+`plans`, `plan_entitlements` and `tenant_subscriptions` stay owned by
+`tenantmanagement`, which remains the authority on what plan a tenant holds.
+`platformbilling` reads them through `tenantmanagement::api` and owns only its own new
+tables. Moving ownership would mean relocating write paths out of a working module for
+no benefit. The cost of this choice is that `tenantmanagement::api` grows slightly.
+
+Adding the module requires a `package-info.java` declaration, an entry in
+`module-inventory.md`, and `database-ownership.csv` rows for every new table. All three
+are enforced by existing architecture tests.
+
+## Provider integration
+
+Verified against AzamPay's published OpenAPI schema. Community SDKs disagree with it —
+they document `/azampay/createtransfer` and a POST status endpoint, neither of which
+appears in the schema — so the schema is the reference.
 
 | SPI | AzamPay |
 |---|---|
-| `initiate()` | `MnoCheckout` |
-| `queryStatus()` | `TransactionalStatus` |
-| `parseWebhook()` | signed callback |
+| `initiate()` | `POST /azampay/mno/checkout` |
+| `queryStatus()` | `GET /api/v1/azampay/transactionstatus` |
+| `parseWebhook()` | `POST /api/v1/Checkout/Callback` |
 | `statement()` | not offered — `UnsupportedOperationException` |
+
+Authentication is `POST /AppRegistration/GenerateToken` on a separate authenticator
+host, returning `data.accessToken` and `data.expire`. Sandbox hosts are
+`authenticator-sandbox.azampay.co.tz` and `sandbox.azampay.co.tz`; the production hosts
+are not published and must be obtained from AzamPay.
+
+Collection takes `accountNumber`, `amount`, `currency`, `externalId` and `provider`,
+where provider is one of `Airtel`, `Tigo`, `Halopesa`, `Azampesa` or `Mpesa`.
+
+**Amount is capped at 5,000,000 TZS per transaction.** This is a product constraint,
+not only an adapter one: a group booking or long stay above the cap cannot be collected
+in a single mobile money transaction and needs splitting, a bank transfer or cash. The
+adapter rejects an over-cap request before calling the provider so the failure is
+Peak's, explained in Peak's language, rather than an opaque provider error.
+
+### Callback verification
+
+Callbacks carry an RSA signature, not an HMAC. Verification is `SHA-256` with
+`PKCS#1 v1.5` padding over the concatenation of four callback fields:
+
+```
+{utilityref}{externalreference}{transactionstatus}{operator}
+```
+
+The public key comes from `GET /azampay/v1/public-key?format=Pem`, is cached, and is
+refreshed periodically. On a verification failure the key is re-fetched once before the
+callback is rejected, so a key rotation does not present as a wave of forged callbacks.
+
+This makes the AzamPay adapter's key handling different from ClickPesa's: the
+verification material is a fetched public key rather than a shared secret held on the
+provider account, so `AzamPayPublicKeyProvider` owns it rather than
+`payment_provider_accounts`.
+
+The callback body also carries `user`, `password` and `clientId`. These are additional
+shared-secret fields and are checked, but the RSA signature is the authority.
+
+### Assurance
 
 AzamPay exposes no statement endpoint, so settlement assurance runs on two
 authoritative legs — signed callback and status query — with a scheduled sweep over
@@ -128,6 +202,11 @@ account.
    AzamPay's token endpoint before storing, records them as secret references, and
    opens the account in `sandbox`. Promotion to `production` passes the existing
    certification gate.
+
+A sandbox app registration sets its own callback URL, but **a production callback URL is
+registered by AzamPay's customer care team after KYC approval**. Connecting a property
+in production therefore has a step Peak cannot perform or automate, and the onboarding
+flow must set that expectation rather than presenting connection as instant.
 
 ## Operational flows
 
@@ -169,9 +248,10 @@ can connect a provider mid-operation without changing how its staff work.
 ## Security
 
 Peak stores credentials that can initiate collections and, through
-`createtransfer`, disbursements. A compromise could therefore move a property's money
-out, not merely collect on its behalf. Credentials are envelope-encrypted, stored only
-by reference, rejected inline in production, and audited on use.
+`POST /api/v1/azampay/disburse`, disbursements. A compromise could therefore move a
+property's money out, not merely collect on its behalf. Credentials are
+envelope-encrypted, stored only by reference, rejected inline in production, and audited
+on use.
 
 The material open mitigation is whether AzamPay can issue collection-scoped
 credentials with disbursement disabled. If so, a breach can only pull money in, and
@@ -185,6 +265,29 @@ decision.
 3. **`platformbilling`** — plans in TZS, subscription lifecycle, collection through the
    adapter from step 2.
 4. **Status sweep**.
+
+## Open with AzamPay
+
+Four items are unresolved and none can be settled from the published documentation.
+
+**The signed data is ambiguous.** AzamPay's callback page states the signature covers
+`{utilityref}{externalreference}{transactionstatus}{operator}`, while the description of
+the `signature` field on the same page states it covers `{utilityref}{externalreference}`
+only. Their sample code in five languages uses the four-field form, which is the one
+recorded above, but implementing the wrong one fails every callback. Confirm in sandbox
+before the verifier is written.
+
+**Production hosts are unpublished.** Only sandbox hosts appear in the documentation.
+
+**Token lifetime is undocumented.** `data.expire` is returned but its unit and duration
+are not specified, which the token cache needs.
+
+**Whether the 5,000,000 cap is per transaction, per day, or negotiable at volume.**
+
+Two further questions are commercial rather than blocking: whether credentials can be
+scoped to collections only, and what `submerchantAcc` — present in the callback schema
+and documented as reserved for future use — is reserved for. The second matters because
+sub-merchant support is the capability whose absence produced this architecture.
 
 ## Deferred
 
