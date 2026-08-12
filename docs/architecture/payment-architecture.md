@@ -129,6 +129,34 @@ account.
    opens the account in `sandbox`. Promotion to `production` passes the existing
    certification gate.
 
+## Operational flows
+
+**Property onboarding.** A property is operational before any provider exists.
+
+1. Tenant registered through `registerNewTenant`.
+2. Property, rooms and outlets configured. This determines the subscription price,
+   since billing is driven by capacity.
+3. Subscription starts, on trial or paid.
+4. Staff invited.
+5. *Optionally*, AzamPay connected. This upgrades mobile money from recorded to
+   initiated and changes nothing else.
+
+Step 5 is the only step that involves a payment provider, and the property is fully
+working without it.
+
+**Guest stay.** Payment is a checkout concern, not an arrival concern.
+
+| Stage | Payment involvement |
+|---|---|
+| Check-in | None. `checkIn` takes no payment and opens the folio. |
+| During stay | Room nights and POS charges accrue to the folio. |
+| Check-out | Folio settled by cash, or by mobile money — recorded against the property's own till when unconnected, initiated by Peak when connected. |
+| Unsettled at check-out | `checkOutWithUnpaidOverride`, which is permissioned and audited. |
+
+The capability tier changes only how a mobile money payment is captured. Arrival,
+departure, folio behaviour and the audit trail are identical either way, so a property
+can connect a provider mid-operation without changing how its staff work.
+
 ## Non-payment
 
 | Stage | Restricted |
