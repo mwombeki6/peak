@@ -137,6 +137,7 @@ peak_purchase_lines,platformbilling,active,platformbilling::api-or-internal-owne
 peak_purchases,platformbilling,active,platformbilling::api-or-internal-owner
 peak_receipts,platformbilling,active,platformbilling::api-or-internal-owner
 peak_reconciliation_state,platformbilling,active,platformbilling::api-or-internal-owner
+peak_restriction_allowances,platformbilling,active,platformbilling::api-or-internal-owner
 permission_catalog,usermanagement,active,usermanagement::api-or-internal-owner
 permissions,usermanagement,active,usermanagement::api-or-internal-owner
 plan_entitlements,tenantmanagement,active,tenantmanagement::api-or-internal-owner
