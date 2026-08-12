@@ -1,6 +1,6 @@
 # Canonical Module Inventory
 
-This inventory is the source of truth for the 22 Spring Modulith modules in the
+This inventory is the source of truth for the 23 Spring Modulith modules in the
 V1 backend. Package declarations in `src/main/java/**/package-info.java` are the
 machine-enforced dependency contract. `database-ownership.csv` is the
 machine-enforced table contract. Generated diagrams and module canvases are
@@ -19,6 +19,7 @@ written under `build/spring-modulith-docs` by `ModulithDocumentationTests`.
 | `maintenance` | `MaintenancePort`, close snapshot port | Requests, work orders, room blocks and windows | `maintenance.*` / `internal`, `realtime` | property API |
 | `nightaudit` | `NightAuditPort`, close snapshot port, `FinancialControlPort` | Runs, issues, immutable close snapshots, financial-control cases, evidence and events | `night_audit.*`, `financial_control.*`, `report.generation.requested` / `internal`, `reporting`, `realtime` | module close-summary APIs and user-management staff directory |
 | `payment` | `PaymentPort`, status/webhook ports, provider SPI | Cash sessions, provider accounts, transactions, webhooks and reconciliation | `payment.*` / `payment`, `internal`, `realtime` | billing API |
+| `platformbilling` | `PlatformBillingPort`, `PlatformBillingWebhookPort` | Product catalog, prices, purchases, purchase lines, payment attempts, provider events, product grants, module activations, reconciliation state, billing lifecycle events and receipts | `platform_billing.*` / `platform_billing` | tenant subscription and entitlement projection, property module projection, payment provider SPI |
 | `platformgovernance` | `TenantGovernancePort`, `SupportControlPort`, `FleetControlPort`, `ReleaseControlPort`, `FeatureControlPort` | Platform services, health, jobs, alerts, incidents, releases, feature flags and support evidence | `platform.tenant.*`, `platform.support.*`, `platform.monitoring.*`, `platform.release.*` / `platform` | tenant lifecycle, platform authorization and user-management privileged-access evidence APIs |
 | `pos` | POS status/configuration ports | Outlets, menus, sessions, orders, tickets and settlement snapshots | `pos.*` / `internal`, `realtime` | billing, payment, inventory and property APIs |
 | `procurement` | `ProcurementPort` | Suppliers, purchase orders, approvals and receipts | `procurement.*` / `internal`, `realtime` | inventory and property APIs |

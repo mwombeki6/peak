@@ -78,6 +78,16 @@ enum class OutboxDestination(val databaseValue: String) {
     HOUSEKEEPING("housekeeping"),
     REPORTS("reports"),
     PLATFORM("platform"),
+
+    /**
+     * Peak's own subscription revenue, kept apart from [PLATFORM] deliberately.
+     *
+     * The outbox dispatcher throws when more than one handler claims an event, and the
+     * platform operations handler claims everything on [PLATFORM] by default. A billing
+     * handler sharing that destination would make every platform event ambiguous and
+     * dead-letter the lot, not only billing's own.
+     */
+    PLATFORM_BILLING("platform_billing"),
 }
 
 @NamedInterface("api")
