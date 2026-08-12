@@ -110,7 +110,7 @@ Starter price later is a data change.
 **`payment_provider_accounts`** — unchanged. Already per tenant and property, already
 stores credentials by reference, already rejects inline secrets in production.
 
-**V76** — `production_provider_readiness_counts` hardcodes
+**V88** — `production_provider_readiness_counts`, introduced in `V43`, hardcodes
 `pp.provider_code <> 'clickpesa'`, so any other provider's active production account
 is counted unsafe and the runtime refuses to start. The preceding line already enforces
 the approved-codes allowlist, making the comparison redundant. Replace it with a
@@ -180,7 +180,7 @@ decision.
 
 ## Build order
 
-1. **V76** — unhardcode the activation guard. Blocks everything else.
+1. **V88** — unhardcode the activation guard. Blocks everything else.
 2. **AzamPay adapter** — serves both flows.
 3. **`platformbilling`** — plans in TZS, subscription lifecycle, collection through the
    adapter from step 2.
