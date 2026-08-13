@@ -8,6 +8,8 @@ import com.mwombeki.peak.platformbilling.api.ProductSummary
 import com.mwombeki.peak.platformbilling.api.PurchaseResponse
 import com.mwombeki.peak.platformbilling.api.Quote
 import com.mwombeki.peak.platformbilling.api.QuoteRequest
+import com.mwombeki.peak.platformbilling.api.RenewalOffer
+import com.mwombeki.peak.platformbilling.internal.RenewalOfferService
 import java.util.UUID
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.GetMapping
@@ -31,6 +33,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/v1/tenants/{tenantId}/billing")
 class TenantBillingController(
     private val platformBillingPort: PlatformBillingPort,
+    private val renewalOfferService: RenewalOfferService,
 ) {
     @GetMapping("/catalog")
     fun catalog(@PathVariable tenantId: UUID): List<ProductSummary> {
@@ -69,6 +72,34 @@ class TenantBillingController(
         @RequestBody request: QuoteRequest,
     ): PurchaseResponse {
         return platformBillingPort.createPurchase(tenantId, request)
+    }
+
+    /**
+     * Reminders that cover is running out. These carry no price and hold no checkout slot:
+     * a renewal is priced only when the customer accepts one.
+     */
+    @GetMapping("/renewal-offers")
+    fun renewalOffers(@PathVariable tenantId: UUID): List<RenewalOffer> {
+        return renewalOfferService.offers(tenantId)
+    }
+
+    /** Prices the renewal at today's catalog and creates an ordinary purchase from it. */
+    @PostMapping("/renewal-offers/{offerId}/accept")
+    @ResponseStatus(HttpStatus.CREATED)
+    fun acceptRenewalOffer(
+        @PathVariable tenantId: UUID,
+        @PathVariable offerId: UUID,
+    ): PurchaseResponse {
+        return renewalOfferService.accept(offerId)
+    }
+
+    @PostMapping("/renewal-offers/{offerId}/decline")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    fun declineRenewalOffer(
+        @PathVariable tenantId: UUID,
+        @PathVariable offerId: UUID,
+    ) {
+        renewalOfferService.decline(offerId)
     }
 
     /**

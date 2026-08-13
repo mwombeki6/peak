@@ -119,6 +119,38 @@ data class PayPurchaseRequest(
     val channel: String?,
 )
 
+/**
+ * A reminder that cover is running out, deliberately carrying no price.
+ *
+ * An offer is not a purchase and holds no checkout slot — see `RenewalOfferService` for why
+ * that distinction is load-bearing rather than pedantic. It also carries no amount, so
+ * accepting one prices against today's catalog rather than replaying last year's invoice.
+ */
+@NamedInterface("api")
+data class RenewalOffer(
+    val id: UUID,
+    val coverEndsAt: Instant,
+    val termMonths: Int,
+    val status: RenewalOfferStatus,
+    val renewsPurchaseId: UUID?,
+)
+
+@NamedInterface("api")
+enum class RenewalOfferStatus(val databaseValue: String) {
+    OFFERED("offered"),
+    ACCEPTED("accepted"),
+    DECLINED("declined"),
+    EXPIRED("expired"),
+    SUPERSEDED("superseded"),
+    ;
+
+    companion object {
+        fun fromDatabase(value: String): RenewalOfferStatus =
+            entries.firstOrNull { it.databaseValue == value }
+                ?: throw IllegalArgumentException("Unknown renewal offer status: $value")
+    }
+}
+
 @NamedInterface("api")
 data class PaymentAttemptResponse(
     val id: UUID,

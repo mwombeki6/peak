@@ -44,6 +44,7 @@ class PlatformBillingWorkerLifecycle(
     private val jdbcTemplate: JdbcTemplate,
     private val reconciler: EntitlementReconciler,
     private val lifecycleService: SubscriptionLifecycleService,
+    private val renewalOfferService: RenewalOfferService,
     private val properties: PlatformBillingProperties,
     @Value("\${peak.runtime.mode:api}")
     private val runtimeMode: String,
@@ -151,6 +152,16 @@ class PlatformBillingWorkerLifecycle(
             try {
                 tenantsNeedingReconciliation().forEach { tenantId ->
                     lifecycleService.advance(tenantId, "lifecycle-${UUID.randomUUID()}")
+                }
+                // An offer, not a quoted purchase. A background job must not take the
+                // tenant's single open-order slot and hold it for a fortnight — the owner
+                // who tries to buy an add-on the next morning would simply be refused.
+                val offered = renewalOfferService.offerDueRenewals(
+                    noticeDays = SubscriptionLifecycleService.NOTICE_PERIOD.toDays().toInt(),
+                    limit = RECONCILE_BATCH,
+                )
+                if (offered > 0) {
+                    log.info("Offered renewal to {} tenants", offered)
                 }
             } catch (ex: CancellationException) {
                 throw ex
