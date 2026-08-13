@@ -152,14 +152,12 @@ class PurchaseSettlementOutboxHandler(
         jdbcTemplate.update(
             """
             INSERT INTO peak_billing_lifecycle_events (
-                tenant_id, purchase_id, event_type, detail
-            ) VALUES (?, ?, 'purchase_settled', ?::jsonb)
+                tenant_id, purchase_id, from_state, to_state, reason, actor
+            ) VALUES (?, ?, 'awaiting_payment', 'active', ?, 'system')
             """.trimIndent(),
             tenantId,
             purchaseId,
-            objectMapper.writeValueAsString(
-                mapOf("periodEndsAt" to periodEndsAt.toInstant().toString()),
-            ),
+            "Purchase settled; paid through ${periodEndsAt.toInstant()}",
         )
     }
 

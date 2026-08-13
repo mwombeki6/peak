@@ -16,8 +16,15 @@ import org.springframework.boot.context.properties.ConfigurationProperties
 @ConfigurationProperties(prefix = "peak.platformbilling")
 data class PlatformBillingProperties(
     val enabled: Boolean = true,
-    /** Provider used for new collections. */
-    val primaryProvider: String = "snippe",
+    /**
+     * Provider used for new collections.
+     *
+     * Defaults to the adapter that exists and has been tested against a documented
+     * contract. It previously defaulted to a provider with no adapter, which meant a
+     * correctly configured deployment would still have thrown at the first customer
+     * payment — the least forgiving moment to discover a configuration error.
+     */
+    val primaryProvider: String = "azampay",
     /** Tried when the primary refuses to initiate; blank disables failover. */
     val fallbackProvider: String = "",
     val appName: String = "",

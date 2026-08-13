@@ -35,6 +35,25 @@ class PlatformCollectionService(
 ) {
     private val adaptersByCode = adapters.associateBy { it.providerCode }
 
+    init {
+        // Fail at boot, not at a customer's first payment. A configured provider with no
+        // adapter is a deployment mistake, and the worst possible time to learn about it is
+        // when someone has already decided to buy.
+        if (properties.enabled) {
+            require(properties.primaryProvider.trim() in adaptersByCode) {
+                "peak.platformbilling.primary-provider is '${properties.primaryProvider}' " +
+                    "but no such payment adapter is registered. Available: " +
+                    adaptersByCode.keys.sorted().joinToString(", ")
+            }
+            val fallback = properties.fallbackProvider.trim()
+            require(fallback.isEmpty() || fallback in adaptersByCode) {
+                "peak.platformbilling.fallback-provider is '$fallback' but no such payment " +
+                    "adapter is registered. Available: " +
+                    adaptersByCode.keys.sorted().joinToString(", ")
+            }
+        }
+    }
+
     /**
      * Deliberately three transactions, not one.
      *
