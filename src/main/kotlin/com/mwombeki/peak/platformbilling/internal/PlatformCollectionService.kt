@@ -2,6 +2,7 @@ package com.mwombeki.peak.platformbilling.internal
 
 import com.mwombeki.peak.payment.api.PaymentProvider
 import com.mwombeki.peak.payment.api.ProviderCollectionCommand
+import com.mwombeki.peak.platformbilling.api.CollectionFlow
 import com.mwombeki.peak.platformbilling.api.PaymentAttemptResponse
 import com.mwombeki.peak.platformbilling.api.PaymentAttemptStatus
 import com.mwombeki.peak.platformbilling.api.PaymentMethod
@@ -103,6 +104,17 @@ class PlatformCollectionService(
                     null
                 }
 
+                val collectionFlow = eligibilityService.collectionFlowFor(
+                    provider.providerCode,
+                    request.method,
+                    purchase.currency,
+                )
+                // Some providers require the payer by name and email, not only by number.
+                // Peak knows who pressed Pay, so this is a lookup rather than something to
+                // ask a customer for — and sending placeholders into a payment record
+                // would be worse than failing.
+                val payer = payerIdentity(actor.tenantId, actor.tenantUserId)
+
                 val attemptNo = nextAttemptNo(purchaseId)
                 require(attemptNo <= properties.maxPaymentAttempts) {
                     "This purchase has already been attempted ${properties.maxPaymentAttempts} " +
@@ -126,6 +138,9 @@ class PlatformCollectionService(
                     attemptNo = attemptNo,
                     provider = provider,
                     method = request.method,
+                    collectionFlow = collectionFlow,
+                    payerName = payer?.name,
+                    payerEmail = payer?.email,
                     msisdn = msisdn,
                     amount = purchase.totalAmount,
                     currency = purchase.currency,
@@ -147,6 +162,9 @@ class PlatformCollectionService(
                     apiKey = secretReferenceResolver.resolve(properties.apiKeySecretRef),
                     checksumKey = secretReferenceResolver.resolve(properties.checksumKeySecretRef),
                     providerChannel = request.channel,
+                    collectionFlow = prepared.collectionFlow.databaseValue,
+                    payerName = prepared.payerName,
+                    payerEmail = prepared.payerEmail,
                 ),
             )
         }.getOrElse { failure ->
@@ -177,6 +195,19 @@ class PlatformCollectionService(
             redirectUrl = result.redirectUrl,
         )
     }
+
+    private fun payerIdentity(tenantId: UUID, userId: UUID): PayerIdentity? {
+        return jdbcTemplate.query(
+            """
+            SELECT full_name, email FROM users WHERE id = ? AND tenant_id = ?
+            """.trimIndent(),
+            { rs, _ -> PayerIdentity(rs.getString("full_name"), rs.getString("email")) },
+            userId,
+            tenantId,
+        ).firstOrNull()
+    }
+
+    private data class PayerIdentity(val name: String?, val email: String?)
 
     private fun internalReference(purchaseId: UUID, attemptNo: Int): String =
         "PEAK-${purchaseId.toString().take(8)}-$attemptNo".uppercase()
@@ -215,6 +246,9 @@ class PlatformCollectionService(
         val attemptNo: Int,
         val provider: PaymentProvider,
         val method: PaymentMethod,
+        val collectionFlow: CollectionFlow,
+        val payerName: String?,
+        val payerEmail: String?,
         val msisdn: String?,
         val amount: BigDecimal,
         val currency: String,

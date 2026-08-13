@@ -71,6 +71,21 @@ data class ProviderCollectionCommand(
      * it itself and ignores this. Defaulted so existing callers and providers are untouched.
      */
     val providerChannel: String? = null,
+    /**
+     * Which collection experience to open, where a provider offers more than one.
+     *
+     * Snippe collects mobile money two ways — a USSD push to a handset we supply, and a
+     * hosted checkout page — against different endpoints with different request shapes.
+     * Naming the rail does not choose between them.
+     */
+    val collectionFlow: String? = null,
+    /**
+     * The payer's name, where the provider requires one. Snippe's direct mobile money
+     * endpoint does; a USSD push does not otherwise need it.
+     */
+    val payerName: String? = null,
+    /** The payer's email, likewise required by some providers and by no rail's mechanics. */
+    val payerEmail: String? = null,
 )
 
 @NamedInterface("api")
@@ -93,6 +108,18 @@ data class ProviderStatusQuery(
     val clientId: String,
     val apiKey: String,
     val checksumKey: String,
+    /**
+     * The reference the provider issued at initiation, where its status endpoint is keyed on
+     * that rather than on ours. AzamPay's transactionId and Snippe's payment reference both
+     * are; passing Peak's own reference would simply not be found.
+     */
+    val providerReference: String? = null,
+    /**
+     * Which flow created the payment being asked about, since a provider offering several
+     * exposes a different status endpoint for each. Inferring it from the shape of a
+     * reference would work today and break the day a prefix changes.
+     */
+    val collectionFlow: String? = null,
 )
 
 @NamedInterface("api")

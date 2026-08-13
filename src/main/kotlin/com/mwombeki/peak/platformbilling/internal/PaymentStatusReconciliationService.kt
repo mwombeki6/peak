@@ -214,6 +214,7 @@ class PaymentStatusReconciliationService(
             val result = adapter.queryStatus(
                 ProviderStatusQuery(
                     internalReference = attempt.internalReference,
+                    providerReference = attempt.providerReference,
                     endpointUrl = properties.endpointUrl,
                     clientId = secretReferenceResolver.resolve(properties.clientIdSecretRef),
                     apiKey = secretReferenceResolver.resolve(properties.apiKeySecretRef),

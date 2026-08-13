@@ -113,7 +113,73 @@ class SnippePaymentProvider(
 
     override val providerCode = "snippe"
 
-    override fun initiate(command: ProviderCollectionCommand): ProviderCollectionResult {
+    override fun initiate(command: ProviderCollectionCommand): ProviderCollectionResult =
+        when (command.collectionFlow?.trim()?.lowercase()) {
+            DIRECT_PUSH -> pushToHandset(command)
+            HOSTED_CHECKOUT, null -> openHostedCheckout(command)
+            else -> throw IllegalArgumentException(
+                "Snippe does not offer a ${command.collectionFlow} collection flow",
+            )
+        }
+
+    /**
+     * The direct rail: Peak supplies the number and Snippe pushes the prompt to it.
+     *
+     * This is what Peak's own subscription UX means by "click Pay" — the owner answers on
+     * their handset rather than being sent to a page. Different endpoint, different path
+     * prefix (`/v1`, not `/api/v1`) and a different request shape from a session.
+     */
+    private fun pushToHandset(command: ProviderCollectionCommand): ProviderCollectionResult {
+        val endpoint = snippeEndpoint(command.endpointUrl.orElse(properties.baseUrl), PAYMENTS_PATH)
+        val payer = requirePayerIdentity(command)
+
+        val body = mapOf(
+            "payment_type" to "mobile",
+            "details" to mapOf(
+                "amount" to command.amount.toWholeUnits(),
+                "currency" to command.currency.uppercase(),
+            ),
+            "phone_number" to command.payerIdentifier,
+            "customer" to mapOf(
+                "firstname" to payer.firstName,
+                "lastname" to payer.lastName,
+                "email" to payer.email,
+            ),
+            // Snippe's documented create-payment body has no external_reference field, only
+            // metadata — and the webhook example echoes metadata back. So our reference goes
+            // here, and the callback parser looks for it in both places. Correlating on
+            // Snippe's own reference alone would work until a callback arrived before the
+            // initiation response had been stored.
+            "metadata" to mapOf("external_reference" to command.internalReference),
+        )
+
+        val response = transport.exchange(
+            method = "POST",
+            endpoint = endpoint,
+            headers = mapOf(
+                "Authorization" to "Bearer ${command.apiKey}",
+                "Idempotency-Key" to command.internalReference,
+            ),
+            payload = objectMapper.writeValueAsString(body),
+        )
+
+        val node = objectMapper.readTree(response).unwrapData()
+        val reference = node.path("reference").asString("").trim()
+        require(reference.isNotEmpty()) {
+            "Snippe payment response carried no reference, so the payment could never be " +
+                "reconciled if its callback were lost"
+        }
+
+        return ProviderCollectionResult(
+            providerReference = reference,
+            status = node.path("status").asString("pending").normalizedStatus(),
+            providerStatus = node.path("status").asString("pending"),
+            // A push, so there is nowhere to send the payer; they answer on the handset.
+            redirectUrl = null,
+        )
+    }
+
+    private fun openHostedCheckout(command: ProviderCollectionCommand): ProviderCollectionResult {
         val endpoint = snippeEndpoint(command.endpointUrl.orElse(properties.baseUrl), SESSIONS_PATH)
         val body = buildMap<String, Any> {
             put("amount", command.amount.toWholeUnits())
@@ -159,10 +225,19 @@ class SnippePaymentProvider(
      * recoverable on this rail.
      */
     override fun queryStatus(command: ProviderStatusQuery): ProviderStatusResult {
-        val reference = command.internalReference.trim()
+        // Snippe's status endpoints are keyed on the reference it issued, not on ours.
+        val reference = command.providerReference?.trim()?.takeIf { it.isNotEmpty() }
+            ?: command.internalReference.trim()
+        // Each flow has its own status endpoint. Inferring which from the shape of the
+        // reference — sessions are prefixed, payments are bare UUIDs — would work today and
+        // break silently the day a prefix changes.
+        val basePath = when (command.collectionFlow?.trim()?.lowercase()) {
+            DIRECT_PUSH -> PAYMENTS_PATH
+            else -> SESSIONS_PATH
+        }
         val endpoint = snippeEndpoint(
             command.endpointUrl.orElse(properties.baseUrl),
-            "$SESSIONS_PATH/$reference",
+            "$basePath/$reference",
         )
         val response = transport.exchange(
             method = "GET",
@@ -226,9 +301,14 @@ class SnippePaymentProvider(
 
     private fun toNotification(root: JsonNode, verified: Boolean): ProviderWebhookNotification {
         val data = root.path("data")
+        // A session carries external_reference directly; a direct payment has no such field
+        // on creation, so ours comes back through metadata. Both are checked rather than
+        // assuming which flow produced the callback.
         val externalReference = data.path("external_reference").asString("").trim()
+            .ifEmpty { data.path("metadata").path("external_reference").asString("").trim() }
         require(externalReference.isNotEmpty()) {
-            "Snippe callback did not carry an external reference"
+            "Snippe callback carried neither an external reference nor one in metadata, so " +
+                "it cannot be matched to a payment Peak started"
         }
 
         val amount = data.path("amount")
@@ -318,8 +398,42 @@ class SnippePaymentProvider(
     private fun parseInstantOrNull(value: String): Instant? =
         runCatching { Instant.parse(value) }.getOrNull()
 
+    /**
+     * Snippe requires a name and email on a direct payment. Peak knows the tenant user who
+     * pressed Pay, so this is a wiring requirement rather than something to ask the customer
+     * for — but failing here beats sending placeholders into a payment record.
+     */
+    private fun requirePayerIdentity(command: ProviderCollectionCommand): PayerIdentity {
+        val email = command.payerEmail?.trim()?.takeIf { it.isNotEmpty() }
+        requireNotNull(email) {
+            "Snippe requires the payer's email on a direct mobile money payment"
+        }
+        val name = command.payerName?.trim()?.takeIf { it.isNotEmpty() }
+        requireNotNull(name) {
+            "Snippe requires the payer's name on a direct mobile money payment"
+        }
+        val parts = name.split(Regex("\\s+"), limit = 2)
+        return PayerIdentity(
+            firstName = parts.first(),
+            // Snippe wants both halves. A single-word name is normal here, so it stands in
+            // for the surname rather than being rejected or padded with something invented.
+            lastName = parts.getOrNull(1)?.takeIf { it.isNotBlank() } ?: parts.first(),
+            email = email,
+        )
+    }
+
+    private data class PayerIdentity(
+        val firstName: String,
+        val lastName: String,
+        val email: String,
+    )
+
     internal companion object {
         const val SESSIONS_PATH = "/api/v1/sessions"
+        /** Note the prefix: /v1, not /api/v1. Snippe's two collection APIs differ in it. */
+        const val PAYMENTS_PATH = "/v1/payments"
+        const val DIRECT_PUSH = "direct_push"
+        const val HOSTED_CHECKOUT = "hosted_checkout"
         const val SIGNATURE_HEADER = "x-webhook-signature"
         const val TIMESTAMP_HEADER = "x-webhook-timestamp"
         const val HMAC_ALGORITHM = "HmacSHA256"

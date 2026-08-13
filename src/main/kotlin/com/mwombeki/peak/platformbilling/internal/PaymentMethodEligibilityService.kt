@@ -135,6 +135,29 @@ class PaymentMethodEligibilityService(
         ).firstOrNull() ?: (method == PaymentMethod.MOBILE_MONEY)
     }
 
+    /**
+     * Which collection experience the enabled rail uses.
+     *
+     * A provider may declare the same rail through more than one flow; only an enabled one
+     * can collect, so a disabled declaration must not decide this.
+     */
+    fun collectionFlowFor(
+        provider: String,
+        method: PaymentMethod,
+        currency: String,
+    ): CollectionFlow {
+        return jdbcTemplate.query(
+            """
+            SELECT collection_flow FROM peak_payment_method_capabilities
+            WHERE provider = ? AND payment_method = ? AND currency = ? AND is_enabled = true
+            """.trimIndent(),
+            { rs, _ -> CollectionFlow.fromDatabase(rs.getString("collection_flow")) },
+            provider,
+            method.databaseValue,
+            currency,
+        ).firstOrNull() ?: CollectionFlow.DIRECT_PUSH
+    }
+
     private fun ineligibleReason(
         amount: BigDecimal,
         currency: String,

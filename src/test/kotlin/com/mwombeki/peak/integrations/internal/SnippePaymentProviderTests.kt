@@ -99,6 +99,134 @@ class SnippePaymentProviderTests {
         assertEquals(0, BigDecimal("30000").compareTo(result.amount))
     }
 
+    // ---- direct push: what Peak's own subscription UX actually needs ----
+
+    @Test
+    fun aDirectPushGoesToThePaymentsEndpointAndSendsNoOneAnywhere() {
+        val transport = StubTransport()
+        val result = provider(transport).initiate(
+            command(flow = "direct_push", name = "Asha Mwinyi", email = "asha@hotel.example"),
+        )
+
+        val call = transport.calls.single()
+        assertEquals(
+            "/v1/payments",
+            call.endpoint.path,
+            "the direct rail lives under /v1, not /api/v1 like sessions",
+        )
+        assertEquals(
+            null,
+            result.redirectUrl,
+            "a push has nowhere to send the payer; they answer on the handset",
+        )
+        assertEquals("9015c155-9e29-4e8e-8fe6-d5d81553c8e6", result.providerReference)
+
+        val body = objectMapper.readTree(requireNotNull(call.payload))
+        assertEquals("mobile", body.path("payment_type").asString(""))
+        assertEquals("255700000001", body.path("phone_number").asString(""))
+        assertEquals(30000L, body.path("details").path("amount").asLong(0))
+        assertEquals("TZS", body.path("details").path("currency").asString(""))
+        assertEquals("Asha", body.path("customer").path("firstname").asString(""))
+        assertEquals("Mwinyi", body.path("customer").path("lastname").asString(""))
+        assertEquals("asha@hotel.example", body.path("customer").path("email").asString(""))
+        assertEquals(
+            "PEAK-REF-1",
+            body.path("metadata").path("external_reference").asString(""),
+            "the create-payment body has no external_reference field, so ours rides in " +
+                "metadata or the callback cannot be matched to a payment Peak started",
+        )
+    }
+
+    @Test
+    fun aDirectPushWithoutThePayersNameOrEmailIsRefused() {
+        listOf(
+            command(flow = "direct_push", name = null, email = "a@b.example"),
+            command(flow = "direct_push", name = "Asha Mwinyi", email = null),
+        ).forEach { incomplete ->
+            val transport = StubTransport()
+            assertFailsWith<IllegalArgumentException> { provider(transport).initiate(incomplete) }
+            assertTrue(
+                transport.calls.isEmpty(),
+                "placeholders must never reach a payment record, so this fails before the call",
+            )
+        }
+    }
+
+    @Test
+    fun aSingleWordNameStandsInForBothHalvesRatherThanBeingInvented() {
+        val transport = StubTransport()
+        provider(transport).initiate(
+            command(flow = "direct_push", name = "Asha", email = "asha@hotel.example"),
+        )
+
+        val customer = objectMapper.readTree(requireNotNull(transport.calls.single().payload))
+            .path("customer")
+        assertEquals("Asha", customer.path("firstname").asString(""))
+        assertEquals(
+            "Asha",
+            customer.path("lastname").asString(""),
+            "one-word names are ordinary here; padding with something made up would be worse",
+        )
+    }
+
+    @Test
+    fun theTwoFlowsUseTheirOwnStatusEndpoints() {
+        val direct = StubTransport()
+        provider(direct).queryStatus(statusQuery(flow = "direct_push", providerRef = "pay-uuid"))
+        assertEquals("/v1/payments/pay-uuid", direct.calls.single().endpoint.path)
+
+        val hosted = StubTransport()
+        provider(hosted).queryStatus(statusQuery(flow = "hosted_checkout", providerRef = "sess_1"))
+        assertEquals("/api/v1/sessions/sess_1", hosted.calls.single().endpoint.path)
+    }
+
+    @Test
+    fun statusIsAskedByTheReferenceSnippeIssuedNotPeaksOwn() {
+        val transport = StubTransport()
+        provider(transport).queryStatus(
+            statusQuery(flow = "direct_push", providerRef = "9015c155-uuid"),
+        )
+        assertEquals(
+            "/v1/payments/9015c155-uuid",
+            transport.calls.single().endpoint.path,
+            "Snippe keys its status endpoints on what it issued; Peak's reference is not " +
+                "something it has ever seen",
+        )
+    }
+
+    @Test
+    fun anUnknownCollectionFlowIsRefusedRatherThanDefaulted() {
+        assertFailsWith<IllegalArgumentException> {
+            provider(StubTransport()).initiate(command(flow = "carrier_pigeon"))
+        }
+    }
+
+    @Test
+    fun aDirectPaymentCallbackIsMatchedThroughMetadata() {
+        // A session carries external_reference directly; a direct payment does not, so ours
+        // comes back the only way it was sent.
+        val payload = """{"id":"evt_direct","type":"payment.completed",
+           "data":{"reference":"9015c155-uuid","status":"completed",
+           "amount":{"value":30000,"currency":"TZS"},
+           "metadata":{"external_reference":"PEAK-REF-1"}}}"""
+
+        val notification = provider(StubTransport()).parseWebhook(payload)
+
+        assertEquals("PEAK-REF-1", notification.internalReference)
+        assertEquals("succeeded", notification.status)
+    }
+
+    @Test
+    fun aCallbackCarryingNeitherReferenceIsRefused() {
+        val payload = """{"id":"evt_x","type":"payment.completed",
+           "data":{"reference":"r","amount":{"value":1,"currency":"TZS"}}}"""
+
+        val failure = assertFailsWith<IllegalArgumentException> {
+            provider(StubTransport()).parseWebhook(payload)
+        }
+        assertTrue(failure.message.orEmpty().contains("metadata"), failure.message.orEmpty())
+    }
+
     // ---- webhook signature ----
 
     @Test
@@ -284,7 +412,21 @@ class SnippePaymentProviderTests {
         clock = Clock.fixed(now, ZoneOffset.UTC),
     )
 
-    private fun command() = ProviderCollectionCommand(
+    private fun statusQuery(flow: String, providerRef: String) = ProviderStatusQuery(
+        internalReference = "PEAK-REF-1",
+        endpointUrl = "https://api.snippe.test",
+        clientId = "client",
+        apiKey = "api-key-value",
+        checksumKey = secret,
+        providerReference = providerRef,
+        collectionFlow = flow,
+    )
+
+    private fun command(
+        flow: String? = null,
+        name: String? = null,
+        email: String? = null,
+    ) = ProviderCollectionCommand(
         transactionId = UUID.randomUUID(),
         internalReference = "PEAK-REF-1",
         endpointUrl = "https://api.snippe.test",
@@ -295,6 +437,9 @@ class SnippePaymentProviderTests {
         apiKey = "api-key-value",
         checksumKey = secret,
         providerChannel = "mobile_money",
+        collectionFlow = flow,
+        payerName = name,
+        payerEmail = email,
     )
 
     private fun signedHeaders(payload: String, timestamp: String) = mapOf(
@@ -340,6 +485,13 @@ class SnippePaymentProviderTests {
             payload: String?,
         ): String {
             calls += RecordedCall(method, endpoint, headers, payload)
+            if (endpoint.path.startsWith("/v1/payments") && method == "POST") {
+                return """{"status":"success","code":201,"data":{
+                   "amount":{"currency":"TZS","value":30000},"api_version":"2026-01-25",
+                   "expires_at":"2026-08-13T13:00:00Z","object":"payment",
+                   "payment_type":"mobile",
+                   "reference":"9015c155-9e29-4e8e-8fe6-d5d81553c8e6","status":"pending"}}"""
+            }
             return if (method == "GET") {
                 """{"reference":"sess_abc123def456","external_reference":"PEAK-REF-1",
                    "status":"completed","amount":{"value":30000,"currency":"TZS"},

@@ -651,16 +651,27 @@ HMAC verification.
 `SnippePaymentProvider` implements **hosted checkout**, status query and webhook
 verification, with a five-minute replay window on `X-Webhook-Timestamp`.
 
-It does **not** implement the direct USSD push, and the capability registry says so. That
-rail is `POST /v1/payments` with `payment_type=mobile` and a `phone_number`, which sends the
-prompt straight to the handset — a different path prefix (`/v1`, not `/api/v1`) and a
-different request shape (`details.amount`, `details.currency`,
-`customer.firstname/lastname/email`). It is declared and disabled with a NOT IMPLEMENTED
-note, and the migration refuses to let anything wearing that note be enabled.
+It also implements the **direct USSD push** — `POST /v1/payments` with
+`payment_type=mobile` and a `phone_number`, which sends the prompt straight to the handset.
+Note the different path prefix (`/v1`, not `/api/v1`) and the different request shape:
+`details.amount`, `details.currency`, `customer.firstname/lastname/email`.
 
-That distinction matters for Peak's own billing: the subscription UX is "click Pay, answer
-the prompt", which is the direct rail. The hosted checkout is the better fit for the large
-amounts that cannot go by USSD at all.
+`collection_flow` on the command selects between them, and each flow has its own status
+endpoint. Which one to use is read from the capability registry rather than inferred from
+the shape of a reference — sessions are prefixed `sess_` and payments are bare UUIDs, so
+inference would work today and break the day a prefix changed.
+
+Two things the direct rail needs that a push does not otherwise imply. Snippe requires the
+payer's name and email, which Peak looks up from the tenant user who pressed Pay; sending
+placeholders into a payment record would be worse than failing, so it fails. And the
+documented create-payment body has **no `external_reference` field**, only `metadata` — so
+Peak's reference travels in metadata, and the callback parser looks in both places. Matching
+on Snippe's own reference alone would work until a callback arrived before the initiation
+response had been stored.
+
+The distinction matters for Peak's own billing: the subscription UX is "click Pay, answer
+the prompt", which is the direct rail. Hosted checkout is the better fit for amounts that
+cannot go by USSD at all.
 
 Three things remain before the rail can be enabled, none settleable by reading:
 
