@@ -22,11 +22,15 @@ data class AzamPayProperties(
     /** Base URL of the authenticator host, e.g. https://authenticator.azampay.co.tz. */
     val authenticatorUrl: String = "",
     /**
-     * Base URL of the payments host, used to fetch AzamPay's public key.
+     * Base URL of the payments host.
      *
-     * Configured rather than read from the callback, which is the whole point: a callback
-     * is unauthenticated until its signature verifies, so letting it name the host we fetch
+     * Configured rather than read from a callback, which is the whole point: a callback is
+     * unauthenticated until its signature verifies, so letting it name the host we fetch
      * the verifying key from would let an attacker supply their own key and sign anything.
+     *
+     * Note the verifying key does **not** come from here. It is served by the authenticator
+     * host at `/api/Token/PublicKey`; the payments host answers 404 for every public-key
+     * path tried against the live sandbox.
      */
     val paymentsUrl: String = "",
     /**

@@ -113,7 +113,10 @@ class AzamPayPaymentProvider(
         // The host comes from configuration and never from the payload — a callback is
         // unauthenticated until it verifies, so letting it name the key server would let
         // an attacker present their own key and sign whatever they liked.
-        val baseUrl = properties.paymentsUrl
+        //
+        // The authenticator host, not the payments host: /api/Token/PublicKey lives there,
+        // and every public-key path on the payments host answers 404.
+        val baseUrl = properties.authenticatorUrl
         val message = signature.signedMessage(
             utilityReference = node.path("utilityref").asString(""),
             externalReference = node.path("externalreference").asString(""),

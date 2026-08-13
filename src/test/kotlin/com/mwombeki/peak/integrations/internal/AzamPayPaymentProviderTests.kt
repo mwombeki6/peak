@@ -191,7 +191,7 @@ class AzamPayPaymentProviderTests {
         assertEquals("succeeded", notification.status)
         assertEquals(
             2,
-            transport.calls.count { it.endpoint.path.contains("public-key") },
+            transport.calls.count { it.endpoint.path.contains("PublicKey") },
             "exactly one refetch: the cached key, then the rotated one",
         )
     }
@@ -216,11 +216,11 @@ class AzamPayPaymentProviderTests {
         }
 
         val keyHosts = transport.calls
-            .filter { it.endpoint.path.contains("public-key") }
+            .filter { it.endpoint.path.contains("PublicKey") }
             .map { it.endpoint.host }
         assertTrue(keyHosts.isNotEmpty(), "the key should have been fetched at all")
         assertTrue(
-            keyHosts.all { it == "sandbox.azampay.co.tz" },
+            keyHosts.all { it == "authenticator-sandbox.azampay.co.tz" },
             "the verifying key must come only from the configured host, but went to $keyHosts",
         )
     }
@@ -336,7 +336,7 @@ class AzamPayPaymentProviderTests {
                     """{"success":true,"data":{"accessToken":"token-abc",
                        "expire":"2026-08-13T18:00:00Z"}}"""
 
-                endpoint.path.contains("public-key") -> {
+                endpoint.path.contains("PublicKey") -> {
                     publicKeyFetches += 1
                     // The first fetch serves the cached-and-now-stale key; a refetch serves
                     // the rotated one, when the test is exercising rotation.

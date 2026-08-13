@@ -124,12 +124,13 @@ The full predicate for offering a method is therefore: **configured provider, re
 adapter, declared rail, enabled capability, eligible for this amount and currency** —
 and `pay()` re-checks it rather than trusting what a quote said hours ago.
 
-**Bank is declared and disabled.** AzamPay advertises bank collection, but the endpoints,
-supported banks, limits, settlement timing and — critically — which identifier the status
-endpoint accepts and whether it is returned at initiation are unconfirmed. If a bank
-reference appears only in the callback, a lost callback is unreconcilable on that rail and
-the guarantee below does not hold there. The row exists so the shape is reviewable;
-enabling it is a data change once the contract is proven.
+**Bank is declared and disabled.** The endpoints exist and their shape is now known —
+`verifybank` then `checkoutbank`, an OTP and a `verificationId`, which is a two-step flow
+rather than a push. What remains unconfirmed is the supported bank list, the limits, the
+settlement timing, and whether `/azam/v1/bank/transactioninquiry` accepts an identifier
+returned at initiation. Until that last one is answered a lost callback is unreconcilable on
+the bank rail, so it stays off. The row exists so the shape is reviewable; enabling it is a
+data change once the contract is proven.
 
 ## Components
 
@@ -182,24 +183,40 @@ classifies every writer of the control plane by the authority it acts under.
 
 ## Provider integration
 
-Verified against AzamPay's published OpenAPI schema. Community SDKs disagree with it —
-they document `/azampay/createtransfer` and a POST status endpoint, neither of which
-appears in the schema — so the schema is the reference.
+Verified on 13 August 2026 against the OpenAPI documents the sandbox hosts serve
+themselves — `sandbox.azampay.co.tz/swagger/v1/swagger.json` and the same path on
+`authenticator-sandbox.azampay.co.tz`. Those are the reference, not the prose docs and not
+the community SDKs, which document endpoints (`/azampay/createtransfer`, a POST status
+endpoint) that do not appear in either. The published docs site renders client-side and
+serves no crawlable content, so the swagger documents are also the only machine-readable
+form available.
 
-| SPI | AzamPay |
-|---|---|
-| `initiate()` | `POST /azampay/mno/checkout` |
-| `queryStatus()` | `GET /api/v1/azampay/transactionstatus` |
-| `parseWebhook()` | `POST /api/v1/Checkout/Callback` |
-| `statement()` | not offered — `UnsupportedOperationException` |
+| SPI | AzamPay | Verified |
+|---|---|---|
+| token | `POST /AppRegistration/GenerateToken` — `{appName, clientId, clientSecret}` | ✅ in spec |
+| `initiate()` | `POST /api/v1/checkout/checkoutmno` | ✅ in spec, 401 unauthenticated |
+| `initiate()` (legacy path in use) | `POST /azampay/mno/checkout` | exists — 401 unauthenticated — but absent from the spec |
+| `queryStatus()` | `GET /api/v1/partner/gettransactionstatus?transactionId=&provider=` | ✅ in spec |
+| bank | `POST /api/v1/checkout/verifybank` then `POST /api/v1/checkout/checkoutbank` | ✅ in spec |
+| public key | `GET /api/Token/PublicKey` on the **authenticator** host | ✅ in spec, 401 unauthenticated |
+| `statement()` | not offered — `UnsupportedOperationException` | — |
 
-Authentication is `POST /AppRegistration/GenerateToken` on a separate authenticator host,
-returning `data.accessToken` and `data.expire`. Sandbox hosts are
-`authenticator-sandbox.azampay.co.tz` and `sandbox.azampay.co.tz`; the production hosts are
-not published and must be obtained from AzamPay.
+Sandbox hosts are `authenticator-sandbox.azampay.co.tz` and `sandbox.azampay.co.tz`; the
+production hosts are not published and must be obtained from AzamPay.
 
-Collection takes `accountNumber`, `amount`, `currency`, `externalId` and `provider`, where
-provider is one of `Airtel`, `Tigo`, `Halopesa`, `Azampesa` or `Mpesa`.
+`checkoutmno` takes `amount`, `currency`, `accountNumber`, `externalId`,
+`serviceActivationCode` and `additionalProperties`. **The spec carries no `provider`
+field**, though the adapter sends one and the legacy path accepts it; whether the channel
+belongs in `additionalProperties` on the documented path is unconfirmed.
+
+**The response returns `transactionId`**, and `gettransactionstatus` is keyed on exactly
+that. So the recovery guarantee holds for mobile money: a lost callback is recoverable
+using an identifier obtained at initiation, which is the condition for enabling a rail.
+
+**Bank is a two-step OTP flow**, not a push. `checkoutbank` requires
+`merchantAccountNumber`, `merchantMobileNumber`, `otp`, `currencyCode` and `amount`, with
+`referenceId`/`verificationId` from a prior `verifybank`. It is nothing like a USSD prompt,
+which is why it must not be forced into the same initiation state machine.
 
 ### Callback verification
 
@@ -216,12 +233,23 @@ would look accommodating and is a vulnerability: if a signature covered only
 `transactionstatus` from failure to success and it would still verify. Being liberal in
 what you accept is a virtue for parsing and a defect for authentication.
 
-The public key comes from `GET /azampay/v1/public-key?format=Pem` **on the configured
-payments host, never on a host named in the callback body**. A callback is unauthenticated
-until its signature verifies, so letting it say where the verifying key comes from would let
-an attacker present their own key and sign anything. On a verification failure the key is
-re-fetched once before the callback is rejected, so a key rotation does not present as a
-wave of forged callbacks.
+The public key comes from `GET /api/Token/PublicKey` on the **authenticator** host, and
+never from a host named in the callback body.
+
+That correction matters: the adapter previously fetched
+`/azampay/v1/public-key?format=Pem` from the *payments* host, which returns **404**. Callback
+verification could therefore never have worked — the first real callback would have failed to
+fetch a key and been rejected as unverifiable. No test could see it, because the tests stub
+the transport. It was found by probing the live sandbox. A callback is unauthenticated until its signature verifies, so letting it say where the
+verifying key comes from would let an attacker present their own key and sign anything. On a
+verification failure the key is re-fetched once before the callback is rejected, so a key
+rotation does not present as a wave of forged callbacks.
+
+**The signature contract is not in the OpenAPI documents at all.** The word `signature` does
+not appear once in either sandbox spec, and the only callback schema they carry is
+`DisbursementCallbackRequest`. The collection callback and its RSA signature exist solely in
+the prose documentation — the documentation that contradicts itself about which fields are
+covered. That is why this cannot be settled by reading, and must be settled in sandbox.
 
 This makes the AzamPay adapter's key handling different from ClickPesa's: the verification
 material is a fetched public key rather than a shared secret held on the provider account,
@@ -538,19 +566,31 @@ The subscription side (Flow 2) is `platformbilling`:
 
 None of these can be settled from the published documentation, and the first is a release gate.
 
-**The signed data is ambiguous.** AzamPay's callback page states the signature covers
-`{utilityref}{externalreference}{transactionstatus}{operator}`, while the description of the
-`signature` field on the same page states it covers `{utilityref}{externalreference}` only.
-Their sample code in five languages uses the four-field form, which is what the adapter
-implements. If sandbox shows otherwise, **the answer is not to relax the verifier to two
-fields** — that would accept a signature under which `transactionstatus` is unprotected. It is
-to treat the callback as an untrusted hint and confirm every settlement with a status query.
+**The signed data is ambiguous, and no spec settles it.** AzamPay's callback page states the
+signature covers `{utilityref}{externalreference}{transactionstatus}{operator}`, while the
+description of the `signature` field on the same page states it covers
+`{utilityref}{externalreference}` only. Their sample code in five languages uses the four-field
+form, which is what the adapter implements. Neither sandbox OpenAPI document mentions a
+signature at all, so this is genuinely unresolvable without a live callback. If sandbox shows
+the two-field form, **the answer is not to relax the verifier** — that would accept a signature
+under which `transactionstatus` is unprotected. It is to treat the callback as an untrusted
+hint and confirm every settlement with a status query.
 
-**Bank rail contract.** Endpoints, supported banks, request and response shape, amount limits,
-settlement timing, and the complete status vocabulary. Most important: *which identifier does
-the transaction-status endpoint accept, and is it returned at initiation?* If a bank reference
-appears only in the callback, then on that rail a lost callback is unreconcilable and the
-guarantee above does not hold.
+**Authenticating the public-key fetch.** `GET /api/Token/PublicKey` answers 401
+unauthenticated, so it wants a bearer token. The webhook path does not currently hold the
+`clientId` needed to mint one — `verifyAndParseWebhook` receives only the client secret. The
+wiring is deliberately not guessed at; it needs one sandbox call to settle whether the token is
+required and which credential mints it.
+
+**Whether the channel belongs in `additionalProperties`.** The documented `checkoutmno` schema
+has no `provider` field, though the legacy `/azampay/mno/checkout` path accepts one and the
+adapter sends it there.
+
+**Bank rail.** The endpoints exist and the shape is known: `verifybank` then `checkoutbank`,
+with an OTP and a `verificationId`. What is not known is the supported bank list, amount
+limits, settlement timing, the full status vocabulary, and whether
+`/azam/v1/bank/transactioninquiry` accepts an identifier returned at initiation. Until that
+last one is answered, a lost callback is unreconcilable on the bank rail and it stays disabled.
 
 **Production hosts are unpublished.** Only sandbox hosts appear in the documentation.
 
@@ -574,5 +614,32 @@ semantics have each been proven in sandbox.
 Metered transaction fees. Split settlement and platform sub-merchants, unavailable from any
 Tanzanian provider. SMS reconciliation. Provider-executed refunds. Multi-currency —
 `exchange_rate` defaults to 1 and no code sets it, so launch billing is restricted to
-TZS-settled properties. The Snippe adapter, pending a verified API contract. Merchant lending,
-which the transaction ledger makes reachable later.
+TZS-settled properties. Merchant lending, which the transaction ledger makes reachable later.
+
+## Snippe
+
+Documented, unambiguous, and unbuilt. Recorded here because the contract is now known and the
+adapter is a straightforward piece of work rather than a research task.
+
+| Concern | Contract |
+|---|---|
+| Auth | `Authorization: Bearer <api key>` |
+| Hosted checkout | `POST /api/v1/sessions` — `amount` (min 500), `currency` (TZS default), `allowed_methods`, `customer`, `redirect_url`, `webhook_url`, `metadata` |
+| Identifier at initiation | `reference`, e.g. `sess_abc123def456` |
+| Status query | `GET /api/v1/sessions/:reference` — keyed on the same reference |
+| Webhook signature | `X-Webhook-Signature`, HMAC-SHA256 hex over `{timestamp}.{raw_body}` |
+| Signing key | `GET /api/v1/settings/webhook-secret`, or the dashboard |
+| Events | `payment.completed`, `payment.failed`, `payment.voided`, `payment.expired` |
+
+Two things stand out against AzamPay. The recovery gate passes cleanly: `reference` is
+returned at initiation and is what the status endpoint accepts. And the signature is
+unambiguous — one header, one algorithm, one message, with an explicit instruction to verify
+against the raw body rather than a re-serialised one, which is the mistake that usually breaks
+HMAC verification.
+
+`ProviderCollectionResult.redirectUrl` already exists for the hosted checkout URL. The
+`X-Webhook-Signature` scheme needs the raw request body, which the current
+`PlatformBillingWebhookController` already takes as a `String` for exactly this reason.
+
+Still to confirm before enabling: the timestamp header name, whether a replay window is
+enforced, upper amount limits, and the direct (non-hosted) USSD path.

@@ -83,7 +83,27 @@ class AzamPayPublicKeyProvider(
     private data class CachedKey(val baseUrl: String?, val key: PublicKey)
 
     private companion object {
-        const val PUBLIC_KEY_PATH = "/azampay/v1/public-key?format=Pem"
+        /**
+         * Verified against the live sandbox on 13 August 2026, because the previous value
+         * was wrong in a way no test could see.
+         *
+         * This adapter fetched `/azampay/v1/public-key?format=Pem` from the *payments* host.
+         * That returns **404** on `sandbox.azampay.co.tz`, so callback verification could
+         * never have worked: the first real callback would fail to fetch a key and be
+         * rejected as unverifiable.
+         *
+         * The endpoint that exists is `GET /api/Token/PublicKey` on the **authenticator**
+         * host — it appears in that host's OpenAPI document
+         * (`authenticator-sandbox.azampay.co.tz/swagger/v1/swagger.json`) and answers 401
+         * unauthenticated rather than 404.
+         *
+         * Still unresolved, and why this adapter remains uncertified: the 401 means the
+         * endpoint wants a bearer token, and the webhook path does not currently hold the
+         * `clientId` needed to mint one — `verifyAndParseWebhook` receives only the client
+         * secret. Wiring that is deliberately not guessed at here. See the payment
+         * architecture doc, "Open with AzamPay".
+         */
+        const val PUBLIC_KEY_PATH = "/api/Token/PublicKey"
     }
 }
 
