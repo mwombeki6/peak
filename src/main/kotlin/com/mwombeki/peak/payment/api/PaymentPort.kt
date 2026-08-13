@@ -79,9 +79,14 @@ interface PaymentPort {
 
 @NamedInterface("api")
 interface PaymentWebhookPort {
+    /**
+     * @param headers the callback's HTTP headers, for a provider that signs in one rather
+     *   than in the body. A provider that signs in the body ignores them.
+     */
     fun receive(
         providerAccountId: UUID,
         payload: String,
+        headers: Map<String, String> = emptyMap(),
     ): PaymentWebhookReceipt
 }
 

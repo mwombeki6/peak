@@ -60,10 +60,12 @@ class PaymentWebhookService(
     override fun receive(
         providerAccountId: UUID,
         payload: String,
+        headers: Map<String, String>,
     ): PaymentWebhookReceipt {
         meterRegistry.counter("peak.payment.webhook.received").increment()
         return try {
             receiveValidated(
+                headers,
                 providerAccountId,
                 payload,
             ).also { receipt ->
@@ -88,6 +90,7 @@ class PaymentWebhookService(
     }
 
     private fun receiveValidated(
+        headers: Map<String, String>,
         providerAccountId: UUID,
         payload: String,
     ): PaymentWebhookReceipt {
@@ -103,12 +106,18 @@ class PaymentWebhookService(
                 require(scope.active) {
                     "Payment provider account is inactive"
                 }
-                require(scope.providerCode == CLICKPESA_PROVIDER) {
-                    "Only ClickPesa callbacks are accepted by this endpoint"
-                }
+                // Any provider with a registered adapter, not ClickPesa alone. The gate
+                // used to name one provider, which meant no second guest rail could ever
+                // confirm a payment however complete its adapter was — a hotel connected to
+                // anything else would watch collections sit pending until they were swept.
+                //
+                // The adapter is still what verifies; an account whose provider has none is
+                // refused, because an unverifiable callback is an anonymous HTTP client
+                // asserting it has paid a hotel.
                 val adapter = adaptersByCode[scope.providerCode]
                     ?: throw PaymentRejectedException(
-                        "Payment provider callback is not supported",
+                        "No adapter is registered for ${scope.providerCode}, so its " +
+                            "callbacks cannot be verified",
                     )
                 val notification = try {
                     adapter.verifyAndParseWebhook(
@@ -118,10 +127,13 @@ class PaymentWebhookService(
                         ),
                         checksumRequired = environment.activeProfiles
                             .contains("prod"),
+                        // Some providers sign in a header rather than in the body; one that
+                        // signs in the body ignores these.
+                        headers = headers,
                     )
                 } catch (ex: IllegalArgumentException) {
                     throw PaymentRejectedException(
-                        ex.message ?: "ClickPesa callback was rejected",
+                        ex.message ?: "${scope.providerCode} callback was rejected",
                     )
                 }
                 validateNotification(notification)
@@ -351,7 +363,7 @@ class PaymentWebhookService(
         try {
             transactionTemplate.executeWithoutResult {
                 val scope = resolveScope(providerAccountId)
-                if (!scope.active || scope.providerCode != CLICKPESA_PROVIDER) {
+                if (!scope.active) {
                     return@executeWithoutResult
                 }
                 val adapter = adaptersByCode[scope.providerCode]

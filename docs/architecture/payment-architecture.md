@@ -618,8 +618,23 @@ semantics have each been proven in sandbox.
 
 ## Deferred
 
-Metered transaction fees. Split settlement and platform sub-merchants, unavailable from any
-Tanzanian provider. SMS reconciliation. Provider-executed refunds. Multi-currency —
+Metered transaction fees.
+
+**Platform sub-merchants, uncertified rather than unavailable.** An earlier revision of this
+document said the model was unavailable from any Tanzanian provider. That was too strong, and
+the distinction matters because it decides whether double onboarding is a temporary cost or a
+permanent one. ClickPesa markets a marketplace BillPay arrangement assigning merchant-specific
+numbers that behave like subaccounts; AzamPay advertises multi-entity processing with
+individual settlement accounts per entity, though its examples are subsidiaries rather than
+unrelated businesses; Flutterwave documents subaccounts and split payments outright. None of
+those has been certified for Peak's shape — independent hotels, one embedded onboarding flow,
+hotel-owned settlement, platform-level orchestration — and that is the accurate claim:
+**Peak has not certified a scalable sub-merchant arrangement, not that none exists.**
+
+Peak should therefore not be architected on the assumption that a hotel will always onboard
+its own provider separately.
+
+SMS reconciliation. Provider-executed refunds. Multi-currency —
 `exchange_rate` defaults to 1 and no code sets it, so launch billing is restricted to
 TZS-settled properties. Merchant lending, which the transaction ledger makes reachable later.
 
