@@ -67,6 +67,42 @@ class PaymentStatusReconciliationService(
         UNKNOWN,
     }
 
+    /**
+     * Asks the provider about one attempt now, regardless of when it was next due.
+     *
+     * The operator-facing action. Deliberately the same code path as the sweep: an operator
+     * pressing a button is impatience, not new authority, so it must not be able to reach a
+     * conclusion the loop could not.
+     */
+    fun requeryAttempt(attemptId: UUID): CollectionStatus {
+        val attempt = jdbcTemplate.query(
+            """
+            SELECT id, tenant_id, purchase_id, provider, internal_reference,
+                   provider_reference, amount, currency, status_check_count
+            FROM peak_payment_attempts
+            WHERE id = ?
+            """.trimIndent(),
+            { rs, _ ->
+                DueAttempt(
+                    attemptId = rs.getObject("id", UUID::class.java),
+                    tenantId = rs.getObject("tenant_id", UUID::class.java),
+                    purchaseId = rs.getObject("purchase_id", UUID::class.java),
+                    provider = rs.getString("provider"),
+                    internalReference = rs.getString("internal_reference"),
+                    providerReference = rs.getString("provider_reference"),
+                    amount = rs.getBigDecimal("amount"),
+                    currency = rs.getString("currency").trim(),
+                    checkCount = rs.getInt("status_check_count"),
+                )
+            },
+            attemptId,
+        ).firstOrNull() ?: throw IllegalArgumentException("Payment attempt was not found")
+
+        val outcome = query(attempt)
+        applyOutcome(attempt, outcome)
+        return outcome.status
+    }
+
     fun reconcileDueAttempts(limit: Int): Int {
         val due = jdbcTemplate.query(
             """
@@ -93,9 +129,14 @@ class PaymentStatusReconciliationService(
         return due.count { attempt -> reconcile(attempt) }
     }
 
-    private fun reconcile(attempt: DueAttempt): Boolean {
-        val outcome = query(attempt)
+    private fun reconcile(attempt: DueAttempt): Boolean =
+        applyOutcome(attempt, query(attempt))
 
+    /**
+     * What to do about an answer. Shared by the sweep and the operator requery so the two
+     * cannot reach different conclusions from the same provider response.
+     */
+    private fun applyOutcome(attempt: DueAttempt, outcome: StatusOutcome): Boolean {
         meterRegistry.counter(
             "peak.platformbilling.status.query",
             "provider", attempt.provider,

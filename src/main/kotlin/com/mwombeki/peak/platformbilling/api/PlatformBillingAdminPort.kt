@@ -35,6 +35,22 @@ interface PlatformBillingAdminPort {
     fun paymentsRequiringReconciliation(limit: Int = 200): List<StuckPayment>
 
     fun receipts(limit: Int = 200): List<IssuedReceipt>
+
+    /**
+     * Asks the provider again about one payment. Decides nothing itself.
+     *
+     * The ordinary operator action, and deliberately the safe one: the authoritative system
+     * answers for itself, through the same path the background sweep uses.
+     */
+    fun requeryPayment(attemptId: UUID): ReconciliationOutcome
+
+    /**
+     * Records what an operator established from evidence the API could not supply.
+     *
+     * The exception, not the default. Requires evidence, and a confirmation must agree with
+     * the amount and currency that were asked for.
+     */
+    fun resolvePayment(attemptId: UUID, command: ResolvePaymentCommand): ReconciliationOutcome
 }
 
 @NamedInterface("api")
@@ -83,4 +99,56 @@ data class IssuedReceipt(
     val issuedAt: Instant,
     val totalAmount: BigDecimal,
     val currency: String,
+)
+
+/**
+ * What an operator establishes about a payment the provider could not resolve.
+ *
+ * An observation, not a verdict. It enters the same settlement path a signed callback
+ * enters, so nothing here has its own idea of what settling means.
+ */
+@NamedInterface("api")
+data class ResolvePaymentCommand(
+    val resolution: ResolutionKind,
+    /** Where the belief came from. Required to confirm a payment. */
+    val evidenceType: EvidenceType? = null,
+    /** A reference an auditor could follow back to the evidence. */
+    val evidenceReference: String? = null,
+    val providerReference: String? = null,
+    /** Checked against the attempt, because misreading a settlement report is easy. */
+    val observedAmount: BigDecimal? = null,
+    val observedCurrency: String? = null,
+    val reason: String,
+)
+
+@NamedInterface("api")
+enum class ResolutionKind(val databaseValue: String) {
+    /** The evidence shows the customer paid. Settles through the ordinary path. */
+    CONFIRMED_PAID("confirmed_paid"),
+
+    /** The evidence shows they did not. The purchase becomes payable again. */
+    CONFIRMED_FAILED("confirmed_failed"),
+
+    /**
+     * Neither could be established. Grants nothing and unblocks nothing — the customer stays
+     * protected from a second charge. This only records that chasing it has stopped.
+     */
+    ABANDONED("abandoned"),
+}
+
+@NamedInterface("api")
+enum class EvidenceType(val databaseValue: String) {
+    PROVIDER_PORTAL("provider_portal"),
+    PROVIDER_SUPPORT("provider_support"),
+    SETTLEMENT_REPORT("settlement_report"),
+    BANK_STATEMENT("bank_statement"),
+}
+
+@NamedInterface("api")
+data class ReconciliationOutcome(
+    val attemptId: UUID,
+    val providerStatus: String,
+    val resolved: Boolean,
+    /** Written for the operator reading it, not for a log. */
+    val message: String,
 )

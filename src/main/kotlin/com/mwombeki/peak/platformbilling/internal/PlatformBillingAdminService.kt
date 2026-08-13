@@ -2,6 +2,8 @@ package com.mwombeki.peak.platformbilling.internal
 
 import com.mwombeki.peak.platformbilling.api.IssuedReceipt
 import com.mwombeki.peak.platformbilling.api.PlatformBillingAdminPort
+import com.mwombeki.peak.platformbilling.api.ReconciliationOutcome
+import com.mwombeki.peak.platformbilling.api.ResolvePaymentCommand
 import com.mwombeki.peak.platformbilling.api.StuckPayment
 import com.mwombeki.peak.platformbilling.api.TenantCommercialStanding
 import java.util.UUID
@@ -19,7 +21,16 @@ import org.springframework.stereotype.Service
 @Service
 class PlatformBillingAdminService(
     private val jdbcTemplate: JdbcTemplate,
+    private val operatorReconciliation: OperatorReconciliationService,
 ) : PlatformBillingAdminPort {
+
+    override fun requeryPayment(attemptId: UUID): ReconciliationOutcome =
+        operatorReconciliation.requery(attemptId)
+
+    override fun resolvePayment(
+        attemptId: UUID,
+        command: ResolvePaymentCommand,
+    ): ReconciliationOutcome = operatorReconciliation.resolve(attemptId, command)
 
     override fun commercialStanding(limit: Int): List<TenantCommercialStanding> {
         return jdbcTemplate.query(

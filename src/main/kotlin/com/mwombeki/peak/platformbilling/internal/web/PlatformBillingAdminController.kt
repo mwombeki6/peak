@@ -2,9 +2,15 @@ package com.mwombeki.peak.platformbilling.internal.web
 
 import com.mwombeki.peak.platformbilling.api.IssuedReceipt
 import com.mwombeki.peak.platformbilling.api.PlatformBillingAdminPort
+import com.mwombeki.peak.platformbilling.api.ReconciliationOutcome
+import com.mwombeki.peak.platformbilling.api.ResolvePaymentCommand
+import java.util.UUID
 import com.mwombeki.peak.platformbilling.api.StuckPayment
 import com.mwombeki.peak.platformbilling.api.TenantCommercialStanding
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
@@ -52,5 +58,30 @@ class PlatformBillingAdminController(
     @GetMapping("/receipts")
     fun receipts(@RequestParam(defaultValue = "200") limit: Int): List<IssuedReceipt> {
         return adminPort.receipts(limit)
+    }
+
+    /**
+     * The ordinary action on a stuck payment: ask the provider again.
+     *
+     * Decides nothing. Whatever the provider answers goes through the same path the
+     * background sweep uses, so an operator cannot reach a conclusion the loop could not.
+     */
+    @PostMapping("/reconciliation/{attemptId}/requery")
+    fun requery(@PathVariable attemptId: UUID): ReconciliationOutcome {
+        return adminPort.requeryPayment(attemptId)
+    }
+
+    /**
+     * The exception: an operator has established from evidence what the API could not tell
+     * us. Records the observation, which then enters the ordinary settlement path.
+     *
+     * Not a mark-as-paid button. Nothing here writes a purchase, a grant or a receipt.
+     */
+    @PostMapping("/reconciliation/{attemptId}/resolutions")
+    fun resolve(
+        @PathVariable attemptId: UUID,
+        @RequestBody command: ResolvePaymentCommand,
+    ): ReconciliationOutcome {
+        return adminPort.resolvePayment(attemptId, command)
     }
 }
