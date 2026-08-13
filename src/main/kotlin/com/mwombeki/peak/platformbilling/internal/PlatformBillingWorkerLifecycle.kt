@@ -43,6 +43,7 @@ import org.springframework.stereotype.Component
 class PlatformBillingWorkerLifecycle(
     private val jdbcTemplate: JdbcTemplate,
     private val reconciler: EntitlementReconciler,
+    private val lifecycleService: SubscriptionLifecycleService,
     private val properties: PlatformBillingProperties,
     @Value("\${peak.runtime.mode:api}")
     private val runtimeMode: String,
@@ -66,6 +67,7 @@ class PlatformBillingWorkerLifecycle(
 
         scope.launch(CoroutineName("platform-billing-reconcile")) { reconcileLoop() }
         scope.launch(CoroutineName("platform-billing-attempt-sweep")) { attemptSweepLoop() }
+        scope.launch(CoroutineName("platform-billing-lifecycle")) { lifecycleLoop() }
 
         log.info("Started platform billing worker loops")
     }
@@ -137,6 +139,28 @@ class PlatformBillingWorkerLifecycle(
         )
     }
 
+    /**
+     * Walks tenants through GRACE, RESTRICTED and SUSPENDED as their cover runs out.
+     *
+     * Slower than the reconcile loop because the states it moves between are measured in
+     * days: a tenant does not become suspended more precisely than once a quarter of an
+     * hour, and polling faster would only add load.
+     */
+    private suspend fun lifecycleLoop() {
+        while (currentCoroutineContext().isActive) {
+            try {
+                tenantsNeedingReconciliation().forEach { tenantId ->
+                    lifecycleService.advance(tenantId, "lifecycle-${UUID.randomUUID()}")
+                }
+            } catch (ex: CancellationException) {
+                throw ex
+            } catch (ex: Exception) {
+                log.error("Platform billing lifecycle sweep failed", ex)
+            }
+            delay(LIFECYCLE_INTERVAL.toKotlinDuration())
+        }
+    }
+
     private suspend fun attemptSweepLoop() {
         while (currentCoroutineContext().isActive) {
             try {
@@ -162,6 +186,7 @@ class PlatformBillingWorkerLifecycle(
     private companion object {
         val RECONCILE_INTERVAL: Duration = Duration.ofSeconds(60)
         val SWEEP_INTERVAL: Duration = Duration.ofMinutes(2)
+        val LIFECYCLE_INTERVAL: Duration = Duration.ofMinutes(15)
         const val RECONCILE_BATCH = 200
     }
 }
