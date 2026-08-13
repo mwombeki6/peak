@@ -1,5 +1,6 @@
 package com.mwombeki.peak.platformbilling.internal
 
+import com.mwombeki.peak.platformbilling.api.CollectionFlow
 import com.mwombeki.peak.platformbilling.api.PaymentMethod
 import com.mwombeki.peak.platformbilling.api.PaymentMethodOption
 import java.math.BigDecimal
@@ -48,13 +49,13 @@ class PaymentMethodEligibilityService(
 
         return jdbcTemplate.query(
             """
-            SELECT provider, payment_method, currency, min_amount, max_amount,
-                   requires_msisdn
+            SELECT provider, payment_method, collection_flow, currency, min_amount,
+                   max_amount, requires_msisdn
             FROM peak_payment_method_capabilities
             WHERE is_enabled = true
               AND currency = ?
               AND provider = ANY(?)
-            ORDER BY payment_method, provider
+            ORDER BY payment_method, collection_flow, provider
             """.trimIndent(),
             { rs, _ ->
                 val method = PaymentMethod.fromDatabase(rs.getString("payment_method"))
@@ -65,6 +66,7 @@ class PaymentMethodEligibilityService(
                 PaymentMethodOption(
                     provider = rs.getString("provider"),
                     method = method,
+                    collectionFlow = CollectionFlow.fromDatabase(rs.getString("collection_flow")),
                     currency = rs.getString("currency").trim(),
                     requiresMsisdn = rs.getBoolean("requires_msisdn"),
                     eligible = reason == null,
@@ -94,6 +96,9 @@ class PaymentMethodEligibilityService(
             SELECT min_amount, max_amount, requires_msisdn, is_enabled
             FROM peak_payment_method_capabilities
             WHERE provider = ? AND payment_method = ? AND currency = ?
+            -- A rail may be offered through more than one flow. Only an enabled one can
+            -- collect, so a disabled declaration must not shadow it.
+            ORDER BY is_enabled DESC
             """.trimIndent(),
             { rs, _ ->
                 Capability(
@@ -121,6 +126,7 @@ class PaymentMethodEligibilityService(
             """
             SELECT requires_msisdn FROM peak_payment_method_capabilities
             WHERE provider = ? AND payment_method = ? AND currency = ?
+            ORDER BY is_enabled DESC
             """.trimIndent(),
             { rs, _ -> rs.getBoolean("requires_msisdn") },
             provider,

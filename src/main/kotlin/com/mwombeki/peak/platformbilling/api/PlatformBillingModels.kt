@@ -148,10 +148,31 @@ enum class PaymentMethod(val databaseValue: String) {
  * Returned alongside a quote so the customer is offered the methods that will work rather
  * than discovering the limit after committing.
  */
+/**
+ * How a customer experiences paying, which is not the same as the rail.
+ *
+ * Mobile money offered as a hosted checkout page and mobile money offered as a USSD push to
+ * a known handset are different integrations against different endpoints, and only the
+ * second is what "click Pay and answer your phone" means.
+ */
+@NamedInterface("api")
+enum class CollectionFlow(val databaseValue: String) {
+    DIRECT_PUSH("direct_push"),
+    HOSTED_CHECKOUT("hosted_checkout"),
+    ;
+
+    companion object {
+        fun fromDatabase(value: String): CollectionFlow =
+            entries.firstOrNull { it.databaseValue == value }
+                ?: throw IllegalArgumentException("Unknown collection flow: $value")
+    }
+}
+
 @NamedInterface("api")
 data class PaymentMethodOption(
     val provider: String,
     val method: PaymentMethod,
+    val collectionFlow: CollectionFlow,
     val currency: String,
     val requiresMsisdn: Boolean,
     val eligible: Boolean,

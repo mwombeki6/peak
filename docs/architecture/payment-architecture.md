@@ -90,12 +90,18 @@ supply and in what a single transaction may carry.
 
 ```
 peak_payment_method_capabilities
-  (provider, method, currency)
+  (provider, method, currency, collection_flow)
       min_amount, max_amount
       requires_msisdn
       supports_status_query
       is_enabled
 ```
+
+`collection_flow` is a separate dimension from the rail, because naming a rail does not name
+how a customer experiences it. Snippe makes that concrete: it offers mobile money as a USSD
+push to a handset Peak supplies (`POST /v1/payments`) *and* as a hosted checkout page
+(`POST /api/v1/sessions`). Both are mobile money; only the first is what "click Pay and
+answer your phone" means. AzamPay will need the same distinction.
 
 This exists because the mobile money ceiling used to live in the quote: a selection above
 5,000,000 TZS was refused outright, as though it were unsellable. It is not. That figure
@@ -642,11 +648,19 @@ HMAC verification.
 `X-Webhook-Signature` scheme needs the raw request body, which the current
 `PlatformBillingWebhookController` already takes as a `String` for exactly this reason.
 
-`SnippePaymentProvider` implements hosted checkout, status query and webhook verification,
-with a five-minute replay window on `X-Webhook-Timestamp`. Only hosted checkout is
-implemented: the direct payments endpoint appears as both `/v1/payments` and
-`/api/v1/payments` in the documentation and its request schema is not published, so it was
-left alone rather than guessed at.
+`SnippePaymentProvider` implements **hosted checkout**, status query and webhook
+verification, with a five-minute replay window on `X-Webhook-Timestamp`.
+
+It does **not** implement the direct USSD push, and the capability registry says so. That
+rail is `POST /v1/payments` with `payment_type=mobile` and a `phone_number`, which sends the
+prompt straight to the handset — a different path prefix (`/v1`, not `/api/v1`) and a
+different request shape (`details.amount`, `details.currency`,
+`customer.firstname/lastname/email`). It is declared and disabled with a NOT IMPLEMENTED
+note, and the migration refuses to let anything wearing that note be enabled.
+
+That distinction matters for Peak's own billing: the subscription UX is "click Pay, answer
+the prompt", which is the direct rail. The hosted checkout is the better fit for the large
+amounts that cannot go by USSD at all.
 
 Three things remain before the rail can be enabled, none settleable by reading:
 
@@ -657,7 +671,14 @@ shillings. If that is wrong the failure is safe rather than silent: settlement a
 a callback whose amount disagrees with the attempt, so every payment would be rejected loudly
 rather than settled at a hundredth of its value. One sandbox payment settles it.
 
-**The production base URL**, and whether sessions serve a USSD push or only hosted checkout.
+**Which credential sessions accept.** The sessions page documents a JWT bearer while the
+payments API and the authentication page document an `snp_` API key. The base URL is
+`https://api.snippe.sh`. That inconsistency is exactly the sort of small documentation
+disagreement that invalidates an adapter, so it is settled by a call rather than by reading.
+
+**Bank collection is not established.** Snippe documents bank *payouts* to 40+ Tanzanian
+banks, and hosted sessions list `allowed_methods: ["mobile_money"]`. Supporting bank
+disbursement is not the same as accepting bank collection, and no row claims otherwise.
 
 **Certification**, on the same terms as any other rail: a sandbox payment initiated, confirmed
 by callback, and then independently recovered by status query with the callback dropped.
