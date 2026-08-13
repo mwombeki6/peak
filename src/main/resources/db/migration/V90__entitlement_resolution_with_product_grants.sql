@@ -27,9 +27,15 @@
 -- That makes a lapsed subscription mean nothing, which is precisely what
 -- self-service billing must not be built on top of.
 --
--- Removing the fallback is a behaviour change for any tenant holding no
--- service-granting subscription. The guard at the end of this migration fails
--- the deployment rather than quietly revoking access from a live tenant.
+-- So the fallback is narrowed rather than removed: it fires only when a tenant
+-- has no subscription row at all, never when one exists in a terminal status.
+-- Removing it outright was tried first and was too blunt -- a tenant assigned a
+-- plan but never subscribed would lose everything, which is the state every
+-- freshly created tenant is in until onboarding writes its trialing row.
+--
+-- This is still a behaviour change for a tenant whose only subscription rows are
+-- terminal. The guard at the end of this migration fails the deployment rather
+-- than quietly revoking access from a live tenant.
 --
 -- granted_entitlements is an object keyed by entitlement code:
 --   {"module.pos": {"is_enabled": true, "value": {}},
@@ -70,16 +76,40 @@ BEGIN
 
     RETURN QUERY
     WITH current_subscription AS (
-        -- No fallback to tenants.plan_id. A subscription outside these statuses
-        -- grants nothing, which is what makes expiry mean something.
-        SELECT subscription.plan_id
-        FROM tenant_subscriptions subscription
-        JOIN tenants tenant
-          ON tenant.id = subscription.tenant_id AND tenant.deleted_at IS NULL
-        WHERE subscription.tenant_id = p_tenant_id
-          AND subscription.status IN ('trialing', 'active', 'past_due', 'paused')
-        ORDER BY subscription.created_at DESC
-        LIMIT 1
+        -- When a subscription row exists it is the only source of truth: a row outside
+        -- these statuses grants nothing, which is what makes expiry mean something.
+        (
+            SELECT subscription.plan_id
+            FROM tenant_subscriptions subscription
+            JOIN tenants tenant
+              ON tenant.id = subscription.tenant_id AND tenant.deleted_at IS NULL
+            WHERE subscription.tenant_id = p_tenant_id
+              AND subscription.status IN ('trialing', 'active', 'past_due', 'paused')
+            ORDER BY subscription.created_at DESC
+            LIMIT 1
+        )
+        UNION ALL
+        -- The fallback to tenants.plan_id, deliberately narrowed to the case it was
+        -- always meant for: a tenant that holds a plan but has never had a subscription
+        -- row at all. The original blanket COALESCE(subscription.plan_id,
+        -- tenant.plan_id) was the bug, because it also fired when a row existed in a
+        -- terminal status -- so a cancelled subscription kept everything, since
+        -- tenants.plan_id still pointed at the plan they used to have.
+        --
+        -- The two branches are mutually exclusive by construction, so this yields at
+        -- most one row.
+        (
+            SELECT tenant.plan_id
+            FROM tenants tenant
+            WHERE tenant.id = p_tenant_id
+              AND tenant.deleted_at IS NULL
+              AND tenant.plan_id IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM tenant_subscriptions subscription
+                  WHERE subscription.tenant_id = p_tenant_id
+              )
+        )
     ), effective_override AS (
         SELECT override.is_enabled, override.entitlement_value,
                'override'::text AS source
@@ -166,10 +196,13 @@ $$;
 -- definer's reach rather than the caller's.
 GRANT SELECT ON peak_product_grants TO pms_app, pms_platform, pms_worker;
 
--- Removing the tenants.plan_id fallback is the one change here that can take
--- access away. Fail the migration rather than discover it in production: any
--- tenant that is not soft-deleted, holds a plan, and has no service-granting
--- subscription would silently lose every plan entitlement.
+-- Narrowing the tenants.plan_id fallback is the one change here that can take
+-- access away. Fail the migration rather than discover it in production.
+--
+-- The tenants at risk are precisely those that have a subscription row, none of
+-- it service-granting, and were relying on the old blanket fallback to keep
+-- working. A tenant with no subscription row at all is not at risk: the narrowed
+-- fallback still covers it.
 DO $migration$
 DECLARE
     affected bigint;
@@ -181,6 +214,11 @@ BEGIN
     WHERE tenant.deleted_at IS NULL
       AND tenant.plan_id IS NOT NULL
       AND tenant.status IN ('trial', 'active')
+      AND EXISTS (
+          SELECT 1
+          FROM tenant_subscriptions subscription
+          WHERE subscription.tenant_id = tenant.id
+      )
       AND NOT EXISTS (
           SELECT 1
           FROM tenant_subscriptions subscription
@@ -190,7 +228,7 @@ BEGIN
 
     IF affected > 0 THEN
         RAISE EXCEPTION
-            'Removing the tenants.plan_id entitlement fallback would revoke access from % live tenant(s): %. Give each a service-granting subscription row before applying this migration.',
+            'Narrowing the tenants.plan_id entitlement fallback would revoke access from % live tenant(s): %. Each holds a subscription row in a terminal status and was relying on the fallback. Give each a service-granting subscription row before applying this migration.',
             affected, left(coalesce(sample, ''), 400);
     END IF;
 END;

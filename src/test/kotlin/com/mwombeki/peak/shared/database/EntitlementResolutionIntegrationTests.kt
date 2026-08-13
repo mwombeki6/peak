@@ -129,6 +129,34 @@ class EntitlementResolutionIntegrationTests {
         )
     }
 
+    /**
+     * The other half of the rule, and the one that is easy to get wrong by over-correcting.
+     *
+     * Removing the `tenants.plan_id` fallback outright also revoked everything from a
+     * tenant that simply had no subscription row yet — the state every tenant is in between
+     * `INSERT INTO tenants` and onboarding writing its trialing row. The fallback therefore
+     * fires on absence, never on a terminal status.
+     */
+    @Test
+    fun aTenantThatNeverSubscribedStillResolvesItsAssignedPlan() {
+        val fixture = seedTenantWithSubscription()
+        jdbcTemplate.update(
+            "INSERT INTO plan_entitlements (plan_id, entitlement_code, entitlement_value, is_enabled) VALUES (?, 'module.reports', '{}'::jsonb, true)",
+            fixture.planId,
+        )
+        jdbcTemplate.update(
+            "DELETE FROM tenant_subscriptions WHERE tenant_id = ?",
+            fixture.tenantId,
+        )
+
+        assertEquals(
+            true,
+            resolve(fixture.tenantId, "module.reports")?.enabled,
+            "a tenant with no subscription row at all must still get its plan",
+        )
+        assertEquals("plan", resolve(fixture.tenantId, "module.reports")?.source)
+    }
+
     private data class Resolved(val enabled: Boolean, val source: String, val limit: Long?)
 
     private fun resolve(tenantId: UUID, code: String): Resolved? {
@@ -164,7 +192,13 @@ class EntitlementResolutionIntegrationTests {
     ) {
         val productCode = "test-product-${UUID.randomUUID().toString().take(8)}"
         jdbcTemplate.update(
-            "INSERT INTO peak_products (code, name, kind) VALUES (?, ?, 'addon')",
+            // Not sellable: this product exists only to hang a grant off. Leaving it
+            // sellable would put a priceless product into the catalog every other test
+            // shares, breaking the invariant that anything on sale has a full price grid.
+            """
+            INSERT INTO peak_products (code, name, kind, is_sellable)
+            VALUES (?, ?, 'addon', false)
+            """.trimIndent(),
             productCode,
             "Test Product $productCode",
         )
