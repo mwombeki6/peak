@@ -33,6 +33,25 @@ interface PaymentProvider {
     ): ProviderWebhookNotification {
         return parseWebhook(payload)
     }
+
+    /**
+     * For a provider that signs in HTTP headers rather than in the body.
+     *
+     * A separate method rather than a defaulted parameter, because adding a parameter to the
+     * method above would break every existing override. This one delegates by default, so a
+     * provider that signs in the body — ClickPesa, AzamPay — needs no change at all.
+     *
+     * Callers should prefer this: it is a superset, and a provider that ignores headers is
+     * unaffected by being handed them.
+     */
+    fun verifyAndParseWebhook(
+        payload: String,
+        checksumKey: String,
+        checksumRequired: Boolean,
+        headers: Map<String, String>,
+    ): ProviderWebhookNotification {
+        return verifyAndParseWebhook(payload, checksumKey, checksumRequired)
+    }
 }
 
 @NamedInterface("api")

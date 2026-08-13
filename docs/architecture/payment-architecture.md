@@ -138,6 +138,7 @@ data change once the contract is proven.
 |---|---|
 | `PaymentProvider` SPI, `PaymentPort`, `PaymentService` | `payment` |
 | `AzamPayPaymentProvider`, `AzamPaySignature`, `AzamPayPublicKeyProvider`, `AzamPayTokenProvider` | `integrations` |
+| `SnippePaymentProvider` | `integrations` |
 | `ProductCatalogService`, `PaymentMethodEligibilityService` | `platformbilling` |
 | `PurchaseService`, `PlatformCollectionService` | `platformbilling` |
 | `PlatformBillingWebhookService`, `PaymentConfirmationService`, `PaymentStatusReconciliationService` | `platformbilling` |
@@ -618,8 +619,8 @@ TZS-settled properties. Merchant lending, which the transaction ledger makes rea
 
 ## Snippe
 
-Documented, unambiguous, and unbuilt. Recorded here because the contract is now known and the
-adapter is a straightforward piece of work rather than a research task.
+Built and uncertified. The contract is documented and unambiguous, which is what made it
+buildable at all.
 
 | Concern | Contract |
 |---|---|
@@ -641,5 +642,22 @@ HMAC verification.
 `X-Webhook-Signature` scheme needs the raw request body, which the current
 `PlatformBillingWebhookController` already takes as a `String` for exactly this reason.
 
-Still to confirm before enabling: the timestamp header name, whether a replay window is
-enforced, upper amount limits, and the direct (non-hosted) USSD path.
+`SnippePaymentProvider` implements hosted checkout, status query and webhook verification,
+with a five-minute replay window on `X-Webhook-Timestamp`. Only hosted checkout is
+implemented: the direct payments endpoint appears as both `/v1/payments` and
+`/api/v1/payments` in the documentation and its request schema is not published, so it was
+left alone rather than guessed at.
+
+Three things remain before the rail can be enabled, none settleable by reading:
+
+**Amount units.** Snippe documents "Integer (smallest unit)". For TZS the smallest
+circulating unit *is* the shilling, and the magnitudes agree — a documented minimum of 500 is
+sensible in shillings and absurd in hundredths — so the adapter treats the value as whole
+shillings. If that is wrong the failure is safe rather than silent: settlement already refuses
+a callback whose amount disagrees with the attempt, so every payment would be rejected loudly
+rather than settled at a hundredth of its value. One sandbox payment settles it.
+
+**The production base URL**, and whether sessions serve a USSD push or only hosted checkout.
+
+**Certification**, on the same terms as any other rail: a sandbox payment initiated, confirmed
+by callback, and then independently recovered by status query with the callback dropped.

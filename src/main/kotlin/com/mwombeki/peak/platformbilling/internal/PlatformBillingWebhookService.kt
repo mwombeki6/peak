@@ -41,7 +41,11 @@ class PlatformBillingWebhookService(
 
     private val adaptersByCode = adapters.associateBy { it.providerCode }
 
-    override fun receive(providerCode: String, payload: String): PlatformBillingWebhookReceipt {
+    override fun receive(
+        providerCode: String,
+        payload: String,
+        headers: Map<String, String>,
+    ): PlatformBillingWebhookReceipt {
         val adapter = adaptersByCode[providerCode.trim().lowercase()]
             ?: throw IllegalArgumentException("Unknown platform billing provider: $providerCode")
 
@@ -49,6 +53,7 @@ class PlatformBillingWebhookService(
             payload = payload,
             checksumKey = secretReferenceResolver.resolve(properties.checksumKeySecretRef),
             checksumRequired = true,
+            headers = headers,
         )
 
         val scope = resolveScope(notification.internalReference)

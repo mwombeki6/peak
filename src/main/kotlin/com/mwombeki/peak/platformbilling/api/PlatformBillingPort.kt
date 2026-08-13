@@ -56,7 +56,16 @@ interface PlatformBillingPort {
  */
 @NamedInterface("api")
 interface PlatformBillingWebhookPort {
-    fun receive(providerCode: String, payload: String): PlatformBillingWebhookReceipt
+    /**
+     * @param headers the callback's HTTP headers. Some providers sign in a header rather
+     *   than in the body, so verification needs them; one that signs in the body ignores
+     *   them harmlessly.
+     */
+    fun receive(
+        providerCode: String,
+        payload: String,
+        headers: Map<String, String> = emptyMap(),
+    ): PlatformBillingWebhookReceipt
 }
 
 @NamedInterface("api")
