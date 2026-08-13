@@ -22,7 +22,8 @@
                 "reliability::api",
                 "payment::api",
                 "tenantmanagement::api",
-                "property::api"
+                "property::api",
+                "usermanagement::api"
         }
 )
 package com.mwombeki.peak.platformbilling;

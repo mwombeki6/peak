@@ -144,6 +144,49 @@ class EntitlementReconcilerIntegrationTests {
         )
     }
 
+    /**
+     * The difference between a module being enabled and a customer being able to see it.
+     *
+     * `can_access_module` wants both the flag and a permission inside the module. A tenant
+     * admin who holds no `pos.*` permission is refused by exactly the same code path as one
+     * who never paid — so without the permission bootstrap, buying POS would flip a flag and
+     * change nothing anyone could observe.
+     */
+    @Test
+    fun buyingAModuleGivesTheTenantAdminRoleThePermissionsToSeeIt() {
+        val fixture = tenantWithProperties(count = 1, withSystemAdminRole = true)
+        grantPos(fixture, fixture.propertyIds)
+
+        assertEquals(
+            0,
+            adminPermissionCount(fixture.tenantId, "pos.view"),
+            "the tenant admin should not hold pos.view before buying POS",
+        )
+
+        reconciler.reconcileTenant(fixture.tenantId, "corr-permission-bootstrap")
+
+        assertTrue(
+            adminPermissionCount(fixture.tenantId, "pos.view") > 0,
+            "activating a module must also grant its permissions, or nothing becomes visible",
+        )
+    }
+
+    @Test
+    fun bootstrappingPermissionsTwiceGrantsThemOnce() {
+        val fixture = tenantWithProperties(count = 1, withSystemAdminRole = true)
+        grantPos(fixture, fixture.propertyIds)
+
+        reconciler.reconcileTenant(fixture.tenantId, "corr-bootstrap-1")
+        val afterFirst = adminPermissionCount(fixture.tenantId, "pos.view")
+        reconciler.reconcileTenant(fixture.tenantId, "corr-bootstrap-2")
+
+        assertEquals(
+            afterFirst,
+            adminPermissionCount(fixture.tenantId, "pos.view"),
+            "a second pass must not duplicate role grants",
+        )
+    }
+
     @Test
     fun aDanglingGrantForADeletedPropertyDoesNotStopTheRest() {
         val fixture = tenantWithProperties(count = 2)
@@ -225,7 +268,27 @@ class EntitlementReconcilerIntegrationTests {
         }
     }
 
-    private fun tenantWithProperties(count: Int): TenantFixture {
+    private fun adminPermissionCount(tenantId: UUID, permissionCode: String): Int {
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT count(*)
+            FROM tenant_role_permissions role_permission
+            JOIN tenant_roles role ON role.id = role_permission.tenant_role_id
+            JOIN permissions permission ON permission.id = role_permission.permission_id
+            WHERE role.tenant_id = ?
+              AND role.code = 'tenant_admin'
+              AND permission.code = ?
+            """.trimIndent(),
+            Int::class.java,
+            tenantId,
+            permissionCode,
+        ) ?: 0
+    }
+
+    private fun tenantWithProperties(
+        count: Int,
+        withSystemAdminRole: Boolean = false,
+    ): TenantFixture {
         val planId = UUID.randomUUID()
         val tenantId = UUID.randomUUID()
         val userId = UUID.randomUUID()
@@ -277,6 +340,17 @@ class EntitlementReconcilerIntegrationTests {
             roleId,
             permissionId,
         )
+
+        if (withSystemAdminRole) {
+            jdbcTemplate.update(
+                """
+                INSERT INTO tenant_roles (id, tenant_id, name, code, is_system)
+                VALUES (?, ?, 'Tenant Administrator', 'tenant_admin', true)
+                """.trimIndent(),
+                UUID.randomUUID(),
+                tenantId,
+            )
+        }
 
         val propertyIds = (1..count).map { index ->
             val propertyId = UUID.randomUUID()

@@ -4,6 +4,7 @@ import com.mwombeki.peak.property.api.PropertyModuleProjectionPort
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.tenantmanagement.api.TenantEntitlementProjectionPort
+import com.mwombeki.peak.usermanagement.api.TenantModulePermissionBootstrapPort
 import java.util.UUID
 import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.JdbcTemplate
@@ -40,6 +41,7 @@ class EntitlementReconciler(
     private val databaseSessionContext: DatabaseSessionContext,
     private val tenantProjection: TenantEntitlementProjectionPort,
     private val propertyProjection: PropertyModuleProjectionPort,
+    private val permissionBootstrap: TenantModulePermissionBootstrapPort,
 ) {
     private val log = LoggerFactory.getLogger(EntitlementReconciler::class.java)
 
@@ -81,6 +83,10 @@ class EntitlementReconciler(
             if (tenantProjection.activateModuleIfNeverActivated(tenantId, moduleId)) {
                 activated += 1
                 recordActivation(tenantId, moduleId)
+                // Enabling the module is only half of becoming visible: can_access_module
+                // also wants the user to hold a permission inside it. Without this the
+                // customer pays, the flag flips, and the screens stay exactly as absent.
+                permissionBootstrap.bootstrapModulePermissions(tenantId, moduleId)
             }
 
             if (scope.propertyIds.isNotEmpty()) {
