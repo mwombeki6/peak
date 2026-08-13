@@ -76,6 +76,7 @@ class PaymentService(
     adapters: List<PaymentProvider>,
 ) : PaymentPort, PaymentStatusPort {
     private val providerCodes = adapters.mapTo(mutableSetOf()) { it.providerCode }
+    private val adaptersByCode = adapters.associateBy { it.providerCode }
 
     override fun nightAuditSummary(
         tenantId: UUID,
@@ -734,12 +735,16 @@ class PaymentService(
             "POS payment tenant must match the active tenant context"
         }
         val amount = request.amount.positiveMoney("amount")
-        requireProviderAccount(
+        val providerAccount = requireProviderAccount(
             actor.tenantId,
             propertyId,
             request.providerAccountId,
             lock = false,
         )
+        // The same check as the folio path. A POS collection is the same push to the same
+        // handset, so leaving it out here would have kept the whole defect alive on the
+        // branch a bar or restaurant actually uses.
+        val mobileNetwork = requireSupportedNetwork(providerAccount, request.mobileNetwork)
         val transactionId = UUID.randomUUID()
         val internalReference = paymentReference(transactionId)
         jdbcTemplate.update(
@@ -748,10 +753,10 @@ class PaymentService(
                 id, tenant_id, property_id, pos_order_id, provider_account_id,
                 initiated_by, idempotency_key_id, transaction_direction,
                 transaction_type, internal_reference, payer_identifier,
-                amount, currency, status, expires_at, next_status_check_at,
-                metadata
+                mobile_network, amount, currency, status, expires_at,
+                next_status_check_at, metadata
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'inbound', 'collection', ?, ?, ?,
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'inbound', 'collection', ?, ?, ?, ?,
                     'TZS', 'created', now() + interval '15 minutes',
                     now() + interval '15 seconds', ?::jsonb)
             """.trimIndent(),
@@ -764,6 +769,7 @@ class PaymentService(
             idempotencyKeyId,
             internalReference,
             request.phoneNumber.tanzanianE164(),
+            mobileNetwork,
             amount,
             objectMapper.writeValueAsString(mapOf("method" to "pos_mobile_money")),
         )
@@ -1958,7 +1964,10 @@ class PaymentService(
         requested: String?,
     ): String? {
         val network = requested?.trim()?.takeIf { it.isNotEmpty() }
-        if (account.providerCode in NETWORK_INFERRING_PROVIDERS) {
+        // Asked of the adapter, not read from a list held here. A list would need editing
+        // for every new provider, and one missed off it fails in the worker — which is the
+        // failure this whole check exists to move forward.
+        if (adaptersByCode[account.providerCode]?.requiresMobileNetwork != true) {
             return network
         }
 
@@ -2286,12 +2295,10 @@ class PaymentService(
     private companion object {
         /**
          * What the adapters accept. Constrained here so a typo is refused while the
-         * receptionist is still on the screen rather than by a provider later.
+         * receptionist is still on the screen rather than by a provider later, and matched
+         * by a CHECK constraint so a second write path cannot bypass it.
          */
         val SUPPORTED_MOBILE_NETWORKS = listOf("Airtel", "Tigo", "Halopesa", "Azampesa", "Mpesa")
-
-        /** Providers that work the network out from the MSISDN themselves. */
-        val NETWORK_INFERRING_PROVIDERS = setOf("clickpesa")
 
         const val CONTRACT_MOCK_PROVIDER = "contract_mock"
         const val HTTP_GATEWAY_PROVIDER = "http_gateway"

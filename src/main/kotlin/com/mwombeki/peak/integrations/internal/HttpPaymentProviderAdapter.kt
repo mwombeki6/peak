@@ -73,7 +73,10 @@ class HttpPaymentProviderAdapter(
                 "payerIdentifier" to command.payerIdentifier,
                 "amount" to command.amount,
                 "currency" to command.currency,
-            ),
+                // Forwarded when supplied. Peak stores the network a caller confirmed, so
+                // dropping it here would mean recording a routing decision and then not
+                // acting on it — the payment would go wherever the gateway guessed.
+            ) + (command.providerChannel?.let { mapOf("mobileNetwork" to it) } ?: emptyMap()),
         )
         val response = transport.post(
             endpoint = endpoint,

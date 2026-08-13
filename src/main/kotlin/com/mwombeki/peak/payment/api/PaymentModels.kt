@@ -82,6 +82,8 @@ data class InitiatePosMobileMoneyRequest(
     val providerAccountId: UUID,
     val phoneNumber: String,
     val amount: BigDecimal,
+    /** See [InitiateMobileMoneyRequest.mobileNetwork]. A POS collection is the same push. */
+    val mobileNetwork: String? = null,
 )
 
 data class ReversePaymentRequest(

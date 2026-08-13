@@ -10,6 +10,19 @@ import org.springframework.modulith.NamedInterface
 interface PaymentProvider {
     val providerCode: String
 
+    /**
+     * Whether this provider must be told which mobile network to push to.
+     *
+     * A provider's own business, declared here rather than listed in the payment module.
+     * A caller holding that list would have to be edited every time a provider is added,
+     * and a provider missed off it fails in the worker — after the work is queued, which is
+     * the failure this exists to prevent.
+     *
+     * False by default: most providers work the network out from the MSISDN, and asking a
+     * front desk a question the provider does not need answered is its own kind of defect.
+     */
+    val requiresMobileNetwork: Boolean get() = false
+
     fun initiate(command: ProviderCollectionCommand): ProviderCollectionResult
 
     fun queryStatus(command: ProviderStatusQuery): ProviderStatusResult {

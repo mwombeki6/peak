@@ -46,6 +46,9 @@ class AzamPayPaymentProvider(
 
     override val providerCode = "azampay"
 
+    /** mno/checkout has a required `provider` field and will not infer it from the MSISDN. */
+    override val requiresMobileNetwork = true
+
     override fun initiate(command: ProviderCollectionCommand): ProviderCollectionResult {
         val channel = requireSupportedChannel(command.providerChannel)
         val endpoint = azamPayEndpoint(command.endpointUrl, CHECKOUT_PATH)
