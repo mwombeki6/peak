@@ -148,6 +148,11 @@ class RenewalOfferService(
      * replaying last year's invoice.
      */
     fun accept(offerId: UUID): PurchaseResponse {
+        // The offer is the idempotency anchor. A double-click, a retried request or an
+        // impatient customer must get back the purchase they already have, not a second one
+        // and not an error about a state they did not know they were in.
+        alreadyAccepted(offerId)?.let { return it }
+
         val selection = requireNotNull(
             transactionTemplate.execute {
                 val actor = tenantRequestContext.bind()
@@ -204,6 +209,33 @@ class RenewalOfferService(
                 actor.tenantId,
             )
         }
+    }
+
+    /**
+     * The purchase this offer already produced, if it has been accepted.
+     *
+     * `accepted_purchase_id` is a one-to-one link enforced by a check constraint — an
+     * accepted offer cannot exist without one — so it is a safe anchor to replay against.
+     */
+    private fun alreadyAccepted(offerId: UUID): PurchaseResponse? {
+        val existing = requireNotNull(
+            transactionTemplate.execute {
+                val actor = tenantRequestContext.bind()
+                jdbcTemplate.query(
+                    """
+                    SELECT accepted_purchase_id
+                    FROM peak_renewal_offers
+                    WHERE id = ? AND tenant_id = ? AND status = 'accepted'
+                    """.trimIndent(),
+                    { rs, _ -> rs.getObject("accepted_purchase_id", UUID::class.java) },
+                    offerId,
+                    actor.tenantId,
+                ).firstOrNull() to actor.tenantId
+            },
+        )
+
+        val (purchaseId, tenantId) = existing
+        return purchaseId?.let { purchaseService.purchase(tenantId, it) }
     }
 
     private fun loadOffer(tenantId: UUID, offerId: UUID): StoredOffer {

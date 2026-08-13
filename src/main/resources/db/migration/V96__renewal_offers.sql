@@ -119,8 +119,14 @@ AS $$
     WHERE grant_row.revoked_at IS NULL
       AND grant_row.status = 'active'
       AND grant_row.ends_at IS NOT NULL
+      -- Cover that runs out within the notice period, or that has already run out.
+      --
+      -- There is deliberately no lower bound. An earlier version required
+      -- ends_at > now(), which meant a tenant whose cover had already lapsed was
+      -- never offered a renewal -- exactly the suspended tenant, the one who most
+      -- needs a route back. Restriction is only defensible if recovery is reachable,
+      -- so the offer has to survive the lapse it is warning about.
       AND grant_row.ends_at <= now() + make_interval(days => greatest(p_notice_days, 0))
-      AND grant_row.ends_at > now()
       -- Any offer at all for this expiring cover, whatever became of it. The unique
       -- index above is a concurrency guard -- it stops two live offers racing -- and
       -- this is the policy: one reminder per cover period. Excluding only 'offered'
