@@ -277,6 +277,21 @@ class SuspendedTenantRecoveryIntegrationTests {
     ).andReturn().response
 
     private fun tenantWithLapsedCover(): RecoveryFixture {
+        // Registering an adapter is not enough to make a rail usable: its capabilities have
+        // to be declared. That gate is deliberate — a provider whose limits and payer
+        // requirements nobody has stated should not be collectable — so the stub declares
+        // its own.
+        jdbcTemplate.update(
+            """
+            INSERT INTO peak_payment_method_capabilities (
+                provider, payment_method, currency, min_amount, max_amount,
+                requires_msisdn, supports_status_query, is_enabled, notes
+            ) VALUES ('stub_recovery', 'mobile_money', 'TZS', 1000, 5000000,
+                      true, true, true, 'Test stub')
+            ON CONFLICT DO NOTHING
+            """.trimIndent(),
+        )
+
         val planId = UUID.randomUUID()
         val tenantId = UUID.randomUUID()
         val userId = UUID.randomUUID()

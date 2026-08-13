@@ -69,6 +69,15 @@ data class Quote(
     val periodStartsAt: Instant,
     val periodEndsAt: Instant,
     val expiresAt: Instant,
+    /**
+     * How this amount could be paid.
+     *
+     * A quote is always priced, even when no rail can currently carry it: what a customer
+     * may buy and how they may pay are independent questions, and conflating them once led
+     * to refusing to price a perfectly sellable annual contract because it would not fit
+     * down a USSD prompt.
+     */
+    val paymentMethods: List<PaymentMethodOption> = emptyList(),
 )
 
 @NamedInterface("api")
@@ -112,11 +121,52 @@ enum class PurchaseStatus(val databaseValue: String) {
     }
 }
 
+/**
+ * The rail money travels down, which is not the same thing as the provider.
+ *
+ * AzamPay offers several. They differ in what the payer must supply and, crucially, in what
+ * a single transaction may carry — which is why an amount that cannot go by mobile money is
+ * a payment-method question rather than a reason to refuse the sale.
+ */
+@NamedInterface("api")
+enum class PaymentMethod(val databaseValue: String) {
+    MOBILE_MONEY("mobile_money"),
+    BANK("bank"),
+    CARD("card"),
+    ;
+
+    companion object {
+        fun fromDatabase(value: String): PaymentMethod =
+            entries.firstOrNull { it.databaseValue == value }
+                ?: throw IllegalArgumentException("Unknown payment method: $value")
+    }
+}
+
+/**
+ * A rail a given amount can actually travel down, with why it can or cannot.
+ *
+ * Returned alongside a quote so the customer is offered the methods that will work rather
+ * than discovering the limit after committing.
+ */
+@NamedInterface("api")
+data class PaymentMethodOption(
+    val provider: String,
+    val method: PaymentMethod,
+    val currency: String,
+    val requiresMsisdn: Boolean,
+    val eligible: Boolean,
+    /** Present when [eligible] is false, phrased for the person reading it. */
+    val ineligibleReason: String?,
+    val maxAmount: BigDecimal?,
+)
+
 @NamedInterface("api")
 data class PayPurchaseRequest(
-    val payerMsisdn: String,
+    /** Required for mobile money, meaningless for a bank transfer. */
+    val payerMsisdn: String? = null,
     /** Provider channel such as Mpesa or Airtel; the adapter validates it. */
-    val channel: String?,
+    val channel: String? = null,
+    val method: PaymentMethod = PaymentMethod.MOBILE_MONEY,
 )
 
 /**
@@ -157,6 +207,7 @@ data class PaymentAttemptResponse(
     val purchaseId: UUID,
     val attemptNo: Int,
     val provider: String,
+    val method: PaymentMethod = PaymentMethod.MOBILE_MONEY,
     val status: PaymentAttemptStatus,
     val internalReference: String,
     /** Present only for a provider that hosts its own checkout page. */

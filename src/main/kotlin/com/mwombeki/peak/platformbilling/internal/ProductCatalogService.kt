@@ -1,7 +1,6 @@
 package com.mwombeki.peak.platformbilling.internal
 
 import com.mwombeki.peak.platformbilling.api.PlatformBillingNotFoundException
-import com.mwombeki.peak.platformbilling.api.PlatformBillingUncollectableException
 import com.mwombeki.peak.platformbilling.api.ProductKind
 import com.mwombeki.peak.platformbilling.api.ProductPrice
 import com.mwombeki.peak.platformbilling.api.ProductSummary
@@ -31,6 +30,7 @@ class ProductCatalogService(
     private val transactionTemplate: TransactionTemplate,
     private val tenantRequestContext: TenantRequestContext,
     private val properties: PlatformBillingProperties,
+    private val eligibilityService: PaymentMethodEligibilityService,
     private val clock: Clock,
 ) {
     fun catalog(): List<ProductSummary> {
@@ -91,18 +91,16 @@ class ProductCatalogService(
         val total = lines.fold(BigDecimal.ZERO) { running, line -> running.add(line.amount) }
         val currency = "TZS"
 
-        // Refuse here rather than at initiation. A purchase that cannot be collected is
-        // worse than one that was never created: the customer has committed, and the
-        // failure arrives as a provider error nobody can act on.
-        if (total > properties.maxCollectableAmount) {
-            throw PlatformBillingUncollectableException(
-                "This selection totals ${total.toPlainString()} $currency, above the " +
-                    "${properties.maxCollectableAmount.toPlainString()} $currency mobile money " +
-                    "limit for a single payment. Choose a shorter term, buy fewer add-ons at " +
-                    "once, or contact us to pay by bank transfer.",
-            )
-        }
-
+        // The quote is always priced, however large.
+        //
+        // This used to refuse anything above the mobile money ceiling, which conflated two
+        // independent things: 5,000,000 TZS is a fact about USSD, not about what Peak will
+        // sell. An annual group contract at 8,500,000 is perfectly sellable and simply needs
+        // another rail. Refusing to price it also pushed toward genuinely bad answers —
+        // splitting one purchase across several pushes, a partially-paid state, or trimming
+        // an annual term to fit a limit that has nothing to do with the agreement.
+        //
+        // How it can be paid is answered alongside, and enforced again at payment time.
         val now = clock.instant()
         return Quote(
             lines = lines,
@@ -112,6 +110,7 @@ class ProductCatalogService(
             periodStartsAt = now,
             periodEndsAt = now.atZone(ZoneOffset.UTC).plusMonths(request.termMonths.toLong()).toInstant(),
             expiresAt = now.plus(properties.quoteValidity),
+            paymentMethods = eligibilityService.methodsFor(total, currency),
         )
     }
 

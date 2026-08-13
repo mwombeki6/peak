@@ -3,7 +3,7 @@ package com.mwombeki.peak.platformbilling.internal
 import com.mwombeki.peak.TestcontainersConfiguration
 import com.mwombeki.peak.platformbilling.api.PlatformBillingConflictException
 import com.mwombeki.peak.platformbilling.api.PlatformBillingPort
-import com.mwombeki.peak.platformbilling.api.PlatformBillingUncollectableException
+import com.mwombeki.peak.platformbilling.api.PaymentMethod
 import com.mwombeki.peak.platformbilling.api.ProductKind
 import com.mwombeki.peak.platformbilling.api.PurchaseStatus
 import com.mwombeki.peak.platformbilling.api.QuoteLineRequest
@@ -213,8 +213,17 @@ class PlatformBillingPurchaseIntegrationTests {
         }
     }
 
+    /**
+     * A large selection is priced, and the limit shows up as a payment-method question.
+     *
+     * This test previously asserted the opposite — that a quote above the mobile money
+     * ceiling was refused outright. That conflated what Peak will sell with how the money can
+     * travel. 5,000,000 TZS is a fact about USSD, not about the commercial agreement, and
+     * refusing to price an annual group contract because it will not fit down a PIN prompt
+     * pushed toward splitting purchases and trimming terms to suit a rail.
+     */
     @Test
-    fun selectionAboveTheCollectionCapIsRejectedAtQuoteWithAnActionableMessage() {
+    fun aSelectionTooLargeForMobileMoneyIsStillPricedButNotPayableThatWay() {
         val unitAmount = jdbcTemplate.queryForObject(
             """
             SELECT amount FROM peak_product_prices
@@ -228,31 +237,48 @@ class PlatformBillingPurchaseIntegrationTests {
 
         val cap = BigDecimal("5000000.00")
         val propertiesNeeded = cap.divide(unitAmount, 0, java.math.RoundingMode.FLOOR).toInt() + 1
-        require(propertiesNeeded in 2..200) {
-            "peak_pos pricing has moved so far that this test would insert " +
-                "$propertiesNeeded properties; revisit the cap or the price"
-        }
+        require(propertiesNeeded in 2..200)
 
         val fixture = billingFixture(propertyCount = propertiesNeeded)
         requestContextHolder.set(fixture.context())
 
-        val failure = assertFailsWith<PlatformBillingUncollectableException> {
-            platformBillingPort.quote(
-                fixture.tenantId,
-                QuoteRequest(
-                    lines = listOf(
-                        QuoteLineRequest("peak_pos", propertyIds = fixture.propertyIds),
-                    ),
-                    termMonths = 12,
-                ),
-            )
-        }
+        val quote = platformBillingPort.quote(
+            fixture.tenantId,
+            QuoteRequest(
+                lines = listOf(QuoteLineRequest("peak_pos", propertyIds = fixture.propertyIds)),
+                termMonths = 12,
+            ),
+        )
 
-        val message = failure.message
-        assertTrue(message.contains("5000000"), "message must name the limit: $message")
         assertTrue(
-            message.contains("shorter term") || message.contains("bank transfer"),
-            "message must tell the customer what to do instead: $message",
+            quote.totalAmount > cap,
+            "precondition: the selection should exceed the mobile money ceiling",
+        )
+
+        val mobileMoney = quote.paymentMethods.single { it.method == PaymentMethod.MOBILE_MONEY }
+        assertFalse(
+            mobileMoney.eligible,
+            "mobile money cannot carry ${quote.totalAmount.toPlainString()} in one transaction",
+        )
+        assertTrue(
+            mobileMoney.ineligibleReason.orEmpty().contains("limit"),
+            "the customer must be told why: ${mobileMoney.ineligibleReason}",
+        )
+    }
+
+    @Test
+    fun anOrdinarySelectionCanBePaidByMobileMoney() {
+        val fixture = billingFixture()
+        requestContextHolder.set(fixture.context())
+
+        val quote = platformBillingPort.quote(
+            fixture.tenantId,
+            QuoteRequest(lines = listOf(QuoteLineRequest("peak_core")), termMonths = 1),
+        )
+
+        assertTrue(
+            quote.paymentMethods.any { it.method == PaymentMethod.MOBILE_MONEY && it.eligible },
+            "a 30,000 TZS monthly subscription is exactly what USSD is for",
         )
     }
 

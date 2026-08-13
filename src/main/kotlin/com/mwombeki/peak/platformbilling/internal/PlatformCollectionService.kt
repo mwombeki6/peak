@@ -4,6 +4,7 @@ import com.mwombeki.peak.payment.api.PaymentProvider
 import com.mwombeki.peak.payment.api.ProviderCollectionCommand
 import com.mwombeki.peak.platformbilling.api.PaymentAttemptResponse
 import com.mwombeki.peak.platformbilling.api.PaymentAttemptStatus
+import com.mwombeki.peak.platformbilling.api.PaymentMethod
 import com.mwombeki.peak.platformbilling.api.PayPurchaseRequest
 import com.mwombeki.peak.platformbilling.api.PlatformBillingConflictException
 import com.mwombeki.peak.platformbilling.api.PlatformBillingNotFoundException
@@ -31,6 +32,7 @@ class PlatformCollectionService(
     private val tenantRequestContext: TenantRequestContext,
     private val secretReferenceResolver: SecretReferenceResolver,
     private val properties: PlatformBillingProperties,
+    private val eligibilityService: PaymentMethodEligibilityService,
     adapters: List<PaymentProvider>,
 ) {
     private val adaptersByCode = adapters.associateBy { it.providerCode }
@@ -71,21 +73,49 @@ class PlatformCollectionService(
             transactionTemplate.execute {
                 val actor = tenantRequestContext.bind()
                 val purchase = openPurchase(actor.tenantId, purchaseId)
-                val msisdn = normalizeTanzanianMsisdn(request.payerMsisdn)
+                val provider = resolveProvider()
+
+                // Enforced here as well as offered at quote time. A quote is valid for hours
+                // and the capability table can move inside that window, so what the customer
+                // was shown is a suggestion and this is the check.
+                eligibilityService.requireEligible(
+                    provider = provider.providerCode,
+                    method = request.method,
+                    amount = purchase.totalAmount,
+                    currency = purchase.currency,
+                )
+
+                // The rail decides what the payer must supply. Mobile money pushes to a
+                // handset; a bank transfer has no phone number to push to.
+                val msisdn = if (
+                    eligibilityService.requiresMsisdn(
+                        provider.providerCode,
+                        request.method,
+                        purchase.currency,
+                    )
+                ) {
+                    normalizeTanzanianMsisdn(
+                        requireNotNull(request.payerMsisdn) {
+                            "A mobile money payment needs the number to send the prompt to"
+                        },
+                    )
+                } else {
+                    null
+                }
 
                 val attemptNo = nextAttemptNo(purchaseId)
                 require(attemptNo <= properties.maxPaymentAttempts) {
                     "This purchase has already been attempted ${properties.maxPaymentAttempts} " +
-                        "times. Start a new purchase, or contact us to pay by bank transfer."
+                        "times. Start a new purchase, or contact us to arrange payment."
                 }
 
-                val provider = resolveProvider()
                 PreparedAttempt(
                     attemptId = insertAttempt(
                         purchaseId = purchaseId,
                         tenantId = actor.tenantId,
                         attemptNo = attemptNo,
                         provider = provider.providerCode,
+                        method = request.method,
                         channel = request.channel,
                         msisdn = msisdn,
                         amount = purchase.totalAmount,
@@ -95,6 +125,7 @@ class PlatformCollectionService(
                     ),
                     attemptNo = attemptNo,
                     provider = provider,
+                    method = request.method,
                     msisdn = msisdn,
                     amount = purchase.totalAmount,
                     currency = purchase.currency,
@@ -110,7 +141,7 @@ class PlatformCollectionService(
                     internalReference = prepared.internalReference,
                     endpointUrl = properties.endpointUrl,
                     clientId = secretReferenceResolver.resolve(properties.clientIdSecretRef),
-                    payerIdentifier = prepared.msisdn,
+                    payerIdentifier = prepared.msisdn.orEmpty(),
                     amount = prepared.amount,
                     currency = prepared.currency,
                     apiKey = secretReferenceResolver.resolve(properties.apiKeySecretRef),
@@ -140,6 +171,7 @@ class PlatformCollectionService(
             purchaseId = purchaseId,
             attemptNo = prepared.attemptNo,
             provider = prepared.provider.providerCode,
+            method = prepared.method,
             status = PaymentAttemptStatus.PENDING,
             internalReference = prepared.internalReference,
             redirectUrl = result.redirectUrl,
@@ -182,7 +214,8 @@ class PlatformCollectionService(
         val attemptId: UUID,
         val attemptNo: Int,
         val provider: PaymentProvider,
-        val msisdn: String,
+        val method: PaymentMethod,
+        val msisdn: String?,
         val amount: BigDecimal,
         val currency: String,
         val internalReference: String,
@@ -255,8 +288,9 @@ class PlatformCollectionService(
         tenantId: UUID,
         attemptNo: Int,
         provider: String,
+        method: PaymentMethod,
         channel: String?,
-        msisdn: String,
+        msisdn: String?,
         amount: BigDecimal,
         currency: String,
         internalReference: String,
@@ -267,16 +301,17 @@ class PlatformCollectionService(
             jdbcTemplate.update(
                 """
                 INSERT INTO peak_payment_attempts (
-                    id, purchase_id, tenant_id, attempt_no, provider, provider_channel,
-                    payer_msisdn, amount, currency, internal_reference, status,
-                    initiated_by_user_id, expires_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'created', ?, now() + interval '15 minutes')
+                    id, purchase_id, tenant_id, attempt_no, provider, payment_method,
+                    provider_channel, payer_msisdn, amount, currency, internal_reference,
+                    status, initiated_by_user_id, expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'created', ?, now() + interval '15 minutes')
                 """.trimIndent(),
                 attemptId,
                 purchaseId,
                 tenantId,
                 attemptNo,
                 provider,
+                method.databaseValue,
                 channel,
                 msisdn,
                 amount,

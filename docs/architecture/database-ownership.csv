@@ -128,6 +128,7 @@ payroll_runs,deferred,dormant,no-runtime-writes
 peak_billing_lifecycle_events,platformbilling,active,platformbilling::api-or-internal-owner
 peak_module_activations,platformbilling,active,platformbilling::api-or-internal-owner
 peak_payment_attempts,platformbilling,active,platformbilling::api-or-internal-owner
+peak_payment_method_capabilities,platformbilling,active,platformbilling::api-or-internal-owner
 peak_product_entitlements,platformbilling,active,platformbilling::api-or-internal-owner
 peak_product_grants,platformbilling,active,platformbilling::api-or-internal-owner
 peak_product_prices,platformbilling,active,platformbilling::api-or-internal-owner
