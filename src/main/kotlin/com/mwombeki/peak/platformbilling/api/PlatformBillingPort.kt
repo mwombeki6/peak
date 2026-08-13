@@ -29,17 +29,9 @@ interface PlatformBillingPort {
      */
     fun createPurchase(tenantId: UUID, request: QuoteRequest): PurchaseResponse
 
-    /**
-     * Starts a collection against an open purchase, pushing a PIN prompt to the payer.
-     *
-     * This never completes the purchase. Mobile money has no mandate, so payment is only
-     * ever confirmed by a signed provider callback, applied in the worker.
-     */
-    fun pay(
-        tenantId: UUID,
-        purchaseId: UUID,
-        request: PayPurchaseRequest,
-    ): PaymentAttemptResponse
+    // Collection — pay(purchaseId, msisdn) — lands with the provider adapters. It is
+    // absent rather than stubbed so the port keeps describing only what exists: a method
+    // that throws is a worse contract than a method that is not there yet.
 
     fun purchase(tenantId: UUID, purchaseId: UUID): PurchaseResponse?
 
