@@ -437,6 +437,11 @@ class RouteAccessMatrixCoverageIntegrationTests {
             startsWith("/api/v1/platform/") -> GuardMode.PLATFORM_PERMISSION
             startsWith("/api/v1/public/properties/") -> GuardMode.MODULE_ONLY
             startsWith("/api/v1/payments/webhooks/") -> GuardMode.PUBLIC_TOKEN
+            // Peak's own subscription callbacks. Separate from the payments webhooks
+            // above, which settle a property's guest payments against a folio; this one
+            // settles Peak's revenue into Peak's own merchant account, and the two must
+            // not share a route or a credential source.
+            startsWith("/api/v1/platform-billing/webhooks/") -> GuardMode.PUBLIC_TOKEN
             this == "/api/v1/invitations/accept" -> GuardMode.PUBLIC_TOKEN
             startsWith("/api/v1/tenants/") -> GuardMode.STAFF_PERMISSION
             startsWith("/api/v1/properties") -> GuardMode.STAFF_PERMISSION
@@ -453,6 +458,10 @@ class RouteAccessMatrixCoverageIntegrationTests {
             startsWith("/api/v1/platform/") -> RouteScope.PLATFORM
             startsWith("/api/v1/public/properties/") -> RouteScope.PUBLIC_PROPERTY
             startsWith("/api/v1/payments/webhooks/") -> RouteScope.PUBLIC
+            // PUBLIC, never PUBLIC_PROPERTY: authorizePublicToken requires PUBLIC exactly
+            // and refuses a route carrying tenant or property variables. The wrong one
+            // satisfies the check constraint and then denies every callback at runtime.
+            startsWith("/api/v1/platform-billing/webhooks/") -> RouteScope.PUBLIC
             this == "/api/v1/invitations/accept" -> RouteScope.PUBLIC
             startsWith("/api/v1/tenants/") -> RouteScope.TENANT
             this == "/api/v1/properties" -> RouteScope.TENANT

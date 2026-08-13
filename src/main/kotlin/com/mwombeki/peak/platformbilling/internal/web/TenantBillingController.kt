@@ -1,5 +1,7 @@
 package com.mwombeki.peak.platformbilling.internal.web
 
+import com.mwombeki.peak.platformbilling.api.PaymentAttemptResponse
+import com.mwombeki.peak.platformbilling.api.PayPurchaseRequest
 import com.mwombeki.peak.platformbilling.api.PlatformBillingNotFoundException
 import com.mwombeki.peak.platformbilling.api.PlatformBillingPort
 import com.mwombeki.peak.platformbilling.api.ProductSummary
@@ -67,5 +69,20 @@ class TenantBillingController(
         @RequestBody request: QuoteRequest,
     ): PurchaseResponse {
         return platformBillingPort.createPurchase(tenantId, request)
+    }
+
+    /**
+     * Returns as soon as the prompt is sent. The purchase is still unpaid at this point —
+     * only the provider callback settles it — so a caller must poll the purchase rather
+     * than treat this response as a receipt.
+     */
+    @PostMapping("/purchases/{purchaseId}/payments")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    fun pay(
+        @PathVariable tenantId: UUID,
+        @PathVariable purchaseId: UUID,
+        @RequestBody request: PayPurchaseRequest,
+    ): PaymentAttemptResponse {
+        return platformBillingPort.pay(tenantId, purchaseId, request)
     }
 }

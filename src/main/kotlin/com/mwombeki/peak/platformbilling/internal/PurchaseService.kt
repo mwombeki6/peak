@@ -1,5 +1,7 @@
 package com.mwombeki.peak.platformbilling.internal
 
+import com.mwombeki.peak.platformbilling.api.PaymentAttemptResponse
+import com.mwombeki.peak.platformbilling.api.PayPurchaseRequest
 import com.mwombeki.peak.platformbilling.api.PlatformBillingConflictException
 import com.mwombeki.peak.platformbilling.api.PlatformBillingPort
 import com.mwombeki.peak.platformbilling.api.ProductSummary
@@ -35,6 +37,7 @@ class PurchaseService(
     private val transactionTemplate: TransactionTemplate,
     private val tenantRequestContext: TenantRequestContext,
     private val catalogService: ProductCatalogService,
+    private val collectionService: PlatformCollectionService,
     private val idempotencyPort: IdempotencyPort,
     private val objectMapper: ObjectMapper,
 ) : PlatformBillingPort {
@@ -83,6 +86,12 @@ class PurchaseService(
             },
         )
     }
+
+    override fun pay(
+        tenantId: UUID,
+        purchaseId: UUID,
+        request: PayPurchaseRequest,
+    ): PaymentAttemptResponse = collectionService.pay(purchaseId, request)
 
     override fun purchase(tenantId: UUID, purchaseId: UUID): PurchaseResponse? {
         return transactionTemplate.execute {
