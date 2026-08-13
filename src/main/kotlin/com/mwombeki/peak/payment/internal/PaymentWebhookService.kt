@@ -46,7 +46,7 @@ class PaymentWebhookService(
     private val requestContextHolder: RequestContextHolder,
     private val transactionTemplate: TransactionTemplate,
     private val secretResolver: SecretReferenceResolver,
-    private val billingPort: BillingPort,
+    private val confirmationService: GuestPaymentConfirmationService,
     private val auditPort: AuditPort,
     private val outboxPort: OutboxPort,
     private val objectMapper: ObjectMapper,
@@ -271,6 +271,7 @@ class PaymentWebhookService(
         val resultStatus = when (notification.status) {
             "posted" -> confirmPayment(
                 scope = scope,
+                providerAccountId = providerAccountId,
                 eventId = eventId,
                 transaction = transaction,
                 notification = notification,
@@ -438,65 +439,44 @@ class PaymentWebhookService(
         )
     }
 
+    /**
+     * Builds an observation and hands it to the shared path.
+     *
+     * The callback used to apply the payment itself, in a method the status query had its own
+     * near-copy of. They had already drifted — fee recorded on one side only, the status
+     * sweep cleared on the other, different idempotency keys for the same folio posting.
+     */
     private fun confirmPayment(
         scope: WebhookScope,
+        providerAccountId: UUID,
         eventId: UUID,
         transaction: WebhookTransaction,
         notification: ProviderWebhookNotification,
     ): String {
         val propertyId = transaction.propertyId
             ?: throw PaymentConflictException("Payment transaction has no property")
-        require((transaction.folioId == null) != (transaction.posOrderId == null)) {
-            "Payment transaction must target exactly one folio or POS order"
-        }
-        jdbcTemplate.update(
-            """
-            UPDATE payment_transactions
-            SET webhook_event_id = ?,
-                provider_reference = ?,
-                fee_amount = ?,
-                provider_status = ?,
-                status = 'posted',
-                posted_at = now(),
-                confirmed_at = now(),
-                updated_at = now()
-            WHERE tenant_id = ?
-              AND id = ?
-              AND status IN ('created', 'initiated', 'pending')
-            """.trimIndent(),
-            eventId,
-            notification.providerReference,
-            notification.feeAmount.money(),
-            notification.status,
-            scope.tenantId,
-            transaction.id,
-        )
-        transaction.folioId?.let { folioId ->
-            val folioPaymentId = billingPort.postConfirmedPayment(
+
+        confirmationService.confirm(
+            ProviderPaymentObservation(
                 tenantId = scope.tenantId,
                 propertyId = propertyId,
-                request = ConfirmedPaymentRequest(
-                    folioId = folioId,
-                    paymentMethod = "mobile_money",
-                    amount = notification.amount.money(),
-                    paymentTransactionId = transaction.id,
-                    processedBy = transaction.initiatedBy,
-                    referenceNumber = notification.providerReference,
-                    idempotencyKey = eventId.toString(),
-                ),
-                idempotencyKeyId = null,
-            )
-            jdbcTemplate.update(
-                """
-                UPDATE payment_transactions
-                SET folio_payment_id = ?, updated_at = now()
-                WHERE tenant_id = ? AND id = ?
-                """.trimIndent(),
-                folioPaymentId,
-                scope.tenantId,
-                transaction.id,
-            )
-        }
+                transactionId = transaction.id,
+                providerAccountId = providerAccountId,
+                internalReference = notification.internalReference,
+                provider = scope.providerCode,
+                status = ProviderPaymentObservation.CanonicalStatus.SUCCEEDED,
+                providerReference = notification.providerReference,
+                providerStatus = notification.status,
+                amount = notification.amount.money(),
+                currency = notification.currency,
+                feeAmount = notification.feeAmount.money(),
+                folioId = transaction.folioId,
+                posOrderId = transaction.posOrderId,
+                initiatedBy = transaction.initiatedBy,
+                source = ProviderPaymentObservation.ObservationSource.WEBHOOK,
+                webhookEventId = eventId,
+            ),
+        )
         return "posted"
     }
 

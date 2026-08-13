@@ -28,7 +28,7 @@ class PaymentStatusOutboxHandler(
     private val databaseSessionContext: DatabaseSessionContext,
     private val transactionTemplate: TransactionTemplate,
     private val secretResolver: SecretReferenceResolver,
-    private val billingPort: BillingPort,
+    private val confirmationService: GuestPaymentConfirmationService,
     private val outboxPort: OutboxPort,
     private val meterRegistry: MeterRegistry,
     private val clock: Clock,
@@ -153,62 +153,47 @@ class PaymentStatusOutboxHandler(
         ).increment()
     }
 
+    /**
+     * Builds an observation and hands it to the shared path, exactly as the callback does.
+     *
+     * This used to apply the payment itself, in a near-copy of the callback's version. The
+     * copies had drifted: no fee recorded here, a different idempotency key for the same
+     * folio posting, and a different set of columns cleared.
+     */
     private fun postPayment(
         tenantId: UUID,
         propertyId: UUID,
         work: StatusWork,
         result: com.mwombeki.peak.payment.api.ProviderStatusResult,
     ) {
-        val changed = jdbcTemplate.update(
-            """
-            UPDATE payment_transactions
-            SET provider_status = ?,
-                provider_reference = COALESCE(?, provider_reference),
-                status = 'posted',
-                posted_at = now(),
-                confirmed_at = now(),
-                last_status_check_at = now(),
-                next_status_check_at = NULL,
-                updated_at = now()
-            WHERE tenant_id = ?
-              AND id = ?
-              AND status IN ('created', 'initiated', 'pending')
-            """.trimIndent(),
-            result.providerStatus,
-            result.providerReference,
-            tenantId,
-            work.transactionId,
-        )
-        if (changed != 1) {
-            return
-        }
-        work.folioId?.let { folioId ->
-            val folioPaymentId = billingPort.postConfirmedPayment(
+        val applied = confirmationService.confirm(
+            ProviderPaymentObservation(
                 tenantId = tenantId,
                 propertyId = propertyId,
-                request = ConfirmedPaymentRequest(
-                    folioId = folioId,
-                    paymentMethod = "mobile_money",
-                    amount = work.amount,
-                    paymentTransactionId = work.transactionId,
-                    processedBy = work.initiatedBy,
-                    referenceNumber = result.providerReference
-                        ?: work.providerReference,
-                    idempotencyKey = "status:${work.transactionId}",
-                ),
-                idempotencyKeyId = null,
-            )
-            jdbcTemplate.update(
-                """
-                UPDATE payment_transactions
-                SET folio_payment_id = ?, updated_at = now()
-                WHERE tenant_id = ? AND id = ?
-                """.trimIndent(),
-                folioPaymentId,
-                tenantId,
-                work.transactionId,
-            )
+                transactionId = work.transactionId,
+                providerAccountId = work.providerAccountId,
+                internalReference = work.internalReference,
+                provider = work.providerCode,
+                status = ProviderPaymentObservation.CanonicalStatus.SUCCEEDED,
+                providerReference = result.providerReference ?: work.providerReference,
+                providerStatus = result.providerStatus,
+                // Peak's own figure, not the provider's. The webhook path compares the two
+                // before it gets here; a status query that disagreed would have to be
+                // reconciled rather than silently believed.
+                amount = work.amount,
+                currency = work.currency,
+                folioId = work.folioId,
+                posOrderId = work.posOrderId,
+                initiatedBy = work.initiatedBy,
+                source = ProviderPaymentObservation.ObservationSource.STATUS_QUERY,
+            ),
+        )
+        if (!applied) {
+            // Another source had already applied it — the ordinary outcome of a callback and
+            // a poll agreeing.
+            return
         }
+
         val payload = mapOf(
             "transactionId" to work.transactionId,
             "posOrderId" to work.posOrderId,
@@ -290,7 +275,8 @@ class PaymentStatusOutboxHandler(
         return jdbcTemplate.query(
             """
             SELECT pt.id, pt.tenant_id, pt.property_id, pt.folio_id,
-                   pt.pos_order_id, pt.initiated_by, pt.internal_reference,
+                   pt.pos_order_id, pt.initiated_by, pt.provider_account_id,
+                   pt.internal_reference,
                    pt.provider_reference, pt.amount, trim(pt.currency) AS currency,
                    pt.status, pt.expires_at, pp.provider_code, ppa.endpoint_url,
                    ppa.client_id, ppa.api_key_secret_ref,
@@ -317,6 +303,7 @@ class PaymentStatusOutboxHandler(
                     folioId = rs.getObject("folio_id", UUID::class.java),
                     posOrderId = rs.getObject("pos_order_id", UUID::class.java),
                     initiatedBy = rs.getObject("initiated_by", UUID::class.java),
+                    providerAccountId = rs.getObject("provider_account_id", UUID::class.java),
                     internalReference = rs.getString("internal_reference"),
                     providerReference = rs.getString("provider_reference"),
                     amount = rs.getBigDecimal("amount"),
@@ -349,6 +336,7 @@ class PaymentStatusOutboxHandler(
         val folioId: UUID?,
         val posOrderId: UUID?,
         val initiatedBy: UUID?,
+        val providerAccountId: UUID,
         val internalReference: String,
         val providerReference: String?,
         val amount: BigDecimal,
