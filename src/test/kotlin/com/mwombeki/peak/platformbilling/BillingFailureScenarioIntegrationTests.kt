@@ -214,24 +214,20 @@ class BillingFailureScenarioIntegrationTests {
     }
 
     /**
-     * The gap, written down rather than hidden.
+     * The gap this test used to document is now closed.
      *
-     * If a provider callback never arrives, the attempt sweep expires the attempt and
-     * returns the purchase to `quoted` so the customer can try again. That is right when the
-     * payment genuinely failed. It is **wrong** when the payment succeeded and only the
-     * callback was lost: the customer has paid, no grant exists, and nothing in the system
-     * will ever discover it.
+     * It previously asserted that a lost callback left a paid customer with nothing, because
+     * the sweep concluded the payment had failed. That conclusion was never available from
+     * the evidence: silence means the outcome is unknown, not negative. The sweep now moves
+     * the attempt to `reconciliation_required`, holds the retry slot so nobody can be charged
+     * twice, and a status query resolves it.
      *
-     * `PaymentProvider.queryStatus` exists and `PaymentStatusOutboxHandler` uses it — but for
-     * a property's guest payments, not for Peak's own collections. Platform billing has no
-     * equivalent reconciliation, so this remains the most serious open risk before taking
-     * real subscription money.
-     *
-     * This test pins the current behaviour so that when the status-query path is built, the
-     * change is visible here rather than silent.
+     * The recovery itself is covered by LostCallbackRecoveryIntegrationTests. What is
+     * asserted here is the narrower thing that used to be wrong: a timeout, on its own,
+     * decides nothing.
      */
     @Test
-    fun aLostCallbackCurrentlyLeavesAPaidCustomerWithoutAGrant() {
+    fun aTimeoutOnItsOwnDecidesNothingAboutWhetherTheCustomerPaid() {
         val fixture = paidPurchase(status = "awaiting_payment")
         jdbcTemplate.update(
             """
@@ -249,18 +245,21 @@ class BillingFailureScenarioIntegrationTests {
         jdbcTemplate.queryForObject("SELECT platform_billing_expire_stale_attempts()", Int::class.java)
 
         assertEquals(
-            "quoted",
+            "awaiting_payment",
             purchaseStatus(fixture.purchaseId),
-            "the sweep releases the purchase so the customer can retry",
+            "returning the purchase to quoted here is what used to invite a second charge " +
+                "for a subscription the customer had already paid for",
         )
         assertEquals(
-            0,
-            grantCount(fixture.purchaseId),
-            "and grants nothing — which is correct if the payment failed, and a silent " +
-                "loss if it succeeded and only the callback went missing. Platform billing " +
-                "has no status-query reconciliation; see PaymentStatusOutboxHandler for the " +
-                "shape the guest-payment side uses.",
+            "reconciliation_required",
+            jdbcTemplate.queryForObject(
+                "SELECT status FROM peak_payment_attempts WHERE purchase_id = ?",
+                String::class.java,
+                fixture.purchaseId,
+            ),
+            "the outcome is unknown, which is a state of its own and not a failure",
         )
+        assertEquals(0, grantCount(fixture.purchaseId), "and nothing is granted on a guess")
     }
 
     private fun grantCount(purchaseId: UUID): Int =

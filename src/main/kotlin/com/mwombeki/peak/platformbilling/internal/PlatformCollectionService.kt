@@ -149,6 +149,35 @@ class PlatformCollectionService(
     private fun internalReference(purchaseId: UUID, attemptNo: Int): String =
         "PEAK-${purchaseId.toString().take(8)}-$attemptNo".uppercase()
 
+    /**
+     * Two different situations, and the difference matters to the person reading it.
+     *
+     * A live prompt means "answer the one on your phone". An unresolved one means we may
+     * already have their money and are finding out — telling them to try again would be
+     * inviting a second charge.
+     */
+    private fun unresolvedAttemptMessage(purchaseId: UUID): String {
+        val unresolved = jdbcTemplate.queryForObject(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM peak_payment_attempts
+                WHERE purchase_id = ? AND status = 'reconciliation_required'
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            purchaseId,
+        ) == true
+
+        return if (unresolved) {
+            "We are still confirming your previous payment with the mobile network. " +
+                "Please do not pay again — if it went through, this purchase will activate " +
+                "on its own, and if it did not you will be able to retry shortly."
+        } else {
+            "A payment for this purchase is already in progress. Check your phone for the " +
+                "PIN prompt, or wait for it to finish before trying again."
+        }
+    }
+
     private data class PreparedAttempt(
         val attemptId: UUID,
         val attemptNo: Int,
@@ -256,12 +285,11 @@ class PlatformCollectionService(
                 initiatedBy,
             )
         } catch (ex: DuplicateKeyException) {
-            // uq_peak_payment_attempts_open. Two prompts for one order is a support ticket
-            // and, worse, a customer who pays twice.
-            throw PlatformBillingConflictException(
-                "A payment for this purchase is already in progress. " +
-                    "Wait for it to finish or expire before trying again.",
-            )
+            // uq_peak_payment_attempts_open, which covers reconciliation_required as well as
+            // the live states. The wording matters as much as the guard: an unresolved
+            // attempt may already have taken the money, so the customer must be told we are
+            // checking rather than invited to press pay again.
+            throw PlatformBillingConflictException(unresolvedAttemptMessage(purchaseId))
         }
         return attemptId
     }
@@ -274,7 +302,8 @@ class PlatformCollectionService(
         jdbcTemplate.update(
             """
             UPDATE peak_payment_attempts
-            SET status = 'pending', provider_reference = ?, redirect_url = ?, updated_at = now()
+            SET status = 'pending', provider_reference = ?, redirect_url = ?,
+                next_status_check_at = now() + interval '30 seconds', updated_at = now()
             WHERE id = ?
             """.trimIndent(),
             providerReference,

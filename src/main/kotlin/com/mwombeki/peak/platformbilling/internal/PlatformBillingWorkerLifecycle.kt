@@ -44,6 +44,7 @@ class PlatformBillingWorkerLifecycle(
     private val jdbcTemplate: JdbcTemplate,
     private val reconciler: EntitlementReconciler,
     private val lifecycleService: SubscriptionLifecycleService,
+    private val statusReconciliation: PaymentStatusReconciliationService,
     private val renewalOfferService: RenewalOfferService,
     private val properties: PlatformBillingProperties,
     @Value("\${peak.runtime.mode:api}")
@@ -183,7 +184,18 @@ class PlatformBillingWorkerLifecycle(
                     Int::class.java,
                 ) ?: 0
                 if (expired > 0) {
-                    log.info("Expired {} stale platform billing payment attempts", expired)
+                    log.info(
+                        "Moved {} platform billing attempts to reconciliation_required",
+                        expired,
+                    )
+                }
+
+                // Ask the provider what actually happened. Without this a lost callback is
+                // indistinguishable from a failed payment, and the customer who was debited
+                // gets nothing and is invited to pay again.
+                val resolved = statusReconciliation.reconcileDueAttempts(RECONCILE_BATCH)
+                if (resolved > 0) {
+                    log.info("Resolved {} platform billing payments by status query", resolved)
                 }
             } catch (ex: CancellationException) {
                 throw ex

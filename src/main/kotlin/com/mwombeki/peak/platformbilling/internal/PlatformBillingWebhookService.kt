@@ -4,9 +4,6 @@ import com.mwombeki.peak.payment.api.PaymentProvider
 import com.mwombeki.peak.payment.api.ProviderWebhookNotification
 import com.mwombeki.peak.platformbilling.api.PlatformBillingWebhookPort
 import com.mwombeki.peak.platformbilling.api.PlatformBillingWebhookReceipt
-import com.mwombeki.peak.reliability.api.OutboxDestination
-import com.mwombeki.peak.reliability.api.OutboxEventCommand
-import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
@@ -36,7 +33,7 @@ class PlatformBillingWebhookService(
     private val transactionTemplate: TransactionTemplate,
     private val requestContextHolder: RequestContextHolder,
     private val databaseSessionContext: DatabaseSessionContext,
-    private val outboxPort: OutboxPort,
+    private val paymentConfirmationService: PaymentConfirmationService,
     private val secretReferenceResolver: SecretReferenceResolver,
     private val properties: PlatformBillingProperties,
     adapters: List<PaymentProvider>,
@@ -122,87 +119,67 @@ class PlatformBillingWebhookService(
         }
     }
 
+    /**
+     * Delegates to the shared settlement path rather than applying the payment itself.
+     *
+     * The status poller reaches the same method. Two settlement implementations would
+     * drift, and the drift would stay invisible until a customer was settled by whichever
+     * one had the bug.
+     */
     private fun confirm(
         notification: ProviderWebhookNotification,
         scope: BillingScope,
     ): PlatformBillingWebhookReceipt {
-        if (scope.purchaseStatus == "paid") {
-            return PlatformBillingWebhookReceipt(true, duplicate = true, attemptId = scope.attemptId)
-        }
-
-        jdbcTemplate.update(
-            """
-            UPDATE peak_payment_attempts
-            SET status = 'confirmed', provider_reference = ?, updated_at = now()
-            WHERE id = ?
-            """.trimIndent(),
-            notification.providerReference,
-            scope.attemptId,
-        )
-        jdbcTemplate.update(
-            "UPDATE peak_purchases SET status = 'paid', updated_at = now() WHERE id = ?",
-            scope.purchaseId,
-        )
-        jdbcTemplate.update(
-            """
-            UPDATE peak_provider_events SET outcome = 'confirmed', processed_at = now()
-            WHERE provider = ? AND provider_event_id = ?
-            """.trimIndent(),
-            scope.provider,
-            notification.eventKey,
-        )
-
-        outboxPort.enqueue(
-            OutboxEventCommand(
-                aggregateType = "peak_purchase",
-                eventType = "platform.purchase.paid",
-                destination = OutboxDestination.PLATFORM_BILLING,
-                payload = mapOf(
-                    "purchaseId" to scope.purchaseId.toString(),
-                    "tenantId" to scope.tenantId.toString(),
-                    "attemptId" to scope.attemptId.toString(),
-                    "providerReference" to notification.providerReference,
-                ),
-                aggregateId = scope.purchaseId,
+        val applied = paymentConfirmationService.confirm(
+            PaymentConfirmationService.ConfirmedPayment(
                 tenantId = scope.tenantId,
+                attemptId = scope.attemptId,
+                purchaseId = scope.purchaseId,
+                providerReference = notification.providerReference,
+                source = PaymentConfirmationService.ConfirmationSource.WEBHOOK,
             ),
         )
-
-        return PlatformBillingWebhookReceipt(true, duplicate = false, attemptId = scope.attemptId)
+        recordOutcome(scope.provider, notification.eventKey, "confirmed")
+        return PlatformBillingWebhookReceipt(
+            accepted = true,
+            duplicate = !applied,
+            attemptId = scope.attemptId,
+        )
     }
 
+    /**
+     * The provider has told us the payment did not happen, which is an answer rather than a
+     * silence, so the purchase may safely become payable again. The customer can try another
+     * number or network; a failed push is not a failed order.
+     */
     private fun fail(
         notification: ProviderWebhookNotification,
         scope: BillingScope,
     ): PlatformBillingWebhookReceipt {
-        jdbcTemplate.update(
-            """
-            UPDATE peak_payment_attempts
-            SET status = 'failed', failure_code = 'provider_declined',
-                failure_detail = ?, updated_at = now()
-            WHERE id = ?
-            """.trimIndent(),
-            notification.metadata["operator"]?.toString()?.take(500),
-            scope.attemptId,
+        paymentConfirmationService.reject(
+            PaymentConfirmationService.RejectedPayment(
+                tenantId = scope.tenantId,
+                attemptId = scope.attemptId,
+                purchaseId = scope.purchaseId,
+                failureCode = "provider_declined",
+                failureDetail = notification.metadata["operator"]?.toString(),
+                source = PaymentConfirmationService.ConfirmationSource.WEBHOOK,
+            ),
         )
-        // The purchase goes back to quoted rather than failed: the customer can try again
-        // with another number or network, and a failed push is not a failed order.
+        recordOutcome(scope.provider, notification.eventKey, "failed")
+        return PlatformBillingWebhookReceipt(true, duplicate = false, attemptId = scope.attemptId)
+    }
+
+    private fun recordOutcome(provider: String, eventKey: String, outcome: String) {
         jdbcTemplate.update(
             """
-            UPDATE peak_purchases SET status = 'quoted', updated_at = now()
-            WHERE id = ? AND status = 'awaiting_payment'
-            """.trimIndent(),
-            scope.purchaseId,
-        )
-        jdbcTemplate.update(
-            """
-            UPDATE peak_provider_events SET outcome = 'failed', processed_at = now()
+            UPDATE peak_provider_events SET outcome = ?, processed_at = now()
             WHERE provider = ? AND provider_event_id = ?
             """.trimIndent(),
-            scope.provider,
-            notification.eventKey,
+            outcome,
+            provider,
+            eventKey,
         )
-        return PlatformBillingWebhookReceipt(true, duplicate = false, attemptId = scope.attemptId)
     }
 
     private fun recordEvent(

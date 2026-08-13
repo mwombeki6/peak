@@ -68,7 +68,7 @@ class BillingSweepVisibilityIntegrationTests {
     }
 
     @Test
-    fun theAttemptSweepExpiresAStaleAttemptAndReleasesItsPurchase() {
+    fun theAttemptSweepMarksAStaleAttemptUnknownRatherThanFailed() {
         val tenantId = seedTenantWithGrant()
         val purchaseId = seedAwaitingPurchase(tenantId)
         val reference = seedAttempt(tenantId, purchaseId, expiresInterval = "- interval '1 minute'")
@@ -80,13 +80,17 @@ class BillingSweepVisibilityIntegrationTests {
             ) ?: 0
         }
 
-        assertTrue(expired >= 1, "the stale attempt should have been expired")
-        assertEquals("expired", attemptStatus(reference))
+        assertTrue(expired >= 1, "the stale attempt should have been picked up")
         assertEquals(
-            "quoted",
+            "reconciliation_required",
+            attemptStatus(reference),
+            "an attempt the provider never answered has an unknown outcome, not a failed one",
+        )
+        assertEquals(
+            "awaiting_payment",
             purchaseStatus(reference),
-            "releasing the attempt without releasing the purchase would leave the customer " +
-                "unable to retry, blocked by the one-open-attempt index against a dead attempt",
+            "the purchase must stay held. The money may already be gone, and returning it " +
+                "to 'quoted' here is how a subscription gets collected twice.",
         )
     }
 

@@ -171,7 +171,18 @@ enum class PaymentAttemptStatus(val databaseValue: String) {
     PENDING("pending"),
     CONFIRMED("confirmed"),
     FAILED("failed"),
+    CANCELLED("cancelled"),
     EXPIRED("expired"),
+
+    /**
+     * We do not know whether the money moved.
+     *
+     * Not a failure. The provider never came back and has not yet answered a status query,
+     * so the payment may well have succeeded. This state deliberately still occupies the
+     * one-open-attempt slot: offering the customer another payment button here is how a
+     * subscription gets collected twice.
+     */
+    RECONCILIATION_REQUIRED("reconciliation_required"),
     ;
 
     companion object {
