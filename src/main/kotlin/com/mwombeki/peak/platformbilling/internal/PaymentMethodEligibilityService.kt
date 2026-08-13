@@ -23,6 +23,7 @@ import org.springframework.stereotype.Service
 @Service
 class PaymentMethodEligibilityService(
     private val jdbcTemplate: JdbcTemplate,
+    private val properties: PlatformBillingProperties,
 ) {
     /**
      * Every enabled rail, each marked with whether it can carry this amount and why not.
@@ -32,6 +33,19 @@ class PaymentMethodEligibilityService(
      * that something is wrong.
      */
     fun methodsFor(amount: BigDecimal, currency: String): List<PaymentMethodOption> {
+        // Scoped to the providers Peak is actually configured to collect through, not every
+        // enabled row. The table can carry capabilities for providers that are registered
+        // but not in use, and offering a customer a rail that pay() would then refuse —
+        // because it resolves the provider from configuration — is worse than not offering
+        // it at all.
+        val configured = listOfNotNull(
+            properties.primaryProvider.trim().takeIf { it.isNotEmpty() },
+            properties.fallbackProvider.trim().takeIf { it.isNotEmpty() },
+        )
+        if (configured.isEmpty()) {
+            return emptyList()
+        }
+
         return jdbcTemplate.query(
             """
             SELECT provider, payment_method, currency, min_amount, max_amount,
@@ -39,6 +53,7 @@ class PaymentMethodEligibilityService(
             FROM peak_payment_method_capabilities
             WHERE is_enabled = true
               AND currency = ?
+              AND provider = ANY(?)
             ORDER BY payment_method, provider
             """.trimIndent(),
             { rs, _ ->
@@ -58,6 +73,7 @@ class PaymentMethodEligibilityService(
                 )
             },
             currency,
+            configured.toTypedArray(),
         )
     }
 

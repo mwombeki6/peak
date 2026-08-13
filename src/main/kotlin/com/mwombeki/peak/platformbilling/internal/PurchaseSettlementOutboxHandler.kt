@@ -27,6 +27,7 @@ class PurchaseSettlementOutboxHandler(
     private val transactionTemplate: TransactionTemplate,
     private val databaseSessionContext: DatabaseSessionContext,
     private val entitlementReconciler: EntitlementReconciler,
+    private val receiptService: ReceiptService,
     private val objectMapper: ObjectMapper,
 ) : OutboxEventHandler {
 
@@ -88,6 +89,11 @@ class PurchaseSettlementOutboxHandler(
         if (purchase.status != "paid") {
             return
         }
+
+        // Before the grants check, not after. A purchase that was settled before receipts
+        // existed has grants and no receipt, and returning early would mean it never got
+        // one. Idempotent on the purchase's unique index either way.
+        receiptService.issueFor(tenantId, purchaseId)
 
         val alreadyGranted = jdbcTemplate.queryForObject(
             "SELECT count(*) FROM peak_product_grants WHERE source_purchase_id = ?",

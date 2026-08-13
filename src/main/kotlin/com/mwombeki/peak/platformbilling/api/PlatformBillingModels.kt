@@ -201,6 +201,22 @@ enum class RenewalOfferStatus(val databaseValue: String) {
     }
 }
 
+/**
+ * What Peak issued for a settled purchase.
+ *
+ * A commercial receipt for a subscription, not a fiscal receipt — those are guest-facing,
+ * belong to the fiscal module, and answer to TRA rules that do not apply here.
+ */
+@NamedInterface("api")
+data class Receipt(
+    val id: UUID,
+    val purchaseId: UUID,
+    val receiptNumber: String,
+    val issuedAt: Instant,
+    val totalAmount: BigDecimal,
+    val currency: String,
+)
+
 @NamedInterface("api")
 data class PaymentAttemptResponse(
     val id: UUID,
