@@ -46,6 +46,12 @@ data class ProviderCollectionCommand(
     val currency: String,
     val apiKey: String,
     val checksumKey: String,
+    /**
+     * The mobile network to push to, where the provider will not infer it from the MSISDN.
+     * AzamPay requires one of Airtel, Tigo, Halopesa, Azampesa or Mpesa; ClickPesa derives
+     * it itself and ignores this. Defaulted so existing callers and providers are untouched.
+     */
+    val providerChannel: String? = null,
 )
 
 @NamedInterface("api")
@@ -54,6 +60,11 @@ data class ProviderCollectionResult(
     val status: String,
     val providerStatus: String = status,
     val providerTimestamp: Instant? = null,
+    /**
+     * Where to send the payer, for a provider that hosts its own checkout page rather than
+     * pushing a PIN prompt to their handset. Null for a pure USSD push.
+     */
+    val redirectUrl: String? = null,
 )
 
 @NamedInterface("api")
