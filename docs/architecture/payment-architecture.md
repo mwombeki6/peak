@@ -571,6 +571,10 @@ The subscription side (Flow 2) is `platformbilling`:
 
 ## Open with AzamPay
 
+Provider questions, verified facts and the certification test now live in
+[`provider-certification.md`](provider-certification.md). What follows is the summary; that
+document is the one to send a provider.
+
 None of these can be settled from the published documentation, and the first is a release gate.
 
 **The signed data is ambiguous, and no spec settles it.** AzamPay's callback page states the
