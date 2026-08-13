@@ -44,6 +44,21 @@ data class InitiateMobileMoneyRequest(
     val providerAccountId: UUID,
     val phoneNumber: String,
     val amount: BigDecimal,
+    /**
+     * The network to push the prompt to — Airtel, Tigo, Halopesa, Azampesa or Mpesa.
+     *
+     * Supplied by the caller and never derived from the phone number. Tanzania has mobile
+     * number portability, so a prefix records which operator was originally allocated the
+     * range rather than who serves the number today; deriving from it would route some
+     * payments to the wrong operator, and the failure would look to the hotel like a guest
+     * who did not pay. An interface may reasonably preselect from the prefix, but what Peak
+     * sends must be what someone confirmed.
+     *
+     * Optional only because a provider that infers the network itself, as ClickPesa does,
+     * does not need it. Whether it is required is the adapter's business, checked before
+     * anything is queued.
+     */
+    val mobileNetwork: String? = null,
 )
 
 data class RecordManualMobileMoneyPaymentRequest(

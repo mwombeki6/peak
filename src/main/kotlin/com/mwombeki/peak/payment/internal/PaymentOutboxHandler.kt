@@ -81,6 +81,10 @@ class PaymentOutboxHandler(
                     endpointUrl = work.endpointUrl,
                     clientId = work.clientId,
                     payerIdentifier = work.payerIdentifier,
+                    // Carried from the request rather than worked out here. A provider that
+                    // needs a network was already refused at the boundary if it had none,
+                    // so reaching the worker without one means the provider does not need it.
+                    providerChannel = work.mobileNetwork,
                     amount = work.amount,
                     currency = work.currency,
                     apiKey = secretResolver.resolve(work.apiKeySecretRef),
@@ -163,7 +167,8 @@ class PaymentOutboxHandler(
     private fun loadWork(tenantId: UUID, transactionId: UUID): PaymentProviderWork {
         return jdbcTemplate.query(
             """
-            SELECT pt.id, pt.internal_reference, pt.payer_identifier, pt.amount,
+            SELECT pt.id, pt.internal_reference, pt.payer_identifier, pt.mobile_network,
+                   pt.amount,
                    pt.currency, pt.status, pp.provider_code, ppa.client_id,
                    ppa.endpoint_url, ppa.api_key_secret_ref,
                    ppa.checksum_key_secret_ref
@@ -185,6 +190,7 @@ class PaymentOutboxHandler(
                     transactionId = rs.getObject("id", UUID::class.java),
                     internalReference = rs.getString("internal_reference"),
                     payerIdentifier = rs.getString("payer_identifier"),
+                    mobileNetwork = rs.getString("mobile_network"),
                     amount = rs.getBigDecimal("amount"),
                     currency = rs.getString("currency").trim(),
                     status = rs.getString("status"),
@@ -206,6 +212,7 @@ class PaymentOutboxHandler(
         val transactionId: UUID,
         val internalReference: String,
         val payerIdentifier: String,
+        val mobileNetwork: String?,
         val amount: BigDecimal,
         val currency: String,
         val status: String,

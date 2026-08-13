@@ -489,12 +489,17 @@ class PaymentService(
                 request.folioId,
                 amount,
             )
-            requireProviderAccount(
+            val providerAccount = requireProviderAccount(
                 actor.tenantId,
                 propertyId,
                 request.providerAccountId,
                 lock = false,
             )
+            // Before the outbox event, not inside the worker. A collection that cannot
+            // possibly be initiated should be refused while the receptionist is still
+            // looking at the screen, rather than queued and retried until it dead-letters
+            // with a guest standing at the desk.
+            val mobileNetwork = requireSupportedNetwork(providerAccount, request.mobileNetwork)
             val transactionId = UUID.randomUUID()
             val internalReference = paymentReference(transactionId)
             jdbcTemplate.update(
@@ -503,9 +508,10 @@ class PaymentService(
                     id, tenant_id, property_id, folio_id, provider_account_id,
                     initiated_by, idempotency_key_id, transaction_direction,
                     transaction_type, internal_reference, payer_identifier,
-                    amount, currency, status, expires_at, next_status_check_at
+                    mobile_network, amount, currency, status, expires_at,
+                    next_status_check_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'inbound', 'collection', ?, ?, ?, ?,
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'inbound', 'collection', ?, ?, ?, ?, ?,
                         'created', now() + interval '15 minutes',
                         now() + interval '15 seconds')
                 """.trimIndent(),
@@ -518,6 +524,7 @@ class PaymentService(
                 idempotencyKeyId,
                 internalReference,
                 request.phoneNumber.tanzanianE164(),
+                mobileNetwork,
                 amount,
                 folio.currency,
             )
@@ -1934,6 +1941,38 @@ class PaymentService(
         ).singleOrNull() ?: throw PaymentNotFoundException("Cash session was not found")
     }
 
+    /**
+     * Refuses a collection whose provider needs a network it has not been given.
+     *
+     * Which providers need one is the adapter's business, not the caller's, so this asks
+     * rather than hardcoding a list of networks per provider — except for the fact that
+     * ClickPesa infers its own, which is why it is exempt.
+     *
+     * Deliberately not derived from the phone number. Tanzania has mobile number
+     * portability, so a prefix records the original allocation rather than the current
+     * operator, and guessing would route some payments to the wrong network. The failure
+     * would look to the hotel like a guest who did not pay.
+     */
+    private fun requireSupportedNetwork(
+        account: PaymentProviderAccountResponse,
+        requested: String?,
+    ): String? {
+        val network = requested?.trim()?.takeIf { it.isNotEmpty() }
+        if (account.providerCode in NETWORK_INFERRING_PROVIDERS) {
+            return network
+        }
+
+        requireNotNull(network) {
+            "${account.providerName} needs to know which mobile network to send the prompt " +
+                "to. Choose one of ${SUPPORTED_MOBILE_NETWORKS.joinToString(", ")}."
+        }
+        return SUPPORTED_MOBILE_NETWORKS.firstOrNull { it.equals(network, ignoreCase = true) }
+            ?: throw PaymentRejectedException(
+                "$network is not a mobile network ${account.providerName} can push to. " +
+                    "Choose one of ${SUPPORTED_MOBILE_NETWORKS.joinToString(", ")}.",
+            )
+    }
+
     private fun requireProviderAccount(
         tenantId: UUID,
         propertyId: UUID,
@@ -2245,6 +2284,15 @@ class PaymentService(
     )
 
     private companion object {
+        /**
+         * What the adapters accept. Constrained here so a typo is refused while the
+         * receptionist is still on the screen rather than by a provider later.
+         */
+        val SUPPORTED_MOBILE_NETWORKS = listOf("Airtel", "Tigo", "Halopesa", "Azampesa", "Mpesa")
+
+        /** Providers that work the network out from the MSISDN themselves. */
+        val NETWORK_INFERRING_PROVIDERS = setOf("clickpesa")
+
         const val CONTRACT_MOCK_PROVIDER = "contract_mock"
         const val HTTP_GATEWAY_PROVIDER = "http_gateway"
         const val CASH_SESSIONS = "cash_sessions"
