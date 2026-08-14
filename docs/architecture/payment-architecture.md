@@ -414,6 +414,18 @@ ACTIVE ──T-14d──► RENEWAL_DUE ──lapse──► GRACE ──7d─�
 | Suspended | Read-only plus four non-negotiables: check out a guest, take a payment, export your data, buy a subscription. |
 | Never | Stranding a guest, or locking a tenant out of paying. |
 
+**Suspension survival is a property of a route, not of the controller it lives in.** The first
+version of this rule said every route under `/billing/` must stay reachable — right for today's
+routes, wrong as a rule, since it makes controller membership the safety classification and a
+later `/billing/refunds` or `/billing/contracts/terminate` would inherit access by living next
+door. `module_access_matrix.suspension_recovery_safe` records the actual judgement: needed to
+understand, pay, recover or obtain evidence for what is owed. Two assertions hold it — a route
+claiming the flag must really survive suspension, and a route *not* claiming it must not be
+reachable anyway through an over-broad permission. The second found
+`/api/tenants/:tenantId/commercial*` on its first run, reachable under suspension because it
+shares `tenant.subscription.view`; it is legitimately recovery, and is now classified rather
+than accidental.
+
 **"Check out a guest" is more than `checkout.%`.** V91 granted that pattern under suspension
 and stopped there. `FrontDeskService.checkOut` refuses with "Checkout requires an issued
 invoice" before it refuses for anything else, and `billing.invoice` was not allowed — so the
@@ -469,6 +481,51 @@ no standing authority — so every collection begins with a customer action in a
 
 The offer is also the idempotency anchor: a double-click returns the purchase that already
 exists rather than a second one.
+
+## Five documents, two taxpayers
+
+Peak produces five distinct financial artifacts. They reference each other and must never be
+collapsed, because two of them belong to different taxpayers.
+
+```
+HOTEL → GUEST                              FBC → HOTEL
+under the hotel's TRA identity             under FBC's TRA identity
+
+folio          running guest account       peak_purchase   the order
+  ↓                                          ↓
+invoice        the hotel's bill            peak_receipt    FBC's commercial receipt
+  ↓            allocate_document_number      ↓             allocate_peak_receipt_number
+payment_transaction ─► folio_payment       (FBC fiscalization — does not exist yet)
+  ↓            PSP evidence, not a receipt
+fiscal_receipt TRA-verifiable
+```
+
+**The PSP confirmation is not a receipt.** A provider saying SUCCESS proves a payment event and
+nothing else. Its reference belongs on the payment record as evidence — `Provider: AzamPay,
+ref AZM-…` — and printing that reference as though it were the hotel's receipt would be
+producing a tax document out of a webhook body.
+
+**The folio is not the invoice.** The folio is a running account; the invoice is the billing
+document issued from it, immutable once issued, corrected through credit notes rather than
+overwritten. This is why `billing.invoice` turned out to be load-bearing for checkout.
+
+**`peak_receipts` is not a fiscal receipt.** It is FBC's commercial evidence that a tenant
+bought a subscription. A number reading `PEAK-RCP-2026-000123` looks official, and that
+resemblance is the danger: a TRA fiscal receipt carries the seller's TIN and VRN, EFD
+identifiers, a tax breakdown and a verification code TRA's own service answers for, and this
+document has none of them. Fiscalizing FBC's own SaaS sales is a separate workflow under FBC's
+taxpayer identity that has not been built. `peak_receipts.fiscal_status` carries
+`not_applicable` so a screen has to say so rather than a reader having to already know.
+
+**The two allocators must never meet.** `allocate_document_number` is tenant-scoped and numbers
+a hotel's documents; `allocate_peak_receipt_number` numbers FBC's. A shared sequence would put
+FBC's sales into a hotel's numbering and make both sets of books unauditable. V110 asserts
+neither function reads the other's sequence.
+
+A future FBC invoice belongs in the same shape — `purchase → FBC invoice → payment → FBC
+receipt → FBC fiscalization` — and should not be forced onto `peak_receipts`, which would make
+one row play invoice, payment receipt and fiscal document at once. That is the same mistake as
+collapsing the guest side.
 
 ## Receipts
 

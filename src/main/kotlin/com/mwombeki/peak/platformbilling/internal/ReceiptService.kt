@@ -130,13 +130,17 @@ class ReceiptService(
      * These existed and only Peak could read them: the sole route was
      * `/api/platform/billing/receipts` behind `platform.billing.view`. Peak took a hotel's
      * money, allocated a sequential receipt number for it, and filed the receipt where the
-     * hotel could not reach it — which for a Tanzanian business is the document their
-     * bookkeeping and their own tax filing depend on.
+     * hotel could not reach it.
+     *
+     * This is FBC's **commercial** evidence of the purchase — what the hotel's bookkeeping
+     * records as a cost. It is not a TRA fiscal receipt and must never be presented as one;
+     * `fiscal_status` is carried so the distinction is rendered rather than assumed.
      */
     fun forTenant(tenantId: UUID, limit: Int = 50): List<Receipt> {
         return jdbcTemplate.query(
             """
-            SELECT id, purchase_id, receipt_number, issued_at, total_amount, currency
+            SELECT id, purchase_id, receipt_number, issued_at, total_amount, currency,
+                   fiscal_status, fiscal_reference
             FROM peak_receipts
             WHERE tenant_id = ?
             ORDER BY issued_at DESC
@@ -150,6 +154,10 @@ class ReceiptService(
                     issuedAt = rs.getTimestamp("issued_at").toInstant(),
                     totalAmount = rs.getBigDecimal("total_amount"),
                     currency = rs.getString("currency").trim(),
+                    fiscalStatus = Receipt.FiscalStatus.valueOf(
+                        rs.getString("fiscal_status").uppercase(),
+                    ),
+                    fiscalReference = rs.getString("fiscal_reference"),
                 )
             },
             tenantId,

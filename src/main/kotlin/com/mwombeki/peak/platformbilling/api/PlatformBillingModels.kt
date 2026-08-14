@@ -229,6 +229,18 @@ enum class RenewalOfferStatus(val databaseValue: String) {
  * belong to the fiscal module, and answer to TRA rules that do not apply here.
  */
 @NamedInterface("api")
+/**
+ * FBC's commercial receipt to a tenant for a Peak subscription purchase.
+ *
+ * **Not a TRA fiscal receipt.** It carries no TIN or VRN, no EFD identifiers, no tax
+ * breakdown and no TRA verification code, and a sequential number that reads
+ * `PEAK-RCP-2026-000123` should not be mistaken for one — that resemblance is the whole
+ * danger. Fiscalizing FBC's own SaaS sales happens under FBC's taxpayer identity in a
+ * workflow that does not exist yet, which is what [fiscalStatus] reports.
+ *
+ * The hotel's fiscal receipt to its guest is a different document, under a different
+ * taxpayer, from a different allocator. The two must never share numbering.
+ */
 data class Receipt(
     val id: UUID,
     val purchaseId: UUID,
@@ -236,7 +248,22 @@ data class Receipt(
     val issuedAt: Instant,
     val totalAmount: BigDecimal,
     val currency: String,
-)
+    /**
+     * Whether a TRA fiscal document exists for this sale. Rendered rather than assumed, so
+     * a commercial receipt is never presented as fiscal evidence.
+     */
+    val fiscalStatus: FiscalStatus = FiscalStatus.NOT_APPLICABLE,
+    /** The fiscal document's own identifier, once one exists. */
+    val fiscalReference: String? = null,
+) {
+    enum class FiscalStatus {
+        /** No FBC fiscalization workflow applies yet. The honest default. */
+        NOT_APPLICABLE,
+        PENDING,
+        ISSUED,
+        FAILED,
+    }
+}
 
 @NamedInterface("api")
 data class PaymentAttemptResponse(

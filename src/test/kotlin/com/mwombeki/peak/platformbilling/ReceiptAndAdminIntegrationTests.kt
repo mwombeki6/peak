@@ -18,6 +18,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 import com.mwombeki.peak.platformbilling.api.PlatformBillingPort
+import com.mwombeki.peak.platformbilling.api.Receipt
 import com.mwombeki.peak.shared.context.RequestContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
@@ -252,17 +253,27 @@ class ReceiptAndAdminIntegrationTests {
     }
 
     /**
-     * A suspended tenant pays to end the suspension, so the evidence of having paid has to
-     * survive it too. `tenant.subscription.view` matches `tenant.subscription.%`, which is
-     * allowed under suspension — this asserts that rather than leaving it to be noticed.
+     * A route survives suspension because it was classified as recovery, not because of which
+     * controller it lives in.
+     *
+     * The first version of this asserted that every route under `/billing/` stays reachable.
+     * That was right for today's routes and wrong as a rule — it makes membership of
+     * `TenantBillingController` the safety classification, so a later `/billing/refunds` or
+     * `/billing/contracts/terminate` would inherit suspension access by living next door.
+     * Those are exactly the routes a suspended tenant should not have.
+     *
+     * `suspension_recovery_safe` records the judgement on the route: needed to understand,
+     * pay, recover or obtain evidence for what is owed. The migration checks it once; this
+     * checks it on every run, which is the difference that matters for a rule about routes
+     * nobody has written yet.
      */
     @Test
-    fun theReceiptsRouteStaysReachableWhileSuspended() {
-        val unreachable = jdbcTemplate.queryForList(
+    fun onlyRoutesClassifiedAsRecoverySurviveSuspension() {
+        val lying = jdbcTemplate.queryForList(
             """
             SELECT route.api_pattern
             FROM module_access_matrix route
-            WHERE route.api_pattern LIKE '/api/tenants/:tenantId/billing/%'
+            WHERE route.suspension_recovery_safe
               AND route.permission_code IS NOT NULL
               AND NOT EXISTS (
                   SELECT 1 FROM peak_restriction_allowances allowance
@@ -272,23 +283,98 @@ class ReceiptAndAdminIntegrationTests {
             """.trimIndent(),
             String::class.java,
         )
-
         assertEquals(
             emptyList(),
-            unreachable,
-            "suspension is ended by paying, so both the route to paying and the evidence of " +
-                "having paid must outlive it",
+            lying,
+            "these claim to survive suspension but their permission does not, so the flag " +
+                "is a comment rather than a fact",
         )
+
+        val overreaching = jdbcTemplate.queryForList(
+            """
+            SELECT route.api_pattern || ' (' || route.permission_code || ')'
+            FROM module_access_matrix route
+            WHERE NOT route.suspension_recovery_safe
+              AND route.permission_code IS NOT NULL
+              AND route.route_scope = 'tenant'
+              AND route.api_pattern LIKE '/api/tenants/%'
+              AND EXISTS (
+                  SELECT 1 FROM peak_restriction_allowances allowance
+                  WHERE allowance.restriction_state = 'suspended'
+                    AND route.permission_code LIKE allowance.permission_pattern
+              )
+            """.trimIndent(),
+            String::class.java,
+        )
+        assertEquals(
+            emptyList(),
+            overreaching,
+            "these are reachable while suspended without anyone classifying them as " +
+                "recovery — either mark them deliberately, or narrow the permission",
+        )
+
         assertEquals(
             1,
             jdbcTemplate.queryForObject(
                 """
                 SELECT count(*) FROM module_access_matrix
                 WHERE api_pattern = '/api/tenants/:tenantId/billing/receipts'
+                  AND suspension_recovery_safe
                 """.trimIndent(),
                 Int::class.java,
             ),
-            "the route must be registered, or the guard above passes over nothing",
+            "the receipts route must be registered and classified, or both guards above " +
+                "pass over nothing",
+        )
+    }
+
+    /**
+     * A commercial receipt must never present itself as a fiscal one.
+     *
+     * `PEAK-RCP-2026-000123` looks official, and that resemblance is the danger. A TRA fiscal
+     * receipt carries the seller's TIN and VRN, EFD identifiers, a tax breakdown and a
+     * verification code TRA's own service answers for. This document carries none of those,
+     * because fiscalizing FBC's own SaaS sales is a separate workflow under FBC's taxpayer
+     * identity that does not exist yet. The status is carried so a screen has to say so.
+     */
+    @Test
+    fun aPeakReceiptSaysItIsNotFiscalEvidence() {
+        val fixture = paidPurchase()
+        runBlocking { settlementHandler.handle(settlementEvent(fixture)) }
+
+        requestContextHolder.set(fixture.context())
+        val receipt = platformBillingPort.receipts(fixture.tenantId).single()
+
+        assertEquals(
+            Receipt.FiscalStatus.NOT_APPLICABLE,
+            receipt.fiscalStatus,
+            "nothing has been fiscalized, and 'pending' would imply a workflow is running",
+        )
+        assertEquals(null, receipt.fiscalReference)
+    }
+
+    /**
+     * Two taxpayers, two allocators. The hotel sells to a guest under its own TRA identity;
+     * FBC sells to the hotel under FBC's. A shared sequence would put FBC's sales into a
+     * hotel's numbering and make both sets of books unauditable.
+     */
+    @Test
+    fun theTwoFiscalContextsDoNotShareNumbering() {
+        val shared = jdbcTemplate.queryForList(
+            """
+            SELECT proname FROM pg_proc
+            WHERE (proname = 'allocate_peak_receipt_number'
+                   AND pg_get_functiondef(oid) ILIKE '%document_sequences%')
+               OR (proname = 'allocate_document_number'
+                   AND pg_get_functiondef(oid) ILIKE '%peak_receipt_number_seq%')
+            """.trimIndent(),
+            String::class.java,
+        )
+
+        assertEquals(
+            emptyList(),
+            shared,
+            "FBC's receipt numbering and the tenant document allocator have met: $shared",
         )
     }
 
