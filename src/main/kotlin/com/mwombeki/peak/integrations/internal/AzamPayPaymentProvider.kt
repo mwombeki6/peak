@@ -4,6 +4,7 @@ package com.mwombeki.peak.integrations.internal
 import com.mwombeki.peak.payment.api.PaymentProvider
 import com.mwombeki.peak.payment.api.ProviderCollectionCommand
 import com.mwombeki.peak.payment.api.ProviderCollectionResult
+import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderWebhookNotification
 import java.math.BigDecimal
 import java.time.Instant
@@ -82,7 +83,7 @@ class AzamPayPaymentProvider(
             providerReference = node.path("transactionId").asString("").trim()
                 .takeIf { it.isNotEmpty() }
                 ?: command.internalReference,
-            status = "pending",
+            status = ProviderPaymentStatus.PENDING,
             providerStatus = node.path("message").asString("pending"),
             // A USSD push, so there is nowhere to send the payer; they answer on the handset.
             redirectUrl = null,
@@ -156,9 +157,13 @@ class AzamPayPaymentProvider(
             internalReference = externalReference,
             providerReference = providerReference,
             status = node.path("transactionstatus").asString("").normalizedStatus(),
+            providerStatus = node.path("transactionstatus").asString("collection.updated"),
             amount = node.path("amount").asString("0").toBigDecimalOrZero(),
             currency = node.path("currency").asString("TZS").uppercase(),
-            clientId = node.path("msisdn").asString(null),
+            // As with Snippe, msisdn is the payer's handset and says nothing about which
+            // merchant the money is for.
+            merchantIdentity = null,
+            payerIdentity = node.path("msisdn").asString(null),
             providerTimestamp = node.path("time").asString(null)?.let(::parseInstantOrNull),
             checksumMethod = if (verified) "SHA256withRSA" else null,
             metadata = mapOf(
@@ -191,12 +196,15 @@ class AzamPayPaymentProvider(
             )
     }
 
-    private fun String.normalizedStatus(): String {
+    private fun String.normalizedStatus(): ProviderPaymentStatus {
         return when (trim().lowercase()) {
-            "success", "successful", "completed" -> "succeeded"
-            "failure", "failed", "rejected" -> "failed"
-            "" -> "pending"
-            else -> trim().lowercase()
+            "success", "successful", "completed" -> ProviderPaymentStatus.SUCCEEDED
+            "failure", "failed", "rejected" -> ProviderPaymentStatus.FAILED
+            "cancelled", "canceled" -> ProviderPaymentStatus.CANCELLED
+            "pending", "processing" -> ProviderPaymentStatus.PENDING
+            // An absent status is not a pending payment. AzamPay omitting the field means
+            // Peak has been told nothing, and the status query must still run.
+            else -> ProviderPaymentStatus.UNKNOWN
         }
     }
 

@@ -1,5 +1,6 @@
 package com.mwombeki.peak.integrations.internal
 
+import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderCollectionCommand
 import com.mwombeki.peak.payment.api.ProviderStatusQuery
 import java.math.BigDecimal
@@ -44,7 +45,7 @@ class SnippePaymentProviderTests {
             result.redirectUrl,
             "a hosted checkout is useless without the URL to send the customer to",
         )
-        assertEquals("pending", result.status)
+        assertEquals(ProviderPaymentStatus.PENDING, result.status)
 
         val call = transport.calls.single()
         assertEquals("POST", call.method)
@@ -95,7 +96,7 @@ class SnippePaymentProviderTests {
         )
 
         assertEquals("/api/v1/sessions/sess_abc123def456", transport.calls.single().endpoint.path)
-        assertEquals("succeeded", result.status)
+        assertEquals(ProviderPaymentStatus.SUCCEEDED, result.status)
         assertEquals(0, BigDecimal("30000").compareTo(result.amount))
     }
 
@@ -213,7 +214,7 @@ class SnippePaymentProviderTests {
         val notification = provider(StubTransport()).parseWebhook(payload)
 
         assertEquals("PEAK-REF-1", notification.internalReference)
-        assertEquals("succeeded", notification.status)
+        assertEquals(ProviderPaymentStatus.SUCCEEDED, notification.status)
     }
 
     @Test
@@ -242,7 +243,7 @@ class SnippePaymentProviderTests {
         )
 
         assertEquals("PEAK-REF-1", notification.internalReference)
-        assertEquals("succeeded", notification.status)
+        assertEquals(ProviderPaymentStatus.SUCCEEDED, notification.status)
         assertEquals(0, BigDecimal("30000").compareTo(notification.amount))
         assertEquals(0, BigDecimal("1000").compareTo(notification.feeAmount))
         assertEquals("HMAC-SHA256", notification.checksumMethod)
@@ -394,11 +395,15 @@ class SnippePaymentProviderTests {
     @Test
     fun onlyACompletedPaymentCountsAsPaid() {
         listOf(
-            "payment.completed" to "succeeded",
-            "payment.failed" to "failed",
-            "payment.voided" to "failed",
-            "payment.expired" to "failed",
-            "payment.something_new" to "pending",
+            "payment.completed" to ProviderPaymentStatus.SUCCEEDED,
+            "payment.failed" to ProviderPaymentStatus.FAILED,
+            "payment.expired" to ProviderPaymentStatus.FAILED,
+            // The payer walked away. Terminal, but not a fault, and worth telling apart from
+            // a payment the provider refused.
+            "payment.voided" to ProviderPaymentStatus.CANCELLED,
+            // Snippe adding an event type must not make Peak declare a guest's payment dead.
+            // UNKNOWN keeps the status query running; PENDING would have claimed knowledge.
+            "payment.something_new" to ProviderPaymentStatus.UNKNOWN,
         ).forEach { (event, expected) ->
             val notification = provider(StubTransport()).parseWebhook(callbackJson(type = event))
             assertEquals(expected, notification.status, "for $event")

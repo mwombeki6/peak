@@ -1,6 +1,7 @@
 package com.mwombeki.peak.platformbilling.internal
 
 import com.mwombeki.peak.payment.api.PaymentProvider
+import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderWebhookNotification
 import com.mwombeki.peak.platformbilling.api.PlatformBillingWebhookPort
 import com.mwombeki.peak.platformbilling.api.PlatformBillingWebhookReceipt
@@ -113,10 +114,13 @@ class PlatformBillingWebhookService(
         }
 
         return when (notification.status) {
-            "succeeded" -> confirm(notification, scope)
-            "failed" -> fail(notification, scope)
-            // Anything else is a progress ping. Recorded above, acted on by nothing.
-            else -> PlatformBillingWebhookReceipt(
+            ProviderPaymentStatus.SUCCEEDED -> confirm(notification, scope)
+            ProviderPaymentStatus.FAILED, ProviderPaymentStatus.CANCELLED ->
+                fail(notification, scope)
+            // A progress ping, or a callback Peak could not make sense of. Recorded above,
+            // acted on by nothing — the status poller is what resolves it either way.
+            ProviderPaymentStatus.PENDING, ProviderPaymentStatus.UNKNOWN ->
+                PlatformBillingWebhookReceipt(
                 accepted = true,
                 duplicate = false,
                 attemptId = scope.attemptId,

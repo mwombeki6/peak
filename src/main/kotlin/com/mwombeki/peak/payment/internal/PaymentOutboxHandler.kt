@@ -1,6 +1,7 @@
 package com.mwombeki.peak.payment.internal
 
 import com.mwombeki.peak.payment.api.PaymentProvider
+import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderCollectionCommand
 import com.mwombeki.peak.reliability.api.ClaimedOutboxEvent
 import com.mwombeki.peak.reliability.api.OutboxDestination
@@ -119,8 +120,15 @@ class PaymentOutboxHandler(
                 ),
             )
         }
-        require(result.status == "pending" || result.status == "initiated") {
-            "Provider initiation returned unsupported status ${result.status}"
+        // Acceptance evidence, not settlement evidence. A provider that answers SUCCEEDED
+        // synchronously is still only telling us it took the request; the folio is posted by
+        // a callback or a status query, never here.
+        require(
+            result.status == ProviderPaymentStatus.PENDING ||
+                result.status == ProviderPaymentStatus.SUCCEEDED,
+        ) {
+            "Provider initiation returned ${result.status} (${result.providerStatus}), so the " +
+                "push cannot be assumed to have reached the payer"
         }
 
         transactionTemplate.executeWithoutResult {

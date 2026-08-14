@@ -5,6 +5,7 @@ import com.mwombeki.peak.TestcontainersConfiguration
 import com.mwombeki.peak.payment.api.PaymentProvider
 import com.mwombeki.peak.payment.api.ProviderCollectionCommand
 import com.mwombeki.peak.payment.api.ProviderCollectionResult
+import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderWebhookNotification
 import com.mwombeki.peak.platformbilling.internal.EntitlementReconciler
 import com.mwombeki.peak.platformbilling.internal.PurchaseSettlementOutboxHandler
@@ -422,7 +423,8 @@ class SuspendedTenantRecoveryIntegrationTests {
 
             override fun initiate(command: ProviderCollectionCommand) = ProviderCollectionResult(
                 providerReference = "STUB-${command.internalReference}",
-                status = "pending",
+                status = ProviderPaymentStatus.PENDING,
+                providerStatus = "pending",
             )
 
             override fun parseWebhook(payload: String) = notification(payload)
@@ -441,10 +443,12 @@ class SuspendedTenantRecoveryIntegrationTests {
                     eventType = "collection.updated",
                     internalReference = reference,
                     providerReference = "STUB-$reference",
-                    status = "succeeded",
+                    status = ProviderPaymentStatus.SUCCEEDED,
+                providerStatus = "succeeded",
                     amount = BigDecimal(amount),
                     currency = "TZS",
-                    clientId = null,
+                    merchantIdentity = null,
+                payerIdentity = null,
                     providerTimestamp = Instant.now(),
                     checksumMethod = "stub",
                 )

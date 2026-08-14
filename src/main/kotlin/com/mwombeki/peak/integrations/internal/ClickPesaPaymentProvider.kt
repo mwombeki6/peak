@@ -6,6 +6,7 @@ import com.mwombeki.peak.payment.api.ProviderCollectionResult
 import com.mwombeki.peak.payment.api.ProviderStatementItem
 import com.mwombeki.peak.payment.api.ProviderStatementQuery
 import com.mwombeki.peak.payment.api.ProviderStatementResult
+import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderStatusQuery
 import com.mwombeki.peak.payment.api.ProviderStatusResult
 import com.mwombeki.peak.payment.api.ProviderWebhookNotification
@@ -115,7 +116,7 @@ class ClickPesaPaymentProvider(
             providerReference = node.requiredText("id"),
             // Initiation responses are acceptance evidence, not settlement
             // evidence. A webhook or status query must verify posting.
-            status = "pending",
+            status = ProviderPaymentStatus.PENDING,
             providerStatus = providerStatus,
             providerTimestamp = node.optionalInstant("createdAt"),
         )
@@ -219,10 +220,12 @@ class ClickPesaPaymentProvider(
             internalReference = data.requiredText("orderReference"),
             providerReference = id,
             status = providerStatus.toCanonicalStatus(),
+            providerStatus = providerStatus,
             amount = data.path("collectedAmount").asString("0").toBigDecimal(),
             currency = data.path("collectedCurrency").asString("TZS").uppercase(),
-            clientId = data.path("clientId").asString(null)
+            merchantIdentity = data.path("clientId").asString(null)
                 ?: root.path("clientId").asString(null),
+            payerIdentity = data.path("customer").path("phoneNumber").asString(null),
             providerTimestamp = data.optionalInstant("updatedAt"),
             checksumMethod = root.path("checksumMethod").asString(null),
             metadata = mapOf(
@@ -351,12 +354,19 @@ class ClickPesaPaymentProvider(
         return uri
     }
 
-    private fun String.toCanonicalStatus(): String {
+    /**
+     * ClickPesa's vocabulary, and nothing else's. This used to return "posted" — a state in
+     * Peak's `payment_transactions`, not an outcome a provider can report — which is how the
+     * boundary came to be defined by whatever the first adapter happened to emit.
+     */
+    private fun String.toCanonicalStatus(): ProviderPaymentStatus {
         return when (uppercase()) {
-            "SUCCESS", "SETTLED" -> "posted"
-            "PROCESSING", "PENDING" -> "pending"
-            "FAILED" -> "failed"
-            else -> error("Unsupported ClickPesa payment status: $this")
+            "SUCCESS", "SETTLED" -> ProviderPaymentStatus.SUCCEEDED
+            "PROCESSING", "PENDING" -> ProviderPaymentStatus.PENDING
+            "FAILED" -> ProviderPaymentStatus.FAILED
+            // Deliberately not FAILED. An unrecognised word means Peak does not know what
+            // happened, and the domain must be told that rather than told it failed.
+            else -> ProviderPaymentStatus.UNKNOWN
         }
     }
 

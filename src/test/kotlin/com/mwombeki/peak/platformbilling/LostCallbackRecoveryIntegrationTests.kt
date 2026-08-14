@@ -4,6 +4,7 @@ import com.mwombeki.peak.TestcontainersConfiguration
 import com.mwombeki.peak.payment.api.PaymentProvider
 import com.mwombeki.peak.payment.api.ProviderCollectionCommand
 import com.mwombeki.peak.payment.api.ProviderCollectionResult
+import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderStatusQuery
 import com.mwombeki.peak.payment.api.ProviderStatusResult
 import com.mwombeki.peak.payment.api.ProviderWebhookNotification
@@ -493,7 +494,8 @@ class LostCallbackRecoveryIntegrationTests {
 
         override fun initiate(command: ProviderCollectionCommand) = ProviderCollectionResult(
             providerReference = "STUB-${command.internalReference}",
-            status = "pending",
+            status = ProviderPaymentStatus.PENDING,
+            providerStatus = "pending",
         )
 
         override fun queryStatus(command: ProviderStatusQuery): ProviderStatusResult {
@@ -502,7 +504,7 @@ class LostCallbackRecoveryIntegrationTests {
             return ProviderStatusResult(
                 internalReference = command.internalReference,
                 providerReference = "STUB-${command.internalReference}",
-                status = status.get(),
+                status = status.get().asCanonicalStatus(),
                 providerStatus = status.get(),
                 amount = amount.get(),
                 currency = "TZS",
@@ -527,13 +529,28 @@ class LostCallbackRecoveryIntegrationTests {
                 eventType = "collection.updated",
                 internalReference = reference,
                 providerReference = "STUB-$reference",
-                status = "succeeded",
+                status = ProviderPaymentStatus.SUCCEEDED,
+                providerStatus = "succeeded",
                 amount = BigDecimal(amountText),
                 currency = "TZS",
-                clientId = null,
+                merchantIdentity = null,
+                payerIdentity = null,
                 providerTimestamp = Instant.now(),
                 checksumMethod = "stub",
             )
+        }
+
+        /**
+         * A stub still has to do an adapter's job. The domain no longer accepts a raw provider
+         * word, so mapping one is what this models — including the case that matters most,
+         * where a word no adapter knows becomes UNKNOWN rather than a failed payment.
+         */
+        private fun String.asCanonicalStatus(): ProviderPaymentStatus = when (trim().lowercase()) {
+            "success", "succeeded", "completed" -> ProviderPaymentStatus.SUCCEEDED
+            "failed", "failure" -> ProviderPaymentStatus.FAILED
+            "cancelled", "canceled" -> ProviderPaymentStatus.CANCELLED
+            "pending", "processing" -> ProviderPaymentStatus.PENDING
+            else -> ProviderPaymentStatus.UNKNOWN
         }
     }
 
@@ -541,5 +558,6 @@ class LostCallbackRecoveryIntegrationTests {
     class Provider {
         @Bean
         fun stubStatusProvider() = StubStatusProvider()
+
     }
 }

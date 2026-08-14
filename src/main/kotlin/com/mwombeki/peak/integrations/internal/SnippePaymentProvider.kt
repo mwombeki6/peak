@@ -4,6 +4,7 @@ package com.mwombeki.peak.integrations.internal
 import com.mwombeki.peak.payment.api.PaymentProvider
 import com.mwombeki.peak.payment.api.ProviderCollectionCommand
 import com.mwombeki.peak.payment.api.ProviderCollectionResult
+import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderStatusQuery
 import com.mwombeki.peak.payment.api.ProviderStatusResult
 import com.mwombeki.peak.payment.api.ProviderWebhookNotification
@@ -325,7 +326,10 @@ class SnippePaymentProvider(
             amount = amount.path("value").asString("0").toWholeAmount(),
             feeAmount = settlement.path("fees").path("value").asString("0").toWholeAmount(),
             currency = amount.path("currency").asString("TZS").uppercase(),
-            clientId = data.path("customer").path("phone").asString(null),
+            // Snippe's callback names the payer, not the merchant; the merchant is already
+            // established by the account the callback was routed to.
+            merchantIdentity = null,
+            payerIdentity = data.path("customer").path("phone").asString(null),
             providerTimestamp = data.path("completed_at").asString(null)
                 ?.let(::parseInstantOrNull)
                 ?: root.path("created_at").asString(null)?.let(::parseInstantOrNull),
@@ -366,17 +370,28 @@ class SnippePaymentProvider(
      * failures the customer may retry; anything unrecognised is left for the reconciler to
      * treat as unknown rather than guessed at here.
      */
-    private fun String.eventStatus(): String = when (trim().lowercase()) {
-        "payment.completed" -> "succeeded"
-        "payment.failed", "payment.voided", "payment.expired" -> "failed"
-        else -> "pending"
+    /**
+     * Snippe reports the outcome in the event name rather than in a status field, so the
+     * event type is what carries meaning here — but only inside this adapter. The domain used
+     * to read event names directly, which is exactly why every Snippe callback was rejected.
+     */
+    private fun String.eventStatus(): ProviderPaymentStatus = when (trim().lowercase()) {
+        "payment.completed" -> ProviderPaymentStatus.SUCCEEDED
+        "payment.failed", "payment.expired" -> ProviderPaymentStatus.FAILED
+        "payment.voided" -> ProviderPaymentStatus.CANCELLED
+        "payment.pending", "payment.processing", "payment.created" ->
+            ProviderPaymentStatus.PENDING
+        // An event Peak has no mapping for is not a failed payment. Snippe adding an event
+        // type must not make Peak declare a guest's payment dead.
+        else -> ProviderPaymentStatus.UNKNOWN
     }
 
-    private fun String.normalizedStatus(): String = when (trim().lowercase()) {
-        "completed", "succeeded", "success" -> "succeeded"
-        "failed", "cancelled", "canceled", "expired" -> "failed"
-        "pending", "active", "processing" -> "pending"
-        else -> trim().lowercase()
+    private fun String.normalizedStatus(): ProviderPaymentStatus = when (trim().lowercase()) {
+        "completed", "succeeded", "success" -> ProviderPaymentStatus.SUCCEEDED
+        "failed", "expired" -> ProviderPaymentStatus.FAILED
+        "cancelled", "canceled" -> ProviderPaymentStatus.CANCELLED
+        "pending", "active", "processing" -> ProviderPaymentStatus.PENDING
+        else -> ProviderPaymentStatus.UNKNOWN
     }
 
     /** TZS carries no circulating subunit, so the integer is already whole shillings. */

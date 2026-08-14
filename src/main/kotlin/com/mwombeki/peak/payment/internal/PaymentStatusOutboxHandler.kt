@@ -3,6 +3,7 @@ package com.mwombeki.peak.payment.internal
 import com.mwombeki.peak.billing.api.BillingPort
 import com.mwombeki.peak.billing.api.ConfirmedPaymentRequest
 import com.mwombeki.peak.payment.api.PaymentProvider
+import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderStatusQuery
 import com.mwombeki.peak.reliability.api.ClaimedOutboxEvent
 import com.mwombeki.peak.reliability.api.OutboxDestination
@@ -115,8 +116,11 @@ class PaymentStatusOutboxHandler(
         transactionTemplate.executeWithoutResult {
             databaseSessionContext.bind(identity)
             when (result.status) {
-                "posted" -> postPayment(tenantId, propertyId, work, result)
-                "failed" -> jdbcTemplate.update(
+                ProviderPaymentStatus.SUCCEEDED ->
+                    postPayment(tenantId, propertyId, work, result)
+                ProviderPaymentStatus.FAILED,
+                ProviderPaymentStatus.CANCELLED,
+                -> jdbcTemplate.update(
                     """
                     UPDATE payment_transactions
                     SET provider_status = ?,
@@ -136,12 +140,17 @@ class PaymentStatusOutboxHandler(
                     tenantId,
                     transactionId,
                 )
-                "pending", "initiated" -> scheduleNext(
+                // Not knowing is not failing. A word no adapter recognises, or an answer the
+                // provider could not give, means the payment is still in flight as far as Peak
+                // is concerned — so it is asked about again rather than declared dead. Writing
+                // 'failed' here is how a guest who did pay gets asked to pay a second time.
+                ProviderPaymentStatus.PENDING,
+                ProviderPaymentStatus.UNKNOWN,
+                -> scheduleNext(
                     event,
                     work,
                     result.providerStatus,
                 )
-                else -> error("Unsupported provider status ${result.status}")
             }
         }
         meterRegistry.counter(
@@ -149,7 +158,7 @@ class PaymentStatusOutboxHandler(
             "provider",
             work.providerCode,
             "result",
-            result.status,
+            result.status.name.lowercase(),
         ).increment()
     }
 

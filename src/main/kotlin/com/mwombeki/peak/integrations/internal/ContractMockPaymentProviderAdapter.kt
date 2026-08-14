@@ -4,6 +4,7 @@ package com.mwombeki.peak.integrations.internal
 import com.mwombeki.peak.payment.api.PaymentProvider
 import com.mwombeki.peak.payment.api.ProviderCollectionCommand
 import com.mwombeki.peak.payment.api.ProviderCollectionResult
+import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderWebhookNotification
 import java.util.UUID
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
@@ -25,7 +26,8 @@ class ContractMockPaymentProviderAdapter(
     override fun initiate(command: ProviderCollectionCommand): ProviderCollectionResult {
         return ProviderCollectionResult(
             providerReference = "MOCK-${UUID.randomUUID()}",
-            status = "pending",
+            status = ProviderPaymentStatus.PENDING,
+            providerStatus = "pending",
         )
     }
 
@@ -40,11 +42,13 @@ class ContractMockPaymentProviderAdapter(
             ),
             internalReference = node.requiredText("internalReference"),
             providerReference = node.requiredText("providerReference"),
-            status = node.requiredText("status").lowercase(),
+            status = node.requiredText("status").toProviderPaymentStatus(),
+            providerStatus = node.requiredText("status"),
             amount = node.requiredText("amount").toBigDecimal(),
             feeAmount = node.path("feeAmount").asString("0").toBigDecimal(),
             currency = node.requiredText("currency").uppercase(),
-            clientId = node.path("clientId").asString(null),
+            merchantIdentity = node.path("clientId").asString(null),
+            payerIdentity = node.path("payerIdentity").asString(null),
             providerTimestamp = node.path("updatedAt").asString(null)
                 ?.let(java.time.Instant::parse),
             checksumMethod = node.path("checksumMethod").asString(null),
@@ -56,4 +60,13 @@ class ContractMockPaymentProviderAdapter(
         return path(field).asString().trim().takeIf { it.isNotEmpty() }
             ?: throw IllegalArgumentException("Provider payload field $field is required")
     }
+
+    /**
+     * This adapter's wire format is Peak's own contract rather than a third party's, so
+     * reading the canonical name back is deserialisation, not vocabulary mapping. A real
+     * provider adapter must never do this — it has words of its own to translate.
+     */
+    private fun String.toProviderPaymentStatus(): ProviderPaymentStatus =
+        ProviderPaymentStatus.entries.firstOrNull { it.name.equals(trim(), ignoreCase = true) }
+            ?: ProviderPaymentStatus.UNKNOWN
 }

@@ -1,6 +1,7 @@
 package com.mwombeki.peak.platformbilling.internal
 
 import com.mwombeki.peak.payment.api.PaymentProvider
+import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderStatusQuery
 import com.mwombeki.peak.shared.secrets.SecretReferenceResolver
 import io.micrometer.core.instrument.MeterRegistry
@@ -246,14 +247,21 @@ class PaymentStatusReconciliationService(
      * Anything unrecognised is UNKNOWN rather than FAILED. A provider adding a new status
      * string must not cause Peak to start declaring payments failed that it cannot read.
      */
-    private fun classify(status: String?): CollectionStatus {
-        return when (status?.trim()?.lowercase()) {
-            "succeeded", "success", "successful", "completed", "paid" -> CollectionStatus.SUCCEEDED
-            "failed", "failure", "rejected", "declined" -> CollectionStatus.FAILED
-            "cancelled", "canceled" -> CollectionStatus.CANCELLED
-            "pending", "processing", "initiated", "in_progress" -> CollectionStatus.PENDING
-            else -> CollectionStatus.UNKNOWN
-        }
+    /**
+     * One-for-one, and total because both sides are enums.
+     *
+     * This used to guess at strings — matching "succeeded", "success", "successful",
+     * "completed" and "paid" in the hope of covering whatever an adapter emitted. Every word
+     * it did not think of became UNKNOWN, which is safe but means a settled payment is
+     * re-queried forever instead of being recognised. The adapters now say which of the five
+     * outcomes they mean, so there is nothing left to guess.
+     */
+    private fun classify(status: ProviderPaymentStatus): CollectionStatus = when (status) {
+        ProviderPaymentStatus.SUCCEEDED -> CollectionStatus.SUCCEEDED
+        ProviderPaymentStatus.FAILED -> CollectionStatus.FAILED
+        ProviderPaymentStatus.CANCELLED -> CollectionStatus.CANCELLED
+        ProviderPaymentStatus.PENDING -> CollectionStatus.PENDING
+        ProviderPaymentStatus.UNKNOWN -> CollectionStatus.UNKNOWN
     }
 
     private fun record(

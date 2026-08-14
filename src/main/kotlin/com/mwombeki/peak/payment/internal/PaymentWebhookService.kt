@@ -10,6 +10,7 @@ import com.mwombeki.peak.payment.api.PaymentNotFoundException
 import com.mwombeki.peak.payment.api.PaymentRejectedException
 import com.mwombeki.peak.payment.api.PaymentProvider
 import com.mwombeki.peak.payment.api.PaymentStatus
+import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderWebhookNotification
 import com.mwombeki.peak.payment.api.PaymentWebhookPort
 import com.mwombeki.peak.payment.api.PaymentWebhookReceipt
@@ -138,10 +139,11 @@ class PaymentWebhookService(
                 }
                 validateNotification(notification)
                 require(
-                    notification.clientId == null ||
-                            notification.clientId == scope.clientId,
+                    notification.merchantIdentity == null ||
+                        notification.merchantIdentity == scope.clientId,
                 ) {
-                    "ClickPesa callback client identity does not match account"
+                    "${scope.providerCode} callback names a different merchant than the " +
+                        "account it was sent to"
                 }
                 notification.providerTimestamp?.let { providerTimestamp ->
                     require(
@@ -150,7 +152,8 @@ class PaymentWebhookService(
                             clock.instant(),
                         ).abs() <= MAX_WEBHOOK_AGE,
                     ) {
-                        "ClickPesa callback is outside the accepted replay window"
+                        "${scope.providerCode} callback is outside the accepted " +
+                            "replay window"
                     }
                 }
 
@@ -243,7 +246,7 @@ class PaymentWebhookService(
         require(transaction.propertyId == scope.propertyId) {
             "Payment callback property does not match provider account"
         }
-        if (notification.status == "posted") {
+        if (notification.status == ProviderPaymentStatus.SUCCEEDED) {
             require(transaction.amount.money() == notification.amount.money()) {
                 "Payment callback amount does not match transaction"
             }
@@ -269,7 +272,7 @@ class PaymentWebhookService(
         }
 
         val resultStatus = when (notification.status) {
-            "posted" -> confirmPayment(
+            ProviderPaymentStatus.SUCCEEDED -> confirmPayment(
                 scope = scope,
                 providerAccountId = providerAccountId,
                 eventId = eventId,
@@ -277,7 +280,7 @@ class PaymentWebhookService(
                 notification = notification,
             )
 
-            "failed" -> {
+            ProviderPaymentStatus.FAILED, ProviderPaymentStatus.CANCELLED -> {
                 jdbcTemplate.update(
                     """
                     UPDATE payment_transactions
@@ -299,9 +302,11 @@ class PaymentWebhookService(
                 "failed"
             }
 
-            else -> throw PaymentRejectedException(
-                "Provider callback status is unsupported",
-            )
+            // A callback that does not settle the question is not an error and must not be
+            // treated as one: the transaction stays in flight and the status query still runs.
+            // Rejecting here would make a provider's progress notification look like an
+            // attack, and 'unknown' would strand a payment the provider may yet confirm.
+            ProviderPaymentStatus.PENDING, ProviderPaymentStatus.UNKNOWN -> "pending"
         }
 
         markEvent(eventId, scope.tenantId, "processed", null)
@@ -466,7 +471,7 @@ class PaymentWebhookService(
                 provider = scope.providerCode,
                 status = ProviderPaymentObservation.CanonicalStatus.SUCCEEDED,
                 providerReference = notification.providerReference,
-                providerStatus = notification.status,
+                providerStatus = notification.providerStatus,
                 amount = notification.amount.money(),
                 currency = notification.currency,
                 feeAmount = notification.feeAmount.money(),
@@ -571,16 +576,18 @@ class PaymentWebhookService(
         require(notification.providerReference.length in 3..200) {
             "Provider callback reference is invalid"
         }
-        require(notification.eventType in setOf("PAYMENT RECEIVED", "PAYMENT FAILED")) {
-            "Provider callback event type is unsupported"
-        }
-        require(notification.status in setOf("posted", "failed")) {
-            "Provider callback status is unsupported"
-        }
+        // Deliberately no check on eventType. It used to be required to be one of ClickPesa's
+        // two event names, which meant every Snippe and AzamPay callback was rejected here —
+        // after its signature had verified correctly — and a hotel on either rail watched its
+        // collections sit pending forever. Event names are one vocabulary per provider;
+        // reducing them to an outcome is the adapter's job, and `status` is that outcome.
         require(
-            (notification.status == "posted" && notification.amount > BigDecimal.ZERO) ||
-                    (notification.status == "failed" && notification.amount >= BigDecimal.ZERO),
+            notification.status != ProviderPaymentStatus.SUCCEEDED ||
+                notification.amount > BigDecimal.ZERO,
         ) {
+            "Provider callback reports a successful payment of ${notification.amount}"
+        }
+        require(notification.amount >= BigDecimal.ZERO) {
             "Provider callback amount is invalid"
         }
         require(notification.feeAmount >= BigDecimal.ZERO) {

@@ -1,5 +1,6 @@
 package com.mwombeki.peak.integrations.internal
 
+import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderCollectionCommand
 import java.math.BigDecimal
 import java.net.URI
@@ -37,7 +38,7 @@ class AzamPayPaymentProviderTests {
 
         val result = provider.initiate(command(channel = "Mpesa"))
 
-        assertEquals("pending", result.status)
+        assertEquals(ProviderPaymentStatus.PENDING, result.status)
         assertEquals("AZ-123", result.providerReference)
         assertEquals(null, result.redirectUrl, "a USSD push has nowhere to redirect to")
 
@@ -122,7 +123,7 @@ class AzamPayPaymentProviderTests {
         val notification = provider.verifyAndParseWebhook(payload, "unused", checksumRequired = true)
 
         assertEquals("PEAK-REF-1", notification.internalReference)
-        assertEquals("succeeded", notification.status)
+        assertEquals(ProviderPaymentStatus.SUCCEEDED, notification.status)
         assertEquals(BigDecimal("30000"), notification.amount)
         assertEquals("SHA256withRSA", notification.checksumMethod)
         assertEquals(true, notification.metadata["signatureVerified"])
@@ -188,7 +189,7 @@ class AzamPayPaymentProviderTests {
 
         val notification = provider.verifyAndParseWebhook(payload, "unused", checksumRequired = true)
 
-        assertEquals("succeeded", notification.status)
+        assertEquals(ProviderPaymentStatus.SUCCEEDED, notification.status)
         assertEquals(
             2,
             transport.calls.count { it.endpoint.path.contains("PublicKey") },

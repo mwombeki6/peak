@@ -4,6 +4,7 @@ import com.mwombeki.peak.TestcontainersConfiguration
 import com.mwombeki.peak.payment.api.PaymentProvider
 import com.mwombeki.peak.payment.api.ProviderCollectionCommand
 import com.mwombeki.peak.payment.api.ProviderCollectionResult
+import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderStatusQuery
 import com.mwombeki.peak.payment.api.ProviderStatusResult
 import com.mwombeki.peak.payment.api.ProviderWebhookNotification
@@ -542,7 +543,8 @@ class OperatorReconciliationIntegrationTests {
 
         override fun initiate(command: ProviderCollectionCommand) = ProviderCollectionResult(
             providerReference = "STUB-${command.internalReference}",
-            status = "pending",
+            status = ProviderPaymentStatus.PENDING,
+            providerStatus = "pending",
         )
 
         override fun queryStatus(command: ProviderStatusQuery): ProviderStatusResult {
@@ -550,7 +552,7 @@ class OperatorReconciliationIntegrationTests {
             return ProviderStatusResult(
                 internalReference = command.internalReference,
                 providerReference = "STUB-${command.internalReference}",
-                status = status.get(),
+                status = status.get().asCanonicalStatus(),
                 providerStatus = status.get(),
                 amount = amount.get(),
                 currency = "TZS",
@@ -561,11 +563,25 @@ class OperatorReconciliationIntegrationTests {
 
         override fun parseWebhook(payload: String): ProviderWebhookNotification =
             throw UnsupportedOperationException("not used in these tests")
+
+        /**
+         * A stub still has to do an adapter's job. The domain no longer accepts a raw provider
+         * word, so mapping one is what this models — including the case that matters most,
+         * where a word no adapter knows becomes UNKNOWN rather than a failed payment.
+         */
+        private fun String.asCanonicalStatus(): ProviderPaymentStatus = when (trim().lowercase()) {
+            "success", "succeeded", "completed" -> ProviderPaymentStatus.SUCCEEDED
+            "failed", "failure" -> ProviderPaymentStatus.FAILED
+            "cancelled", "canceled" -> ProviderPaymentStatus.CANCELLED
+            "pending", "processing" -> ProviderPaymentStatus.PENDING
+            else -> ProviderPaymentStatus.UNKNOWN
+        }
     }
 
     @TestConfiguration
     class Provider {
         @Bean
         fun stubOperatorProvider() = StubOperatorProvider()
+
     }
 }
