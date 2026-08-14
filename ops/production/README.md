@@ -199,6 +199,55 @@ Keep worker DB pool size greater than or equal to worker parallelism only when h
 
 ## Backup And Restore Drill
 
+### Recovery order is not negotiable
+
+**PostgreSQL roles are cluster-level; a database dump is not.** `pg_dump` of one
+database emits the objects a role owns and no `CREATE ROLE` for the role itself.
+Restoring into a fresh cluster therefore fails on the first unknown owner and
+takes the rest of the recovery with it.
+
+Recover in this order:
+
+1. Provision the PostgreSQL cluster.
+2. **Create the roles** — `ops/scripts/bootstrap-db-roles.sh`, which applies
+   `role-bootstrap.sql`.
+3. Restore the database.
+4. Restore application secrets and configuration.
+5. Start Peak.
+
+Not "restore the database and hope the roles appear". This is not hypothetical:
+three SECURITY DEFINER owner roles created by migrations were once missing from
+`role-bootstrap.sql`, and the gap surfaced only when an acceptance drill
+attempted a real restore, twenty migrations after the fault was introduced.
+
+Two things keep it closed. `RestorableRoleBootstrapTests` asserts that every role
+any migration creates also exists in `role-bootstrap.sql`, with no exemptions —
+"roles that own something" would require predicting what a dump will reference,
+which is the judgement that failed. And the drill below proves it end to end.
+
+### Minimal drill
+
+```sh
+ops/testing/verify-db-backup-restore.sh
+```
+
+Needs only Podman or Docker and this repository. No Peak API, Redis, Keycloak,
+Caddy, or providers — deliberately, because CI and the full stack are exactly
+what you do not have when you are restoring from a backup.
+
+For each supported PostgreSQL version it migrates a fresh cluster to head, dumps
+it, restores into another fresh cluster, and checks the head, role count, table
+and function counts. It also runs a **negative control**: the same dump restored
+into a cluster with no roles must fail. Without that, a future change to how
+ownership is emitted could make the positive path pass for the wrong reason.
+
+Evidence lands in `build/evidence/db-restore/` — PostgreSQL version, migration
+head, dump SHA-256, role and object counts, restore stderr, timestamp.
+
+`PG_VERSIONS` overrides the matrix; `KEEP_EVIDENCE=1` retains the dumps.
+
+### Full drill
+
 Create a backup:
 
 ```sh
