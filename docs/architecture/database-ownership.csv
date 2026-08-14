@@ -226,6 +226,8 @@ schema_version_history,shared,active,shared::api-or-internal-owner
 service_health_checks,platformgovernance,active,platformgovernance::api-or-internal-owner
 shift_handovers,frontdesk,active,frontdesk::api-or-internal-owner
 shift_templates,deferred,dormant,no-runtime-writes
+staff_activation_secrets,usermanagement,active,usermanagement::api-or-internal-owner
+staff_credentials,usermanagement,active,usermanagement::api-or-internal-owner
 staff_rosters,deferred,dormant,no-runtime-writes
 stays,frontdesk,active,frontdesk::api-or-internal-owner
 stock_levels,inventory,active,inventory::api-or-internal-owner
