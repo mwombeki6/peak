@@ -10,6 +10,7 @@ import com.mwombeki.peak.platformbilling.api.PurchaseStatus
 import com.mwombeki.peak.platformbilling.api.Quote
 import com.mwombeki.peak.platformbilling.api.QuoteLine
 import com.mwombeki.peak.platformbilling.api.QuoteRequest
+import com.mwombeki.peak.platformbilling.api.Receipt
 import com.mwombeki.peak.reliability.api.IdempotencyCommand
 import com.mwombeki.peak.reliability.api.IdempotencyPort
 import com.mwombeki.peak.reliability.api.IdempotencyReservation
@@ -40,6 +41,7 @@ class PurchaseService(
     private val collectionService: PlatformCollectionService,
     private val idempotencyPort: IdempotencyPort,
     private val objectMapper: ObjectMapper,
+    private val receiptService: ReceiptService,
 ) : PlatformBillingPort {
 
     override fun catalog(): List<ProductSummary> = catalogService.catalog()
@@ -116,6 +118,19 @@ class PurchaseService(
                     limit.coerceIn(1, 200),
                 )
                 ids.mapNotNull { id -> readPurchase(actor.tenantId, id) }
+            },
+        )
+    }
+
+    /**
+     * Bound and read inside a transaction like every other tenant read here, so RLS scopes it
+     * to the caller's own tenant rather than the query being trusted to say so.
+     */
+    override fun receipts(tenantId: UUID, limit: Int): List<Receipt> {
+        return requireNotNull(
+            transactionTemplate.execute {
+                val actor = tenantRequestContext.bind()
+                receiptService.forTenant(actor.tenantId, limit)
             },
         )
     }

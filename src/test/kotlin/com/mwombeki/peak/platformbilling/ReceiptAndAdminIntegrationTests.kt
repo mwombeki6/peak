@@ -17,6 +17,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
+import com.mwombeki.peak.platformbilling.api.PlatformBillingPort
+import com.mwombeki.peak.shared.context.RequestContext
+import com.mwombeki.peak.shared.context.RequestContextHolder
+import com.mwombeki.peak.shared.context.RequestIdentity
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.annotation.Import
@@ -37,9 +41,12 @@ class ReceiptAndAdminIntegrationTests {
     @Autowired private lateinit var lifecycleService: SubscriptionLifecycleService
     @Autowired private lateinit var adminPort: PlatformBillingAdminPort
     @Autowired private lateinit var jdbcTemplate: JdbcTemplate
+    @Autowired private lateinit var platformBillingPort: PlatformBillingPort
+    @Autowired private lateinit var requestContextHolder: RequestContextHolder
 
     @AfterTest
     fun resetSession() {
+        requestContextHolder.clear()
         jdbcTemplate.execute("RESET ALL")
     }
 
@@ -197,6 +204,94 @@ class ReceiptAndAdminIntegrationTests {
         assertEquals(2, numbers.toSet().size, "two sales, two distinct receipt numbers")
     }
 
+    /**
+     * The customer can read the receipt Peak issued them.
+     *
+     * V99 built the receipt correctly — one per purchase, sequentially numbered — and gave it
+     * exactly one route, `/api/platform/billing/receipts` behind `platform.billing.view`.
+     * That is a Peak staff permission. `TenantBillingController` had catalog, quotes,
+     * purchases and renewal offers, and no receipts at all. Peak took a hotel's money,
+     * allocated a numbered receipt for it, and filed it where the hotel could not reach it —
+     * which for a Tanzanian business is the document their bookkeeping and their own filing
+     * rest on.
+     */
+    @Test
+    fun aTenantCanReadTheReceiptPeakIssuedIt() {
+        val fixture = paidPurchase()
+        runBlocking { settlementHandler.handle(settlementEvent(fixture)) }
+
+        requestContextHolder.set(fixture.context())
+        val receipts = platformBillingPort.receipts(fixture.tenantId)
+
+        assertEquals(1, receipts.size, "the purchase settled, so its receipt must be readable")
+        assertEquals(fixture.purchaseId, receipts.single().purchaseId)
+        assertTrue(
+            receipts.single().receiptNumber.isNotBlank(),
+            "a receipt without its number is not evidence of anything",
+        )
+    }
+
+    /** One hotel's receipts must not be another's, whatever the caller asks for. */
+    @Test
+    fun aTenantSeesOnlyItsOwnReceipts() {
+        val mine = paidPurchase()
+        val theirs = paidPurchase()
+        runBlocking {
+            settlementHandler.handle(settlementEvent(mine))
+            settlementHandler.handle(settlementEvent(theirs))
+        }
+
+        requestContextHolder.set(mine.context())
+        val receipts = platformBillingPort.receipts(mine.tenantId)
+
+        assertEquals(
+            listOf(mine.purchaseId),
+            receipts.map { it.purchaseId },
+            "the read is bound to the caller's own tenant, not to the id it passed",
+        )
+    }
+
+    /**
+     * A suspended tenant pays to end the suspension, so the evidence of having paid has to
+     * survive it too. `tenant.subscription.view` matches `tenant.subscription.%`, which is
+     * allowed under suspension — this asserts that rather than leaving it to be noticed.
+     */
+    @Test
+    fun theReceiptsRouteStaysReachableWhileSuspended() {
+        val unreachable = jdbcTemplate.queryForList(
+            """
+            SELECT route.api_pattern
+            FROM module_access_matrix route
+            WHERE route.api_pattern LIKE '/api/tenants/:tenantId/billing/%'
+              AND route.permission_code IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM peak_restriction_allowances allowance
+                  WHERE allowance.restriction_state = 'suspended'
+                    AND route.permission_code LIKE allowance.permission_pattern
+              )
+            """.trimIndent(),
+            String::class.java,
+        )
+
+        assertEquals(
+            emptyList(),
+            unreachable,
+            "suspension is ended by paying, so both the route to paying and the evidence of " +
+                "having paid must outlive it",
+        )
+        assertEquals(
+            1,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*) FROM module_access_matrix
+                WHERE api_pattern = '/api/tenants/:tenantId/billing/receipts'
+                """.trimIndent(),
+                Int::class.java,
+            ),
+            "the route must be registered, or the guard above passes over nothing",
+        )
+    }
+
     private fun receiptCount(purchaseId: UUID): Int =
         jdbcTemplate.queryForObject(
             "SELECT count(*) FROM peak_receipts WHERE purchase_id = ?",
@@ -289,5 +384,20 @@ class ReceiptAndAdminIntegrationTests {
         return PurchaseFixture(tenantId, purchaseId)
     }
 
-    private data class PurchaseFixture(val tenantId: UUID, val purchaseId: UUID)
+    private data class PurchaseFixture(val tenantId: UUID, val purchaseId: UUID) {
+        fun context(): RequestContext {
+            val correlationId = "corr-receipts-$tenantId"
+            return RequestContext(
+                identity = RequestIdentity.Tenant(
+                    tenantId = tenantId,
+                    tenantUserId = UUID.randomUUID(),
+                    correlationId = correlationId,
+                ),
+                correlationId = correlationId,
+                idempotencyKey = null,
+                httpMethod = "GET",
+                requestPath = "/api/v1/tenants/$tenantId/billing/receipts",
+            )
+        }
+    }
 }

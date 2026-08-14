@@ -45,6 +45,15 @@ interface PlatformBillingPort {
     fun purchase(tenantId: UUID, purchaseId: UUID): PurchaseResponse?
 
     fun purchases(tenantId: UUID, limit: Int = 50): List<PurchaseResponse>
+
+    /**
+     * The tenant's own receipts for what they have paid Peak.
+     *
+     * Peak already issued these, with a sequential number, and only Peak could read them. For
+     * a Tanzanian business the receipt is what their bookkeeping and their own filing rest on,
+     * so withholding it is not a missing feature but a document held hostage.
+     */
+    fun receipts(tenantId: UUID, limit: Int = 50): List<Receipt>
 }
 
 /**

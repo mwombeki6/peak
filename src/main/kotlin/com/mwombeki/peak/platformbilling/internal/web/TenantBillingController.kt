@@ -8,6 +8,7 @@ import com.mwombeki.peak.platformbilling.api.ProductSummary
 import com.mwombeki.peak.platformbilling.api.PurchaseResponse
 import com.mwombeki.peak.platformbilling.api.Quote
 import com.mwombeki.peak.platformbilling.api.QuoteRequest
+import com.mwombeki.peak.platformbilling.api.Receipt
 import com.mwombeki.peak.platformbilling.api.RenewalOffer
 import com.mwombeki.peak.platformbilling.internal.RenewalOfferService
 import java.util.UUID
@@ -54,6 +55,14 @@ class TenantBillingController(
         @RequestParam(defaultValue = "50") limit: Int,
     ): List<PurchaseResponse> {
         return platformBillingPort.purchases(tenantId, limit)
+    }
+
+    @GetMapping("/receipts")
+    fun receipts(
+        @PathVariable tenantId: UUID,
+        @RequestParam(defaultValue = "50") limit: Int,
+    ): List<Receipt> {
+        return platformBillingPort.receipts(tenantId, limit)
     }
 
     @GetMapping("/purchases/{purchaseId}")

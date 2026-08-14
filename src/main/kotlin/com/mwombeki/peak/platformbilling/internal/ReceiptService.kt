@@ -124,6 +124,39 @@ class ReceiptService(
         ).firstOrNull()
     }
 
+    /**
+     * A tenant's own receipts, newest first.
+     *
+     * These existed and only Peak could read them: the sole route was
+     * `/api/platform/billing/receipts` behind `platform.billing.view`. Peak took a hotel's
+     * money, allocated a sequential receipt number for it, and filed the receipt where the
+     * hotel could not reach it — which for a Tanzanian business is the document their
+     * bookkeeping and their own tax filing depend on.
+     */
+    fun forTenant(tenantId: UUID, limit: Int = 50): List<Receipt> {
+        return jdbcTemplate.query(
+            """
+            SELECT id, purchase_id, receipt_number, issued_at, total_amount, currency
+            FROM peak_receipts
+            WHERE tenant_id = ?
+            ORDER BY issued_at DESC
+            LIMIT ?
+            """.trimIndent(),
+            { rs, _ ->
+                Receipt(
+                    id = rs.getObject("id", UUID::class.java),
+                    purchaseId = rs.getObject("purchase_id", UUID::class.java),
+                    receiptNumber = rs.getString("receipt_number"),
+                    issuedAt = rs.getTimestamp("issued_at").toInstant(),
+                    totalAmount = rs.getBigDecimal("total_amount"),
+                    currency = rs.getString("currency").trim(),
+                )
+            },
+            tenantId,
+            limit.coerceIn(1, 200),
+        )
+    }
+
     private data class ReceiptSubject(
         val totalAmount: java.math.BigDecimal,
         val currency: String,
