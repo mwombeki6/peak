@@ -89,6 +89,60 @@ class ProviderConfirmationChokePointTests {
         }
     }
 
+    /**
+     * The path that acts on what a provider said must not know which provider said it.
+     *
+     * Three separate leaks of one provider's vocabulary into this path made every Snippe and
+     * AzamPay callback fail: an event type enumerating ClickPesa's two event names, a status
+     * compared against `posted`, and a merchant check reading a field ClickPesa fills with a
+     * merchant id and the others fill with the guest's phone number. Each was written when
+     * ClickPesa was the only rail, each looked correct, and the suite stayed green because
+     * every adapter test asserted the word that adapter itself had invented.
+     *
+     * The mapping belongs in the adapter. Naming a provider here means it has leaked back.
+     *
+     * Deliberately scoped to these four files. Elsewhere in the module naming a provider is
+     * legitimate — `PaymentService` restricts statement imports to ClickPesa explicitly and
+     * says so, and the controller keeps a ClickPesa-shaped route because a callback URL
+     * already registered with a provider cannot be changed unilaterally. Those are honest
+     * statements about one provider. What must not exist is a general path that quietly
+     * assumes one.
+     */
+    @Test
+    fun theConfirmationPathNeverNamesAProvider() {
+        val providerCodes = providerCodesFromAdapters()
+        assertTrue(
+            providerCodes.containsAll(setOf("clickpesa", "snippe", "azampay")),
+            "the three guest rails must be discovered, or this test proves nothing: " +
+                providerCodes,
+        )
+
+        val leaks = PROVIDER_AGNOSTIC_PATH.associateWith { file ->
+            val code = stripComments(Files.readString(paymentRoot.resolve("internal/$file")))
+            providerCodes.filter { code.contains(it, ignoreCase = true) }
+        }.filterValues { it.isNotEmpty() }
+
+        assertTrue(
+            leaks.isEmpty(),
+            "these decide what a provider's message means while knowing which provider sent " +
+                "it, which is how the last three rails-down bugs happened: $leaks",
+        )
+    }
+
+    /** Read from the adapters, so a new provider is covered without editing this test. */
+    private fun providerCodesFromAdapters(): List<String> =
+        Files.walk(Path.of("src/main/kotlin/com/mwombeki/peak/integrations")).use { paths ->
+            paths.asSequence()
+                .filter { it.toString().endsWith(".kt") }
+                .flatMap { PROVIDER_CODE.findAll(Files.readString(it)) }
+                .map { it.groupValues[1] }
+                .toList()
+        }
+
+    /** Comments discuss the history on purpose; only code may not name a provider. */
+    private fun stripComments(source: String): String =
+        source.replace(BLOCK_COMMENT, "").replace(LINE_COMMENT, "")
+
     private fun paymentSources(): List<Pair<String, String>> =
         Files.walk(paymentRoot).use { paths ->
             paths.asSequence()
@@ -107,5 +161,17 @@ class ProviderConfirmationChokePointTests {
             "ProviderWebhookNotification",
             "ProviderStatusResult",
         )
+
+        /** Everything that decides what a provider's message means. */
+        val PROVIDER_AGNOSTIC_PATH = listOf(
+            "PaymentWebhookService.kt",
+            "PaymentStatusOutboxHandler.kt",
+            "GuestPaymentConfirmationService.kt",
+            "PaymentOutboxHandler.kt",
+        )
+
+        val PROVIDER_CODE = Regex("""override val providerCode\s*=\s*"([^"]+)"""")
+        val BLOCK_COMMENT = Regex("""/\*.*?\*/""", RegexOption.DOT_MATCHES_ALL)
+        val LINE_COMMENT = Regex("""//.*""")
     }
 }

@@ -633,7 +633,6 @@ class PaymentWebhookService(
     )
 
     private companion object {
-        const val CLICKPESA_PROVIDER = "clickpesa"
         const val MAX_PAYLOAD_BYTES = 64 * 1024
         val MAX_WEBHOOK_AGE: Duration = Duration.ofMinutes(5)
         val INTERNAL_REFERENCE = Regex("PEAK-[A-F0-9]{20}")

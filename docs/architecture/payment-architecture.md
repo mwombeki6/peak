@@ -225,6 +225,53 @@ using an identifier obtained at initiation, which is the condition for enabling 
 `referenceId`/`verificationId` from a prior `verifybank`. It is nothing like a USSD prompt,
 which is why it must not be forced into the same initiation state machine.
 
+### What a provider is allowed to say
+
+Every adapter reduces its provider's vocabulary to one of five outcomes before the payment
+domain sees it. `ProviderPaymentStatus` in `payment::api` is that boundary:
+
+```
+ClickPesa  SUCCESS / SETTLED  ─┐
+Snippe     payment.completed  ─┼─► SUCCEEDED ─► the only status that may post to a folio
+AzamPay    success            ─┘
+
+                               ─► PENDING    in flight, ask again
+                               ─► FAILED     the provider says it will not happen
+                               ─► CANCELLED  the payer walked away
+                               ─► UNKNOWN    Peak could not find out
+```
+
+This was a `String` until it caused an outage in waiting. Each adapter invented its own word —
+ClickPesa emitted `posted`, Snippe and AzamPay emitted `succeeded` — and the domain compared
+against `posted`. ClickPesa worked. **Every Snippe and AzamPay callback was rejected**, after
+its signature had verified, by Peak's own validator one layer further in. A hotel on either
+rail would have watched collections sit pending until the sweep expired them.
+
+`posted` is the tell: that is not something a provider can report, it is a state in Peak's
+`payment_transactions`. The first adapter mapped straight onto the database, the boundary was
+never written down, and the next two adapter authors had nothing to be wrong about until
+production. The same shape had leaked twice more — the domain enumerated ClickPesa's two event
+names, and checked a `clientId` field that ClickPesa fills with a merchant id while the others
+fill it with the guest's phone number.
+
+Three rules follow, and `ProviderConfirmationChokePointTests` enforces the third:
+
+- **UNKNOWN is never FAILED.** An unrecognised status word means Peak has not been told, so the
+  status query keeps running. Collapsing the two is how a guest who paid is asked to pay again.
+- **A progress callback is not an error.** It is accepted and leaves the payment in flight.
+  Rejecting it sent providers that retry on non-2xx into a loop over a harmless message.
+- **The confirmation path never names a provider.** `PaymentWebhookService`,
+  `PaymentStatusOutboxHandler`, `PaymentOutboxHandler` and `GuestPaymentConfirmationService`
+  are scanned for provider codes. Naming one elsewhere is fine when it is honest — statement
+  import really is ClickPesa-only, and the legacy `/webhooks/clickpesa/{id}` route exists
+  because a callback URL already registered with a provider cannot be changed unilaterally.
+  What must not exist is a general path that quietly assumes one.
+
+`AnyProviderCallbackConfirmsIntegrationTests` drives a real callback body through each of the
+three adapters to a posted folio payment. It uses the real adapters rather than a stub on
+purpose: a stub would have agreed with whatever the domain expected, which is exactly how this
+survived a green suite.
+
 ### Callback verification
 
 Callbacks carry an RSA signature, not an HMAC. Verification is `SHA-256` with
