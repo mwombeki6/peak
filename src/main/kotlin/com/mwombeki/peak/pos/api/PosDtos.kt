@@ -149,6 +149,15 @@ data class SettlePosOrderRequest(
     @field:NotBlank
     val paymentMethod: String,
     val folioId: UUID? = null,
+    /**
+     * The room the guest named, required for a room charge.
+     *
+     * A folio id on its own proves nothing about who is being charged, and a waiter never sees
+     * one — they hear "put it on 204" across a restaurant. This is the input a POS client
+     * actually has, and it is what Peak verifies against the folio's checked-in stay.
+     */
+    @field:Size(max = 20)
+    val roomNumber: String? = null,
     val providerAccountId: UUID? = null,
     @field:Size(max = 20)
     val phoneNumber: String? = null,

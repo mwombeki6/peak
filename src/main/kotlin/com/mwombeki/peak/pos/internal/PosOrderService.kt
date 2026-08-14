@@ -393,10 +393,18 @@ class PosOrderService(
         } else {
             order.taxAmount.divide(order.subtotal, 8, RoundingMode.HALF_UP)
         }
+        // A folio id alone does not say whose bill this is. The waiter heard a room number;
+        // that is what Peak checks against the folio's checked-in stay.
+        val roomNumber = request.roomNumber?.trim().orEmpty()
+        require(roomNumber.isNotEmpty()) {
+            "A room charge must name the room. A folio id on its own does not prove the guest " +
+                "being charged is the guest who ordered."
+        }
         billingPort.postPosCharge(
             tenantId = tenantId,
             propertyId = propertyId,
             folioId = folioId,
+            expectedRoomNumber = roomNumber,
             request = PostChargeRequest(
                 chargeType = "F&B",
                 description = "POS order ${order.orderNumber}",

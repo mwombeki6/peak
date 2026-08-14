@@ -56,10 +56,16 @@ interface BillingPort {
     fun listFolios(propertyId: UUID): List<FolioResponse>
     fun getFolio(propertyId: UUID, folioId: UUID): FolioResponse?
     fun postCharge(propertyId: UUID, folioId: UUID, request: PostChargeRequest): BillingMutationReceipt
+    /**
+     * @param expectedRoomNumber the room the caller believes this folio belongs to. Verified
+     *   against the folio's checked-in stay, because a folio id alone does not identify a
+     *   guest and a POS caller has no way to establish that it does.
+     */
     fun postPosCharge(
         tenantId: UUID,
         propertyId: UUID,
         folioId: UUID,
+        expectedRoomNumber: String,
         request: PostChargeRequest,
         idempotencyKeyId: UUID,
     ): UUID
