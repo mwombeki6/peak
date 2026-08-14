@@ -320,6 +320,8 @@ for name in \
   PEAK_ALLOW_TRUSTED_JWT_IDENTITY_CLAIMS \
   PEAK_COMMUNICATION_DELIVERY_LOCAL_PROVIDER_ENABLED \
   PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_ENABLED \
+  PEAK_COMMUNICATION_ROUTING_EMAIL \
+  PEAK_COMMUNICATION_ROUTING_SMS \
   PEAK_ACCEPTANCE_MODE \
   PEAK_PLATFORM_BOOTSTRAP_ENABLED \
   PEAK_PLATFORM_RECOVERY_ENABLED \
@@ -396,6 +398,16 @@ fi
 if [ "$(value_of PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_ENABLED)" != "true" ]; then
   fail "PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_ENABLED must be true in production"
 fi
+
+# Enabling an adapter is not the same as routing a channel to it. Without these, the
+# worker starts cleanly, reports healthy, and every invitation and password reset fails
+# in the outbox — discovered days later by a locked-out user, not by a dashboard.
+for channel in EMAIL SMS; do
+  var="PEAK_COMMUNICATION_ROUTING_${channel}"
+  if [ -z "$(value_of "$var")" ]; then
+    fail "$var must name the adapter that delivers ${channel} in production"
+  fi
+done
 
 if [ "$(value_of PEAK_REPORT_STORAGE_ENABLED)" != "true" ]; then
   fail "PEAK_REPORT_STORAGE_ENABLED must be true in production"

@@ -62,7 +62,7 @@ class NotificationDeliveryProcessor(
     private val databaseSessionContext: DatabaseSessionContext,
     private val transactionTemplate: TransactionTemplate,
     private val objectMapper: ObjectMapper,
-    private val providers: List<NotificationDeliveryProvider>,
+    private val router: NotificationProviderRouter,
     private val meterRegistry: ObjectProvider<MeterRegistry>,
     private val secretEnvelopeService: SecretEnvelopeService,
     private val invitationProperties: InvitationDeliveryProperties,
@@ -78,7 +78,10 @@ class NotificationDeliveryProcessor(
             markPolicyBlocked(tenantId, event, pendingPayload.channel)
             throw ex
         }
-        val provider = providers.firstOrNull { it.supports(payload.channel) }
+        // Configuration decides this, not bean ordering. A null here means the channel was
+        // never configured for this deployment; a channel configured against a missing or
+        // unsuitable adapter cannot reach this point, because the router refuses to start.
+        val provider = router.routeFor(payload.channel)
         val providerCode = provider?.providerCode ?: "unavailable"
         val work = startAttempt(
             tenantId = tenantId,
@@ -88,7 +91,10 @@ class NotificationDeliveryProcessor(
         )
 
         if (provider == null) {
-            val ex = IllegalStateException("No communication provider registered for ${payload.channel}")
+            val ex = IllegalStateException(
+                "Channel ${payload.channel} is not configured for delivery in this " +
+                    "deployment. Configured: ${router.configuredChannels().sorted()}",
+            )
             finishFailed(tenantId, event, work, ex)
             throw ex
         }

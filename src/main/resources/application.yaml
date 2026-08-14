@@ -131,6 +131,19 @@ peak:
   communication:
     invitation:
       acceptance-base-url: ${PEAK_INVITATION_ACCEPTANCE_BASE_URL:http://localhost:3000/invitations/accept}
+    # Which adapter carries each channel. Capability is not routing: the HTTP gateway
+    # supports four channels and must still be told which it is responsible for.
+    #
+    # These name the local provider because that is what is registered by default
+    # (matchIfMissing), so development behaves as it always did. Production overrides them
+    # to the gateway and refuses to start if it names an adapter that is not enabled —
+    # which is the intended way to find out.
+    #
+    # whatsapp and voice_phone are deliberately absent: nothing serves them, and a default
+    # pointing at an adapter nobody enabled would break startup everywhere.
+    routing:
+      email: ${PEAK_COMMUNICATION_ROUTING_EMAIL:local}
+      sms: ${PEAK_COMMUNICATION_ROUTING_SMS:local}
   usermanagement:
     invitation:
       expose-token-in-response: ${PEAK_INVITATION_EXPOSE_TOKEN_IN_RESPONSE:false}

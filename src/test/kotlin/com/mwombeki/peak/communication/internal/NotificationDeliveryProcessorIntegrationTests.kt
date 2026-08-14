@@ -33,6 +33,10 @@ import tools.jackson.databind.ObjectMapper
     properties = [
         "peak.security.request-context.allow-header-identity=true",
         "peak.communication.delivery.local-provider.enabled=false",
+        // The local provider is off, so the default routing to it would refuse to start —
+        // which is the router working. Point the channel at the provider this test registers.
+        "peak.communication.routing.email=failing-test",
+        "peak.communication.routing.sms=failing-test",
     ],
 )
 @AutoConfigureMockMvc
