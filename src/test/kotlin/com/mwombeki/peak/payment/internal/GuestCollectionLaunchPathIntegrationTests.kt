@@ -198,6 +198,64 @@ class GuestCollectionLaunchPathIntegrationTests {
         assertEquals(1, outboxCount(fixture.tenantId, transaction.id))
     }
 
+    /**
+     * One folio, one live collection.
+     *
+     * A receptionist who clicks Request Payment twice — because the first push was slow, or
+     * the guest said nothing happened — creates two real USSD prompts for the same bill. If
+     * the guest approves both, the hotel has taken TZS 370,000 for a TZS 185,000 stay, and
+     * refunding mobile money in Tanzania is slow and manual. The idempotency key stops a
+     * replayed request; it does not stop a second deliberate one.
+     *
+     * This matters more the moment the front desk gains QR and payment links, because those
+     * are three ways to reach one payment, not three payments — but the defect is already
+     * here with one button.
+     */
+    @Test
+    fun asecondCollectionForTheSameFolioIsRefusedWhileOneIsStillInFlight() {
+        val fixture = walkInWithCharge(providerCode = "clickpesa")
+
+        requestContextHolder.set(fixture.context("idem-collect-first"))
+        paymentPort.initiateMobileMoney(
+            fixture.propertyId,
+            InitiateMobileMoneyRequest(
+                folioId = fixture.folioId,
+                providerAccountId = fixture.providerAccountId,
+                phoneNumber = "0754123456",
+                amount = BigDecimal("180000.00"),
+                mobileNetwork = "Mpesa",
+            ),
+        )
+
+        // A different key, so this is a second request rather than a replay of the first.
+        requestContextHolder.set(fixture.context("idem-collect-second"))
+        assertFailsWith<PaymentRejectedException> {
+            paymentPort.initiateMobileMoney(
+                fixture.propertyId,
+                InitiateMobileMoneyRequest(
+                    folioId = fixture.folioId,
+                    providerAccountId = fixture.providerAccountId,
+                    phoneNumber = "0754123456",
+                    amount = BigDecimal("180000.00"),
+                    mobileNetwork = "Mpesa",
+                ),
+            )
+        }
+
+        assertEquals(
+            1,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*) FROM payment_transactions
+                WHERE folio_id = ? AND status IN ('created', 'initiated', 'pending')
+                """.trimIndent(),
+                Int::class.java,
+                fixture.folioId,
+            ),
+            "a guest must never be holding two live prompts for the same bill",
+        )
+    }
+
     private fun outboxCount(tenantId: UUID, transactionId: UUID): Int =
         jdbcTemplate.queryForObject(
             """

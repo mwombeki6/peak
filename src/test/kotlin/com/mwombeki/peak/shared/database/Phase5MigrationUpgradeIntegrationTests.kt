@@ -232,7 +232,7 @@ class Phase5MigrationUpgradeIntegrationTests @Autowired constructor(
                 .dataSource(url, postgres.username, postgres.password)
                 .load()
             flyway.migrate()
-            assertEquals("110", flyway.info().current().version.version)
+            assertEquals("111", flyway.info().current().version.version)
 
             DriverManager.getConnection(
                 url,

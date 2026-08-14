@@ -501,6 +501,7 @@ class PaymentService(
             // looking at the screen, rather than queued and retried until it dead-letters
             // with a guest standing at the desk.
             val mobileNetwork = requireSupportedNetwork(providerAccount, request.mobileNetwork)
+            requireNoLiveCollection(actor.tenantId, request.folioId)
             val transactionId = UUID.randomUUID()
             val internalReference = paymentReference(transactionId)
             jdbcTemplate.update(
@@ -1881,6 +1882,39 @@ class PaymentService(
         val actor = tenantRequestContext.bind()
         tenantRequestContext.requirePropertyUsable(actor.tenantId, propertyId, lockProperty)
         return actor
+    }
+
+    /**
+     * Refuses a second prompt for a bill that already has one waiting.
+     *
+     * `uq_payment_transactions_open_folio_collection` is what actually guarantees this; a
+     * concurrent pair of requests can both pass this check and one will lose at the index.
+     * This exists so the ordinary case — a receptionist pressing the button twice because the
+     * first push seemed slow — produces something they can act on rather than a constraint
+     * violation they cannot read.
+     */
+    private fun requireNoLiveCollection(tenantId: UUID, folioId: UUID) {
+        val live = jdbcTemplate.query(
+            """
+            SELECT internal_reference, payer_identifier
+            FROM payment_transactions
+            WHERE tenant_id = ?
+              AND folio_id = ?
+              AND transaction_direction = 'inbound'
+              AND transaction_type = 'collection'
+              AND status IN ('created', 'initiated', 'pending')
+            LIMIT 1
+            """.trimIndent(),
+            { rs, _ -> rs.getString("internal_reference") to rs.getString("payer_identifier") },
+            tenantId,
+            folioId,
+        ).firstOrNull() ?: return
+
+        throw PaymentRejectedException(
+            "A payment request is already waiting on this folio (${live.first}, sent to " +
+                "${live.second}). Wait for the guest to answer it, or let it expire, before " +
+                "sending another — two live prompts means the guest can pay twice.",
+        )
     }
 
     private fun requirePayableFolio(
