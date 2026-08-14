@@ -199,6 +199,19 @@ tasks.withType<Test>().configureEach {
     // Spring integration contexts and container clients retain native resources;
     // bounded forks keep the complete suite deterministic on CI-sized runners.
     forkEvery = 25
+
+    // Several tests assert against files that are not on the classpath — migrations, the
+    // production role bootstrap, the ownership CSV. Gradle hashes declared inputs to decide
+    // whether a task is up to date, so without these it will report a stale PASS after one of
+    // them changes. That was not theoretical: the role-bootstrap guard silently skipped when
+    // only role-bootstrap.sql was edited, which is exactly when it needs to run.
+    inputs.files(
+        fileTree("src/main/resources/db/migration"),
+        file("ops/production/role-bootstrap.sql"),
+        file("docs/architecture/database-ownership.csv"),
+    )
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .withPropertyName("peakSourceOfTruthFiles")
     systemProperty(
         "spring.profiles.active",
         System.getProperty("spring.profiles.active") ?: "test",
