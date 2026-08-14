@@ -5,8 +5,12 @@ import com.mwombeki.peak.payment.api.PaymentProvider
 import com.mwombeki.peak.payment.api.ProviderCollectionCommand
 import com.mwombeki.peak.payment.api.ProviderCollectionResult
 import com.mwombeki.peak.payment.api.ProviderPaymentStatus
+import com.mwombeki.peak.payment.api.ProviderStatusQuery
+import com.mwombeki.peak.payment.api.ProviderStatusResult
 import com.mwombeki.peak.payment.api.ProviderWebhookNotification
 import java.math.BigDecimal
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.time.Instant
 import org.springframework.stereotype.Component
 import tools.jackson.databind.JsonNode
@@ -87,6 +91,76 @@ class AzamPayPaymentProvider(
             providerStatus = node.path("message").asString("pending"),
             // A USSD push, so there is nowhere to send the payer; they answer on the handset.
             redirectUrl = null,
+        )
+    }
+
+
+    /**
+     * Asks AzamPay what happened, so a lost callback is recoverable.
+     *
+     * This is a release gate, not a convenience. Mobile money callbacks go missing routinely,
+     * and without a way to ask, a customer whose account was debited is told the payment did
+     * not happen. `peak_payment_method_capabilities` had claimed AzamPay supported this and
+     * the rail was enabled on that claim while this method did not exist; the default
+     * implementation threw, the reconciler recorded "unknown", and the payment sat waiting for
+     * a human who was never told to look.
+     *
+     * Keyed on `transactionId` from the initiation response, which is why `initiate` keeps it
+     * as the provider reference. Peak's own `externalId` is not accepted here, so a status
+     * query for an attempt that has no provider reference cannot be answered — that is a
+     * payment we never confirmed was accepted, and it is reported as unknown rather than
+     * guessed at.
+     */
+    override fun queryStatus(command: ProviderStatusQuery): ProviderStatusResult {
+        val providerReference = command.providerReference?.trim().orEmpty()
+        require(providerReference.isNotEmpty()) {
+            "AzamPay keys its status endpoint on the transactionId returned at initiation, " +
+                "so an attempt without one cannot be asked about"
+        }
+
+        val endpoint = azamPayEndpoint(
+            command.endpointUrl,
+            "$STATUS_PATH?transactionId=" +
+                URLEncoder.encode(providerReference, StandardCharsets.UTF_8) +
+                "&provider=" +
+                URLEncoder.encode(command.collectionFlow ?: DEFAULT_STATUS_CHANNEL,
+                    StandardCharsets.UTF_8),
+        )
+
+        val node = objectMapper.readTree(
+            transport.exchange(
+                method = "GET",
+                endpoint = endpoint,
+                headers = statusHeaders(command),
+                payload = null,
+            ),
+        )
+
+        val providerStatus = node.path("transactionstatus").asString("")
+            .ifEmpty { node.path("data").path("transactionstatus").asString("") }
+
+        return ProviderStatusResult(
+            internalReference = node.path("externalreference").asString(
+                command.internalReference,
+            ),
+            providerReference = node.path("transactionid").asString(providerReference),
+            status = providerStatus.normalizedStatus(),
+            providerStatus = providerStatus,
+            amount = node.path("amount").asString(null)?.toBigDecimalOrZero(),
+            currency = node.path("currency").asString(null)?.uppercase(),
+            clientId = command.clientId,
+            providerTimestamp = node.path("time").asString(null)?.let(::parseInstantOrNull),
+        )
+    }
+
+    private fun statusHeaders(command: ProviderStatusQuery): Map<String, String> {
+        val token = tokenProvider.token(
+            clientId = command.clientId,
+            clientSecret = command.checksumKey,
+        )
+        return mapOf(
+            "Authorization" to "Bearer $token",
+            "X-API-Key" to command.apiKey,
         )
     }
 
@@ -216,6 +290,14 @@ class AzamPayPaymentProvider(
 
     internal companion object {
         const val CHECKOUT_PATH = "/azampay/mno/checkout"
+        const val STATUS_PATH = "/api/v1/partner/gettransactionstatus"
+
+        /**
+         * AzamPay's status endpoint takes the network as `provider`. The collection flow
+         * carries it where the caller knows it; where it does not, Mpesa is the largest
+         * network in Tanzania and the wrong guess costs a re-query rather than a wrong answer.
+         */
+        const val DEFAULT_STATUS_CHANNEL = "Mpesa"
 
         /**
          * AzamPay's accepted `provider` values. Mpesa is present: an earlier read of their
