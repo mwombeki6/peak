@@ -482,6 +482,26 @@ no standing authority — so every collection begins with a customer action in a
 The offer is also the idempotency anchor: a double-click returns the purchase that already
 exists rather than a second one.
 
+## Reviewing anything consequential
+
+Five questions, in order. A green suite answers at most the first two.
+
+| | Question | What its absence looks like |
+|---|---|---|
+| **Exists** | Did we build the capability at all? | An enabled rail whose adapter has no `queryStatus` |
+| **Correct** | Does it carry the right business meaning? | A commercial receipt presented as fiscal evidence |
+| **Reachable** | Can the intended actor get to it through the real path? | A receipt only Peak staff can read; a checkout allowance blocked by an unlisted precondition |
+| **Authorized** | Can *only* the right actor reach or mutate it? | One property's merchant context settling its sibling's payment |
+| **Recoverable** | Can the system converge when an async step fails? | A lost callback that strands a debited customer forever |
+
+Every defect found in this module fell into three, four or five — never one or two. The work was
+built and the work was right; it was unreachable, or unrecoverable, or reachable by the wrong
+party. Those are the ones tests do not fail on, because nothing is throwing.
+
+The reachability question is the cheapest to ask and the most often skipped: **who is this for,
+and can they get to it in every lifecycle state where they need it?** Asking it of three
+artifacts in this module found three separate production defects.
+
 ## Five documents, two taxpayers
 
 Peak produces five distinct financial artifacts. They reference each other and must never be
@@ -516,6 +536,28 @@ identifiers, a tax breakdown and a verification code TRA's own service answers f
 document has none of them. Fiscalizing FBC's own SaaS sales is a separate workflow under FBC's
 taxpayer identity that has not been built. `peak_receipts.fiscal_status` carries
 `not_applicable` so a screen has to say so rather than a reader having to already know.
+
+**`fiscal_status` describes the sale, never the integration.** This is the one thing to get
+right before FBC fiscalization is built. `NOT_APPLICABLE` must keep meaning *this sale is
+legitimately outside the fiscal workflow* and must never absorb *the integration is off*, *it
+is not configured* or *TRA is unreachable*. If it does, a production configuration fault
+silently produces `NOT_APPLICABLE` on a sale that was legally required to be fiscalized, and it
+reads as a deliberate exemption forever after because nothing distinguishes the two.
+
+Those belong in a separate, FBC-wide concept:
+
+```
+FBC fiscal configuration        this receipt
+────────────────────────        ────────────
+DISABLED                        NOT_APPLICABLE   genuinely exempt
+REQUIRED                        PENDING          owed, not yet issued
+OPTIONAL                        ISSUED           done, see fiscal_reference
+                                FAILED           attempted and refused
+```
+
+Under a `REQUIRED` configuration, `NOT_APPLICABLE` must be unreachable: an outage makes a sale
+`PENDING` or `FAILED`, both of which are states someone is expected to act on.
+`NOT_APPLICABLE` says nobody needs to.
 
 **The two allocators must never meet.** `allocate_document_number` is tenant-scoped and numbers
 a hotel's documents; `allocate_peak_receipt_number` numbers FBC's. A shared sequence would put

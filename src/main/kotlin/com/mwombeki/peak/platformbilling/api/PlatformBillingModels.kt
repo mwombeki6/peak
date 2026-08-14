@@ -256,11 +256,46 @@ data class Receipt(
     /** The fiscal document's own identifier, once one exists. */
     val fiscalReference: String? = null,
 ) {
+    /**
+     * The fiscal state of **this sale**, never the state of FBC's fiscal integration.
+     *
+     * The distinction is not pedantic and is the one thing to get right before FBC
+     * fiscalization is built. If `NOT_APPLICABLE` is ever allowed to absorb "the integration
+     * is off", "it is not configured" or "TRA is unreachable", then a production
+     * configuration fault silently produces `NOT_APPLICABLE` on a sale that was legally
+     * required to be fiscalized — and it will read as a deliberate exemption forever after,
+     * because nothing distinguishes the two.
+     *
+     * Those belong in a separate, FBC-wide concept, roughly:
+     *
+     * ```
+     * FBC fiscal configuration        this receipt
+     * ────────────────────────        ────────────
+     * DISABLED                        NOT_APPLICABLE  this sale is genuinely exempt
+     * REQUIRED                        PENDING         owed, not yet issued
+     * OPTIONAL                        ISSUED          done, see fiscalReference
+     *                                 FAILED          attempted and refused
+     * ```
+     *
+     * Under a `REQUIRED` configuration, `NOT_APPLICABLE` must be unreachable: an outage makes
+     * a sale `PENDING` or `FAILED`, both of which are recoverable states someone is expected
+     * to act on. `NOT_APPLICABLE` says nobody needs to.
+     */
     enum class FiscalStatus {
-        /** No FBC fiscalization workflow applies yet. The honest default. */
+        /**
+         * This sale is legitimately outside the fiscal workflow. Today that is every sale,
+         * because no FBC fiscalization exists — but it must keep meaning "exempt" rather than
+         * drifting into "unavailable".
+         */
         NOT_APPLICABLE,
+
+        /** Fiscalization is owed for this sale and has not completed. */
         PENDING,
+
+        /** A fiscal document exists; [fiscalReference] identifies it. */
         ISSUED,
+
+        /** Fiscalization was attempted and refused. Recoverable, and someone must act. */
         FAILED,
     }
 }
