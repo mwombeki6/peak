@@ -7,6 +7,7 @@ import java.util.UUID
 import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
+import org.springframework.transaction.support.TransactionSynchronizationManager
 
 /**
  * What Peak learned about a guest payment, in one shape whatever told it.
@@ -101,6 +102,16 @@ class GuestPaymentConfirmationService(
      * already applied it, which is the ordinary outcome of a callback and a poll agreeing.
      */
     fun confirm(observation: ProviderPaymentObservation): Boolean {
+        // Stated rather than assumed. This method marks the transaction posted and then posts
+        // the folio payment; outside a transaction the first commits on its own and, if the
+        // second throws, the payment is stranded — the transaction reads 'posted' so the
+        // compare-and-set refuses every retry, while the folio still shows the guest owing.
+        // Both callers happen to wrap it today, which is exactly the kind of thing that stops
+        // being true when a third one is added.
+        require(TransactionSynchronizationManager.isActualTransactionActive()) {
+            "A guest payment must be confirmed inside a transaction, or a failure after the " +
+                "status change strands the payment with the folio still unpaid"
+        }
         require(observation.status == ProviderPaymentObservation.CanonicalStatus.SUCCEEDED) {
             "Only a succeeded observation may confirm a payment, not ${observation.status}"
         }
