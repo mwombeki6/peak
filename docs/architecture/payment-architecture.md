@@ -414,6 +414,20 @@ ACTIVE ──T-14d──► RENEWAL_DUE ──lapse──► GRACE ──7d─�
 | Suspended | Read-only plus four non-negotiables: check out a guest, take a payment, export your data, buy a subscription. |
 | Never | Stranding a guest, or locking a tenant out of paying. |
 
+**"Check out a guest" is more than `checkout.%`.** V91 granted that pattern under suspension
+and stopped there. `FrontDeskService.checkOut` refuses with "Checkout requires an issued
+invoice" before it refuses for anything else, and `billing.invoice` was not allowed — so the
+allowance existed, read correctly, and could not be exercised. Every layer was individually
+right: the guard permitted checkout, no guest-serving module reads commercial state, and the
+list said exactly what it meant. The gap was between what checkout is *called* and what
+checkout *needs*, which only walking the route crosses —
+`SuspendedTenantGuestCheckoutIntegrationTests` found it on its first run.
+
+V108 adds `billing.invoice` and asserts at migration time that every permission a lawful
+departure passes through resolves against the suspended allowances. Widening to `billing.%`
+would have been the wrong fix: voiding invoices and issuing credit notes are not on the path
+out of the building.
+
 Restriction is data — `peak_restriction_allowances`, consulted by `tenant_restriction_permits`,
 which `can_access_module` ANDs in. That places it on every route the guard covers, and on the
 realtime plane for free, since `RealtimeSubscriptionAuthorizer` calls the same function.
