@@ -152,6 +152,14 @@ class AnyProviderCallbackConfirmsIntegrationTests {
             "a progress notification must neither settle the payment nor kill it",
         )
         assertEquals(0, folioPaymentCount(hotel), "nothing may reach the folio yet")
+        assertEquals(
+            0,
+            outboxCount(hotel),
+            "a progress notification must be published to nobody. POS subscribes only to " +
+                "payment.transaction.posted and .failed, so a 'pending' event would find no " +
+                "handler, throw, retry and dead-letter — an operational alert raised by a " +
+                "callback that was working exactly as intended",
+        )
     }
 
     private fun assertConfirmed(hotel: Hotel) {
@@ -176,6 +184,13 @@ class AnyProviderCallbackConfirmsIntegrationTests {
             String::class.java,
             hotel.transactionId,
         )
+
+    private fun outboxCount(hotel: Hotel): Int =
+        jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM outbox_events WHERE aggregate_id = ?",
+            Int::class.java,
+            hotel.transactionId,
+        ) ?: 0
 
     private fun folioPaymentCount(hotel: Hotel): Int =
         jdbcTemplate.queryForObject(

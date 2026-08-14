@@ -306,10 +306,25 @@ class PaymentWebhookService(
             // treated as one: the transaction stays in flight and the status query still runs.
             // Rejecting here would make a provider's progress notification look like an
             // attack, and 'unknown' would strand a payment the provider may yet confirm.
-            ProviderPaymentStatus.PENDING, ProviderPaymentStatus.UNKNOWN -> "pending"
+            ProviderPaymentStatus.PENDING, ProviderPaymentStatus.UNKNOWN -> null
         }
 
         markEvent(eventId, scope.tenantId, "processed", null)
+
+        // A progress notification is recorded and published to nobody. POS and platform
+        // consumers subscribe to outcomes; PosPaymentOutboxHandler.supports() accepts only
+        // payment.transaction.posted and .failed, so publishing a 'pending' event to POS
+        // would find no handler, throw NoOutboxEventHandlerException, retry and dead-letter —
+        // turning a routine callback into an operational alert.
+        if (resultStatus == null) {
+            return PaymentWebhookReceipt(
+                providerEventId = notification.eventKey,
+                transactionId = transaction.id,
+                status = PaymentStatus.fromDatabase(transaction.status),
+                replayed = false,
+            )
+        }
+
         val payload = mapOf(
             "transactionId" to transaction.id,
             "providerAccountId" to providerAccountId,
