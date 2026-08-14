@@ -2,6 +2,7 @@ package com.mwombeki.peak.shared.config
 
 import com.mwombeki.peak.shared.context.RequestContextProperties
 import com.mwombeki.peak.shared.security.HttpSecurityProperties
+import com.mwombeki.peak.shared.security.StepUpProperties
 import com.mwombeki.peak.shared.secrets.SecretReferenceResolver
 import java.util.UUID
 import kotlin.test.Test
@@ -10,6 +11,29 @@ import kotlin.test.assertTrue
 import org.springframework.mock.env.MockEnvironment
 
 class ProductionReadinessValidatorTests {
+
+    /**
+     * Step-up enforcement used to be implied by `allow-header-identity`, which production
+     * already refuses. Separating them would have quietly removed that guarantee unless the
+     * new flag was refused on its own terms, so this asserts it directly.
+     */
+    @Test
+    fun rejectsAssumingCeremonyEvidenceIsUnavailableInProduction() {
+        val error = assertFailsWith<IllegalStateException> {
+            validator(
+                environment = prodEnvironment()
+                    .withProperty("spring.datasource.username", "peak_migrator")
+                    .withProperty("spring.datasource.password", "peak_migrator"),
+                stepUpProperties = StepUpProperties(assumeUnavailable = true),
+            ).afterSingletonsInstantiated()
+        }
+
+        assertTrue(
+            requireNotNull(error.message).contains("step-up.assume-unavailable must be false"),
+            "production must refuse a runtime that skips privileged ceremony checks: " +
+                error.message,
+        )
+    }
 
     @Test
     fun rejectsUnsafeProductionDefaults() {
@@ -339,12 +363,14 @@ class ProductionReadinessValidatorTests {
             allowHeaderIdentity = true,
             allowTrustedJwtIdentityClaims = true,
         ),
+        stepUpProperties: StepUpProperties = StepUpProperties(assumeUnavailable = false),
     ): ProductionReadinessValidator {
         return ProductionReadinessValidator(
             environment = environment,
             runtimeProperties = runtimeProperties,
             httpSecurityProperties = httpSecurityProperties,
             requestContextProperties = requestContextProperties,
+            stepUpProperties = stepUpProperties,
             secretReferenceResolver = SecretReferenceResolver(environment),
         )
     }

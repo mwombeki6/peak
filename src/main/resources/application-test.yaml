@@ -20,6 +20,11 @@ peak:
           - http://localhost
     request-context:
       allow-header-identity: true
+    step-up:
+      # Tests cannot mint a real MFA ceremony, so enforcement is relaxed here. Stated by name
+      # rather than inherited from allow-header-identity, so an integration test can turn it
+      # back on and prove a step-up gate is actually wired into the service that needs it.
+      assume-unavailable: true
   reliability:
     outbox:
       worker:

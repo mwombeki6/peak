@@ -2,6 +2,7 @@ package com.mwombeki.peak.shared.config
 
 import com.mwombeki.peak.shared.context.RequestContextProperties
 import com.mwombeki.peak.shared.security.HttpSecurityProperties
+import com.mwombeki.peak.shared.security.StepUpProperties
 import com.mwombeki.peak.shared.secrets.SecretReferenceResolver
 import org.springframework.beans.factory.SmartInitializingSingleton
 import org.springframework.core.env.Environment
@@ -13,6 +14,7 @@ class ProductionReadinessValidator(
     private val runtimeProperties: PeakRuntimeProperties,
     private val httpSecurityProperties: HttpSecurityProperties,
     private val requestContextProperties: RequestContextProperties,
+    private val stepUpProperties: StepUpProperties,
     private val secretReferenceResolver: SecretReferenceResolver,
 ) : SmartInitializingSingleton {
 
@@ -39,6 +41,13 @@ class ProductionReadinessValidator(
             }
             requireTrue(!requestContextProperties.allowTrustedJwtIdentityClaims) {
                 "peak.security.request-context.allow-trusted-jwt-identity-claims must be false in prod"
+            }
+            // Its own switch since the flag above stopped implying it. Without this check the
+            // separation would have quietly removed a production guarantee rather than
+            // clarified it.
+            requireTrue(!stepUpProperties.assumeUnavailable) {
+                "peak.security.step-up.assume-unavailable must be false in prod; privileged " +
+                    "operations would proceed without a proven ceremony"
             }
             requireTrue(
                 environment.getProperty(
