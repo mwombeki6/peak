@@ -25,12 +25,6 @@ interface PaymentProvider {
 
     fun initiate(command: ProviderCollectionCommand): ProviderCollectionResult
 
-    fun queryStatus(command: ProviderStatusQuery): ProviderStatusResult {
-        throw UnsupportedOperationException(
-            "$providerCode does not support status queries",
-        )
-    }
-
     fun statement(command: ProviderStatementQuery): ProviderStatementResult {
         throw UnsupportedOperationException(
             "$providerCode does not support statement queries",
@@ -67,6 +61,32 @@ interface PaymentProvider {
     }
 }
 
+/**
+ * A provider Peak can ask about a payment, instead of waiting to be told.
+ *
+ * Separate from [PaymentProvider] because it is the difference between a rail that may carry
+ * money and one that may not. Mobile money callbacks are lost routinely — a worker restart, a
+ * network partition, a provider's retry budget running out — and a rail with no way to ask
+ * turns a lost message into a customer who was debited being told they were not.
+ *
+ * This used to be a defaulted method that threw, which made the capability a claim rather than
+ * a fact. `peak_payment_method_capabilities.supports_status_query` said AzamPay had it and the
+ * rail was enabled on that basis while the adapter had no implementation at all. Nothing could
+ * detect it: a migration can only check a row against another row, and reflection cannot see
+ * the difference either — a Spring CGLIB proxy declares every overridable method, and a Kotlin
+ * interface method with a body makes the compiler emit an override into *every* implementing
+ * class, so adapters that inherited the throwing default looked identical to ones that did the
+ * work.
+ *
+ * As a separate interface the question stops needing to be asked. An adapter either satisfies
+ * the type or it does not, `is StatusQueryablePaymentProvider` is the whole check, and an
+ * adapter that loses `queryStatus` stops compiling rather than stops reconciling.
+ */
+@NamedInterface("api")
+interface StatusQueryablePaymentProvider : PaymentProvider {
+    fun queryStatus(command: ProviderStatusQuery): ProviderStatusResult
+}
+
 @NamedInterface("api")
 data class ProviderCollectionCommand(
     val transactionId: UUID,
@@ -99,6 +119,15 @@ data class ProviderCollectionCommand(
     val payerName: String? = null,
     /** The payer's email, likewise required by some providers and by no rail's mechanics. */
     val payerEmail: String? = null,
+    /**
+     * The provider application registration this account authenticates under, for a provider
+     * that authenticates one. Null means the configured default, which is Peak's own.
+     *
+     * AzamPay authenticates appName, clientId and clientSecret together. The last two were
+     * always per-account; this one was global, which meant a property collecting into its own
+     * merchant account would have had its token minted under Peak's authority.
+     */
+    val providerAppName: String? = null,
 )
 
 /**
@@ -173,6 +202,15 @@ data class ProviderStatusQuery(
      * reference would work today and break the day a prefix changes.
      */
     val collectionFlow: String? = null,
+    /**
+     * The provider application registration this account authenticates under, for a provider
+     * that authenticates one. Null means the configured default, which is Peak's own.
+     *
+     * AzamPay authenticates appName, clientId and clientSecret together. The last two were
+     * always per-account; this one was global, which meant a property collecting into its own
+     * merchant account would have had its token minted under Peak's authority.
+     */
+    val providerAppName: String? = null,
 )
 
 @NamedInterface("api")

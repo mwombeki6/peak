@@ -8,6 +8,7 @@ import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderStatusQuery
 import com.mwombeki.peak.payment.api.ProviderStatusResult
 import com.mwombeki.peak.payment.api.ProviderWebhookNotification
+import com.mwombeki.peak.payment.api.StatusQueryablePaymentProvider
 import java.math.BigDecimal
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
@@ -47,7 +48,7 @@ class AzamPayPaymentProvider(
     private val signature: AzamPaySignature,
     private val objectMapper: ObjectMapper,
     private val properties: AzamPayProperties,
-) : PaymentProvider {
+) : StatusQueryablePaymentProvider {
 
     override val providerCode = "azampay"
 
@@ -157,6 +158,10 @@ class AzamPayPaymentProvider(
         val token = tokenProvider.token(
             clientId = command.clientId,
             clientSecret = command.checksumKey,
+            // The property's own registration where it has one. Null falls back to Peak's,
+            // which is right for subscription collection and wrong for a hotel's own account —
+            // hence the column rather than a shared default.
+            appName = command.providerAppName,
         )
         return mapOf(
             "Authorization" to "Bearer $token",
@@ -251,6 +256,10 @@ class AzamPayPaymentProvider(
         val token = tokenProvider.token(
             clientId = command.clientId,
             clientSecret = command.checksumKey,
+            // The property's own registration where it has one. Null falls back to Peak's,
+            // which is right for subscription collection and wrong for a hotel's own account —
+            // hence the column rather than a shared default.
+            appName = command.providerAppName,
         )
         return mapOf(
             "Authorization" to "Bearer $token",

@@ -179,7 +179,8 @@ class PaymentOutboxHandler(
                    pt.amount,
                    pt.currency, pt.status, pp.provider_code, ppa.client_id,
                    ppa.endpoint_url, ppa.api_key_secret_ref,
-                   ppa.checksum_key_secret_ref
+                   ppa.checksum_key_secret_ref,
+                   ppa.provider_app_name
             FROM payment_transactions pt
             JOIN payment_provider_accounts ppa
               ON ppa.tenant_id = pt.tenant_id
@@ -209,6 +210,7 @@ class PaymentOutboxHandler(
                     checksumKeySecretRef = rs.getString(
                         "checksum_key_secret_ref",
                     ),
+                    providerAppName = rs.getString("provider_app_name"),
                 )
             },
             tenantId,
@@ -229,6 +231,7 @@ class PaymentOutboxHandler(
         val clientId: String,
         val apiKeySecretRef: String,
         val checksumKeySecretRef: String,
+        val providerAppName: String?,
     )
 
     private companion object {

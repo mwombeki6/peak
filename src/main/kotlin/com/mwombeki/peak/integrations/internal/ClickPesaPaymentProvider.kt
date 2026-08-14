@@ -10,6 +10,7 @@ import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderStatusQuery
 import com.mwombeki.peak.payment.api.ProviderStatusResult
 import com.mwombeki.peak.payment.api.ProviderWebhookNotification
+import com.mwombeki.peak.payment.api.StatusQueryablePaymentProvider
 import com.mwombeki.peak.shared.outbound.OutboundEndpointPolicy
 import java.math.BigDecimal
 import java.net.URI
@@ -46,7 +47,7 @@ class ClickPesaPaymentProvider(
     private val properties: ClickPesaProperties,
     private val clock: Clock,
     private val meterRegistry: MeterRegistry,
-) : PaymentProvider {
+) : StatusQueryablePaymentProvider {
     override val providerCode = "clickpesa"
     private val httpClient = HttpClient.newBuilder()
         .connectTimeout(properties.connectTimeout)

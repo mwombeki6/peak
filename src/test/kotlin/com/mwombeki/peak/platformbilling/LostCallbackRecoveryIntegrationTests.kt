@@ -8,6 +8,7 @@ import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderStatusQuery
 import com.mwombeki.peak.payment.api.ProviderStatusResult
 import com.mwombeki.peak.payment.api.ProviderWebhookNotification
+import com.mwombeki.peak.payment.api.StatusQueryablePaymentProvider
 import com.mwombeki.peak.platformbilling.api.PlatformBillingWebhookPort
 import com.mwombeki.peak.platformbilling.internal.PaymentStatusReconciliationService
 import com.mwombeki.peak.platformbilling.internal.PurchaseSettlementOutboxHandler
@@ -467,7 +468,7 @@ class LostCallbackRecoveryIntegrationTests {
      * A provider whose answers the test controls, including the ability to not answer at
      * all — which is the case that matters most here.
      */
-    class StubStatusProvider : PaymentProvider {
+    class StubStatusProvider : StatusQueryablePaymentProvider {
         override val providerCode = "stub_recovery_status"
 
         private val status = AtomicReference("pending")

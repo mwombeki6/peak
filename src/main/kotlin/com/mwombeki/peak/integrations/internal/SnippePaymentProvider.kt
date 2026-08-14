@@ -8,6 +8,7 @@ import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderStatusQuery
 import com.mwombeki.peak.payment.api.ProviderStatusResult
 import com.mwombeki.peak.payment.api.ProviderWebhookNotification
+import com.mwombeki.peak.payment.api.StatusQueryablePaymentProvider
 import com.mwombeki.peak.shared.outbound.BoundedJsonHttpClient
 import com.mwombeki.peak.shared.outbound.OutboundEndpointPolicy
 import java.math.BigDecimal
@@ -110,7 +111,7 @@ class SnippePaymentProvider(
     private val objectMapper: ObjectMapper,
     private val properties: SnippeProperties,
     private val clock: Clock,
-) : PaymentProvider {
+) : StatusQueryablePaymentProvider {
 
     override val providerCode = "snippe"
 

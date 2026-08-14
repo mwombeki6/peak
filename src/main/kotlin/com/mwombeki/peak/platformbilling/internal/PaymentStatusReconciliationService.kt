@@ -3,6 +3,7 @@ package com.mwombeki.peak.platformbilling.internal
 import com.mwombeki.peak.payment.api.PaymentProvider
 import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderStatusQuery
+import com.mwombeki.peak.payment.api.StatusQueryablePaymentProvider
 import com.mwombeki.peak.shared.secrets.SecretReferenceResolver
 import io.micrometer.core.instrument.MeterRegistry
 import java.math.BigDecimal
@@ -211,8 +212,16 @@ class PaymentStatusReconciliationService(
         val adapter = adaptersByCode[attempt.provider]
             ?: return StatusOutcome.unknown("no adapter registered for ${attempt.provider}")
 
+        // Unknown rather than an error: this reconciler exists to survive not knowing, and an
+        // adapter that cannot be asked is one more way of not knowing. The attempt keeps its
+        // open slot so nobody is offered a second payment button.
+        val queryable = adapter as? StatusQueryablePaymentProvider
+            ?: return StatusOutcome.unknown(
+                "${attempt.provider} cannot be asked about a payment",
+            )
+
         return try {
-            val result = adapter.queryStatus(
+            val result = queryable.queryStatus(
                 ProviderStatusQuery(
                     internalReference = attempt.internalReference,
                     providerReference = attempt.providerReference,

@@ -5,6 +5,7 @@ import com.mwombeki.peak.billing.api.ConfirmedPaymentRequest
 import com.mwombeki.peak.payment.api.PaymentProvider
 import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderStatusQuery
+import com.mwombeki.peak.payment.api.StatusQueryablePaymentProvider
 import com.mwombeki.peak.reliability.api.ClaimedOutboxEvent
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventCommand
@@ -79,15 +80,24 @@ class PaymentStatusOutboxHandler(
             }
             return
         }
+        // A rail with no way to ask cannot be polled, and saying so is the whole point of
+        // the separate interface. Reaching here means a payment was initiated on a provider
+        // that can only be told about, which the capability registry is supposed to prevent.
         val provider = providersByCode[work.providerCode]
             ?: error("No payment provider for ${work.providerCode}")
-        val result = provider.queryStatus(
+        val queryable = provider as? StatusQueryablePaymentProvider
+            ?: error(
+                "${work.providerCode} cannot be asked about a payment, so a lost callback " +
+                    "on this rail is unrecoverable and it must not have been enabled",
+            )
+        val result = queryable.queryStatus(
             ProviderStatusQuery(
                 internalReference = work.internalReference,
                 endpointUrl = work.endpointUrl,
                 clientId = work.clientId,
                 apiKey = secretResolver.resolve(work.apiKeySecretRef),
                 checksumKey = secretResolver.resolve(work.checksumKeySecretRef),
+                providerAppName = work.providerAppName,
             ),
         )
         require(result.internalReference == work.internalReference) {
@@ -289,7 +299,8 @@ class PaymentStatusOutboxHandler(
                    pt.provider_reference, pt.amount, trim(pt.currency) AS currency,
                    pt.status, pt.expires_at, pp.provider_code, ppa.endpoint_url,
                    ppa.client_id, ppa.api_key_secret_ref,
-                   ppa.checksum_key_secret_ref
+                   ppa.checksum_key_secret_ref,
+                   ppa.provider_app_name
             FROM payment_transactions pt
             JOIN payment_provider_accounts ppa
               ON ppa.tenant_id = pt.tenant_id
@@ -326,6 +337,7 @@ class PaymentStatusOutboxHandler(
                     checksumKeySecretRef = rs.getString(
                         "checksum_key_secret_ref",
                     ),
+                    providerAppName = rs.getString("provider_app_name"),
                 )
             },
             tenantId,
@@ -357,6 +369,7 @@ class PaymentStatusOutboxHandler(
         val clientId: String,
         val apiKeySecretRef: String,
         val checksumKeySecretRef: String,
+        val providerAppName: String?,
     )
 
     private companion object {

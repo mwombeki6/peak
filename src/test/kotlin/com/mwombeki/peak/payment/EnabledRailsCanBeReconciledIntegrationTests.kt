@@ -2,10 +2,9 @@ package com.mwombeki.peak.payment
 
 import com.mwombeki.peak.TestcontainersConfiguration
 import com.mwombeki.peak.payment.api.PaymentProvider
-import java.nio.file.Files
-import java.nio.file.Path
-import kotlin.streams.asSequence
+import com.mwombeki.peak.payment.api.StatusQueryablePaymentProvider
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
@@ -82,6 +81,32 @@ class EnabledRailsCanBeReconciledIntegrationTests {
     }
 
     /**
+     * The capability must stay a real distinction.
+     *
+     * If `PaymentProvider` ever gained a `queryStatus` again — or something made every adapter
+     * satisfy the queryable type — `filterIsInstance` would return everything and the check
+     * above would pass while enforcing nothing. That is precisely how the two reflective
+     * versions of this test failed, so the partition is stated rather than trusted.
+     */
+    @Test
+    fun beingAbleToAskIsStillSomethingAnAdapterHasToEarn() {
+        val queryable = providers.filterIsInstance<StatusQueryablePaymentProvider>()
+            .map { it.providerCode }.toSet()
+        val all = providers.map { it.providerCode }.toSet()
+
+        assertEquals(
+            setOf("clickpesa", "snippe", "azampay"),
+            queryable,
+            "these three carry money and must be answerable about it",
+        )
+        assertTrue(
+            (all - queryable).isNotEmpty(),
+            "no adapter is left that cannot be queried, so this test can no longer tell the " +
+                "difference between a real capability and a universal one: $all",
+        )
+    }
+
+    /**
      * The claim only ever gets stronger by accident, so this catches the reverse mistake: an
      * adapter that gained a status query while its capability row still says it has none, which
      * would keep a working rail switched off for no reason anyone would think to look for.
@@ -105,32 +130,24 @@ class EnabledRailsCanBeReconciledIntegrationTests {
     }
 
     /**
-     * Which adapters actually implement `queryStatus`, read from their source.
+     * Which adapters can be asked, answered by the type system.
      *
-     * Reflection cannot answer this, which took two wrong versions of this test to establish.
-     * `javaClass` is a CGLIB proxy that declares every overridable method. `getTargetClass`
-     * unwraps that and is still wrong, because `PaymentProvider.queryStatus` is a Kotlin
-     * interface method with a body, so the compiler emits an override into every implementing
-     * class — `contract_mock` and `http_gateway` "declared" it too. Both versions passed while
-     * the rail they were written to catch was broken.
+     * This was a source scan, because the two obvious reflective versions both lied.
+     * `javaClass` is a CGLIB proxy that declares every overridable method; `getTargetClass`
+     * unwraps that and is still wrong, because a Kotlin interface method *with a body* makes
+     * the compiler emit an override into every implementing class — `contract_mock` and
+     * `http_gateway` "declared" `queryStatus` too. Both versions passed while the rail they
+     * were written to catch was broken.
      *
-     * Calling it would answer the question, since the default throws immediately. But an
-     * adapter that does implement it would make a real HTTP request to a payment provider
-     * from a test run, which is not a thing a test suite should do.
+     * Splitting the capability into its own interface removes the question rather than
+     * answering it more cleverly. `is StatusQueryablePaymentProvider` cannot be fooled by a
+     * proxy or by a compiler-emitted override, and an adapter that loses `queryStatus` now
+     * fails to compile instead of failing to reconcile.
      */
     private fun providersImplementingStatusQuery(): Set<String> =
-        Files.walk(Path.of("src/main/kotlin/com/mwombeki/peak/integrations")).use { paths ->
-            paths.asSequence()
-                .filter { it.toString().endsWith(".kt") }
-                .map { Files.readString(it) }
-                .filter { it.contains("override fun queryStatus") }
-                .mapNotNull { PROVIDER_CODE.find(it)?.groupValues?.get(1) }
-                .toSet()
-        }
-
-    private companion object {
-        val PROVIDER_CODE = Regex("""override val providerCode\s*=\s*"([^"]+)"""")
-    }
+        providers.filterIsInstance<StatusQueryablePaymentProvider>()
+            .map { it.providerCode }
+            .toSet()
 
     private data class Rail(
         val provider: String,

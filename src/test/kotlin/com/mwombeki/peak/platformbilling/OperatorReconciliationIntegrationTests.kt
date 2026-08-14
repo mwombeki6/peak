@@ -8,6 +8,7 @@ import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderStatusQuery
 import com.mwombeki.peak.payment.api.ProviderStatusResult
 import com.mwombeki.peak.payment.api.ProviderWebhookNotification
+import com.mwombeki.peak.payment.api.StatusQueryablePaymentProvider
 import com.mwombeki.peak.platformbilling.api.EvidenceType
 import com.mwombeki.peak.platformbilling.api.PlatformBillingAdminPort
 import com.mwombeki.peak.platformbilling.api.ResolutionKind
@@ -520,7 +521,7 @@ class OperatorReconciliationIntegrationTests {
         val amount: BigDecimal,
     )
 
-    class StubOperatorProvider : PaymentProvider {
+    class StubOperatorProvider : StatusQueryablePaymentProvider {
         override val providerCode = "stub_operator"
 
         private val status = AtomicReference("pending")

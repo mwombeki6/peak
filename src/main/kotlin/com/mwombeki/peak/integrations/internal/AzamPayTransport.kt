@@ -6,7 +6,7 @@ import java.net.URI
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.ConcurrentHashMap
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.stereotype.Component
 import tools.jackson.databind.ObjectMapper
@@ -99,6 +99,18 @@ class JdkAzamPayHttpTransport(
  * Cached because a token is valid for hours and minting one per checkout would add a round
  * trip to the customer's wait, and because AzamPay rate-limits the authenticator. Renewed
  * early by [AzamPayProperties.tokenRefreshSkew] so a token never expires mid-flight.
+ *
+ * **One entry per merchant identity, not one entry.** Peak collects into its own AzamPay
+ * account for subscriptions and — once each property carries its own merchant registration —
+ * into a different account per hotel. A single-entry cache was never able to serve the wrong
+ * hotel's token, because it compared the client id before using it, but it re-minted on every
+ * alternation between two properties and a rotation on one hotel's credentials discarded every
+ * other hotel's live token. Neither is a security defect; both make the isolation an accident
+ * of one comparison rather than a property of the design.
+ *
+ * The key is the identity AzamPay itself authenticates: the authenticator it was minted
+ * against, the registered application, and the client. Nothing else can change which token
+ * comes back, and a token minted for one identity is unreachable from another.
  */
 @Component
 class AzamPayTokenProvider(
@@ -107,39 +119,60 @@ class AzamPayTokenProvider(
     private val properties: AzamPayProperties,
     private val clock: Clock,
 ) {
-    private val cached = AtomicReference<CachedToken?>(null)
+    private val cached = ConcurrentHashMap<MerchantIdentity, CachedToken>()
 
-    fun token(clientId: String, clientSecret: String): String {
+    /**
+     * @param appName the merchant's own AzamPay application registration. Defaults to the
+     *   configured one, which is Peak's; a property collecting into its own account must pass
+     *   its own, because a token minted under Peak's registration carries Peak's authority.
+     */
+    fun token(clientId: String, clientSecret: String, appName: String? = null): String {
+        val identity = MerchantIdentity(
+            authenticatorUrl = properties.authenticatorUrl,
+            appName = appName?.trim().orEmpty().ifEmpty { properties.appName },
+            clientId = clientId,
+        )
         val now = clock.instant()
-        cached.get()?.let { current ->
-            if (current.matches(clientId) && current.usableAt(now, properties.tokenRefreshSkew)) {
+        cached[identity]?.let { current ->
+            if (current.usableAt(now, properties.tokenRefreshSkew)) {
                 return current.accessToken
             }
         }
 
-        val minted = mint(clientId, clientSecret)
-        cached.set(minted)
+        val minted = mint(identity, clientSecret)
+        cached[identity] = minted
         return minted.accessToken
     }
 
-    /** Drops the cached token so the next call mints a fresh one. */
-    fun invalidate() {
-        cached.set(null)
+    /**
+     * Drops one merchant's token. Scoped so rotating one hotel's credentials cannot force
+     * every other hotel to re-mint against a rate-limited authenticator.
+     */
+    fun invalidate(clientId: String, appName: String? = null) {
+        cached.keys.removeIf {
+            it.clientId == clientId &&
+                (appName == null || it.appName == appName.trim())
+        }
     }
 
-    private fun mint(clientId: String, clientSecret: String): CachedToken {
-        require(properties.appName.isNotBlank()) {
-            "peak.payment.providers.azampay.app-name must be configured"
+    private fun mint(identity: MerchantIdentity, clientSecret: String): CachedToken {
+        require(identity.appName.isNotBlank()) {
+            "An AzamPay app name is required; configure " +
+                "peak.payment.providers.azampay.app-name for Peak's own account, or carry " +
+                "the property's registered app name on the command"
         }
-        val endpoint = azamPayEndpoint(properties.authenticatorUrl, "/AppRegistration/GenerateToken")
+        val endpoint = azamPayEndpoint(
+            identity.authenticatorUrl,
+            "/AppRegistration/GenerateToken",
+        )
         val response = transport.exchange(
             method = "POST",
             endpoint = endpoint,
             headers = emptyMap(),
             payload = objectMapper.writeValueAsString(
                 mapOf(
-                    "appName" to properties.appName,
-                    "clientId" to clientId,
+                    "appName" to identity.appName,
+                    "clientId" to identity.clientId,
                     "clientSecret" to clientSecret,
                 ),
             ),
@@ -159,16 +192,23 @@ class AzamPayTokenProvider(
             ?.let { runCatching { Instant.parse(it) }.getOrNull() }
             ?: clock.instant().plus(FALLBACK_TOKEN_LIFETIME)
 
-        return CachedToken(clientId = clientId, accessToken = accessToken, expiresAt = expiresAt)
+        return CachedToken(accessToken = accessToken, expiresAt = expiresAt)
     }
 
-    private data class CachedToken(
+    /**
+     * Exactly what AzamPay authenticates. Anything absent from this cannot change which token
+     * comes back, and anything present in it must not share a cache entry.
+     */
+    private data class MerchantIdentity(
+        val authenticatorUrl: String?,
+        val appName: String,
         val clientId: String,
+    )
+
+    private data class CachedToken(
         val accessToken: String,
         val expiresAt: Instant,
     ) {
-        fun matches(candidate: String): Boolean = clientId == candidate
-
         fun usableAt(now: Instant, skew: Duration): Boolean = now.isBefore(expiresAt.minus(skew))
     }
 

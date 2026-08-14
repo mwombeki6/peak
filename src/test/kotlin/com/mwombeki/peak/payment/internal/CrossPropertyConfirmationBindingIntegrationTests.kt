@@ -1,6 +1,8 @@
 package com.mwombeki.peak.payment.internal
 
 import com.mwombeki.peak.TestcontainersConfiguration
+import com.mwombeki.peak.billing.api.BillingPort
+import com.mwombeki.peak.billing.api.ConfirmedPaymentRequest
 import com.mwombeki.peak.shared.context.RequestContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
@@ -52,6 +54,7 @@ class CrossPropertyConfirmationBindingIntegrationTests {
     @Autowired private lateinit var requestContextHolder: RequestContextHolder
     @Autowired private lateinit var jdbcTemplate: JdbcTemplate
     @Autowired private lateinit var transactionTemplate: TransactionTemplate
+    @Autowired private lateinit var billingPort: BillingPort
 
     @AfterTest
     fun clearContext() {
@@ -217,22 +220,22 @@ class CrossPropertyConfirmationBindingIntegrationTests {
      * than derived from the observation.
      */
     private fun confirmInTransaction(observation: ProviderPaymentObservation): Boolean {
-        requestContextHolder.set(
-            RequestContext(
-                identity = RequestIdentity.Public(
-                    tenantId = observation.tenantId,
-                    propertyId = observation.propertyId,
-                    correlationId = "corr-${observation.transactionId}",
-                ),
-                correlationId = "corr-${observation.transactionId}",
-                idempotencyKey = null,
-                httpMethod = "POST",
-                requestPath = "/api/payments/webhooks/clickpesa/accounts/" +
-                    observation.providerAccountId,
-            ),
-        )
+        requestContextHolder.set(contextFor(observation))
         return transactionTemplate.execute { confirmationService.confirm(observation) } == true
     }
+
+    private fun contextFor(observation: ProviderPaymentObservation) = RequestContext(
+        identity = RequestIdentity.Public(
+            tenantId = observation.tenantId,
+            propertyId = observation.propertyId,
+            correlationId = "corr-${observation.transactionId}",
+        ),
+        correlationId = "corr-${observation.transactionId}",
+        idempotencyKey = null,
+        httpMethod = "POST",
+        requestPath = "/api/payments/webhooks/clickpesa/accounts/" +
+            observation.providerAccountId,
+    )
 
     /**
      * A refusal must leave the payment collectable. If a rejected observation moved the row
