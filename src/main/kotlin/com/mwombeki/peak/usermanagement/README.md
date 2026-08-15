@@ -97,6 +97,8 @@ Tenant user lifecycle and identity-link revocation routes also require `tenant.u
 
 Tenant invitations only create new tenant users. They cannot reactivate or relink an existing active, invited, locked, or disabled account; existing accounts must use the lifecycle and identity-link administration routes. Acceptance revalidates that the invited dynamic role is still active and assignable.
 
+Frontline staff are not invited through Keycloak. `POST /api/v1/tenants/{tenantId}/staff` (`tenant.users.manage`, strong session) creates a user with no email, allocates `staff_number`, assigns an operational property role, and issues a PIN activation. When `phoneNumber` is present the secret is enqueued as SMS (`staff.credential.activation.issued`); when it is absent the one-time secret is returned once so a manager can hand it over in person. `POST /api/v1/staff/credentials/activate` is public: staff number, secret, and the PIN the staff member chose. A role that contains any strong permission is refused — that person still needs an email invitation.
+
 ## Tenant-Managed Property Access API
 
 These routes are tenant-scoped and validate that the property belongs to the tenant. Reads require `tenant.properties.roles.view`; mutations and assignments require `tenant.properties.manage_access`.

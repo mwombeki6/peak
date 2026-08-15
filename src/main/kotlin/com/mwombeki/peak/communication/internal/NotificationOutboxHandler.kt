@@ -376,6 +376,41 @@ class NotificationDeliveryProcessor(
     @Suppress("UNCHECKED_CAST")
     private fun ClaimedOutboxEvent.notificationPayload(): PendingNotificationPayload {
         val payload = objectMapper.readValue(this.payload, Map::class.java) as Map<String, Any?>
+        if (eventType == STAFF_ACTIVATION_EVENT) {
+            val userId = requireNotNull(aggregateId) {
+                "Staff activation aggregate id is required"
+            }
+            val secretEnvelope = payload["secretEnvelope"]?.toString()?.normalizedRequired("secretEnvelope")
+                ?: throw IllegalArgumentException("Staff activation secret envelope is required")
+            val secret = secretEnvelopeService.decrypt(
+                envelope = secretEnvelope,
+                associatedData = userId.toString(),
+            )
+            val staffNumber = payload["staffNumber"]?.toString()?.normalizedRequired("staffNumber")
+                ?: throw IllegalArgumentException("Staff number is required")
+            val fullName = payload["fullName"]?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+                ?: "Peak staff"
+            val expiresAt = payload["expiresAt"]?.toString()?.normalizedRequired("expiresAt")
+                ?: throw IllegalArgumentException("Staff activation expiry is required")
+            return PendingNotificationPayload(
+                channel = "sms",
+                recipient = payload["phoneNumber"]?.toString()?.normalizedRequired("phoneNumber"),
+                contactChannelId = null,
+                purpose = null,
+                subject = null,
+                content = buildString {
+                    append("Hello ")
+                    append(fullName)
+                    append(". Your Peak staff number is ")
+                    append(staffNumber)
+                    append(". Activation code: ")
+                    append(secret)
+                    append(". Expires ")
+                    append(expiresAt)
+                    append(".")
+                },
+            )
+        }
         if (eventType == INVITATION_EVENT) {
             val invitationId = requireNotNull(aggregateId) {
                 "Invitation aggregate id is required"
@@ -592,7 +627,12 @@ class NotificationDeliveryProcessor(
         private val ALLOWED_CHANNELS = setOf("email", "sms", "whatsapp", "voice_phone")
         private const val CHANNEL_VERIFICATION_EVENT = "communication.channel.verification.requested"
         private const val INVITATION_EVENT = "tenant.user.invited"
-        private val DIRECT_RECIPIENT_EVENTS = setOf(CHANNEL_VERIFICATION_EVENT, INVITATION_EVENT)
+        private const val STAFF_ACTIVATION_EVENT = "staff.credential.activation.issued"
+        private val DIRECT_RECIPIENT_EVENTS = setOf(
+            CHANNEL_VERIFICATION_EVENT,
+            INVITATION_EVENT,
+            STAFF_ACTIVATION_EVENT,
+        )
         private const val POLICY_BLOCKED_MESSAGE =
             "Delivery blocked because the contact channel or consent is no longer active"
         private const val MAX_ERROR_MESSAGE_LENGTH = 1000

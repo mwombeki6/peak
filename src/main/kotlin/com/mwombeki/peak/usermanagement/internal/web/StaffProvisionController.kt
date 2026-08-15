@@ -1,0 +1,138 @@
+package com.mwombeki.peak.usermanagement.internal.web
+
+import com.mwombeki.peak.shared.exception.ApiProblemFactory
+import com.mwombeki.peak.usermanagement.internal.application.StaffProvisionConflictException
+import com.mwombeki.peak.usermanagement.internal.application.StaffProvisionInProgressException
+import com.mwombeki.peak.usermanagement.internal.application.StaffProvisionService
+import jakarta.validation.Valid
+import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.NotNull
+import java.net.URI
+import java.time.Instant
+import java.util.UUID
+import org.springframework.http.HttpStatus
+import org.springframework.http.ProblemDetail
+import org.springframework.http.ResponseEntity
+import org.springframework.web.bind.annotation.ExceptionHandler
+import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RestController
+
+@RestController
+@RequestMapping("/api/v1")
+class StaffProvisionController(
+    private val staff: StaffProvisionService,
+    private val apiProblemFactory: ApiProblemFactory,
+) {
+    @PostMapping("/tenants/{tenantId}/staff")
+    fun provision(
+        @PathVariable tenantId: UUID,
+        @Valid @RequestBody request: ProvisionStaffHttpRequest,
+    ): ResponseEntity<ProvisionStaffHttpResponse> {
+        val receipt = staff.provision(
+            StaffProvisionService.ProvisionCommand(
+                tenantId = tenantId,
+                fullName = request.fullName,
+                phoneNumber = request.phoneNumber,
+                propertyId = request.propertyId,
+                propertyRoleId = request.propertyRoleId,
+            ),
+        )
+        return ResponseEntity
+            .created(URI.create("/api/v1/tenants/$tenantId/staff/${receipt.userId}"))
+            .body(
+                ProvisionStaffHttpResponse(
+                    userId = receipt.userId,
+                    tenantId = receipt.tenantId,
+                    staffNumber = receipt.staffNumber,
+                    phoneNumber = receipt.phoneNumber,
+                    propertyId = receipt.propertyId,
+                    propertyRoleId = receipt.propertyRoleId,
+                    activationSecret = receipt.activationSecret,
+                    activationExpiresAt = receipt.activationExpiresAt,
+                    replayed = receipt.replayed,
+                ),
+            )
+    }
+
+    @PostMapping("/staff/credentials/activate")
+    fun activate(
+        @Valid @RequestBody request: ActivateStaffCredentialHttpRequest,
+    ): ResponseEntity<Void> {
+        try {
+            staff.activate(
+                StaffProvisionService.ActivateCommand(
+                    tenantId = request.tenantId,
+                    staffNumber = request.staffNumber,
+                    secret = request.secret,
+                    pin = request.pin,
+                ),
+            )
+        } catch (ex: IllegalArgumentException) {
+            throw StaffActivationRejectedException()
+        }
+        return ResponseEntity.ok().build()
+    }
+
+    @ExceptionHandler(StaffProvisionConflictException::class)
+    fun handleConflict(ex: StaffProvisionConflictException): ResponseEntity<ProblemDetail> {
+        return apiProblemFactory.response(HttpStatus.CONFLICT, "Staff provision conflict", ex.safeDetail())
+    }
+
+    @ExceptionHandler(StaffProvisionInProgressException::class)
+    fun handleInProgress(ex: StaffProvisionInProgressException): ResponseEntity<ProblemDetail> {
+        return apiProblemFactory.response(HttpStatus.CONFLICT, "Staff provision in progress", ex.safeDetail())
+    }
+
+    @ExceptionHandler(StaffActivationRejectedException::class)
+    fun handleActivationRejected(
+        @Suppress("UNUSED_PARAMETER") ex: StaffActivationRejectedException,
+    ): ResponseEntity<ProblemDetail> {
+        return apiProblemFactory.response(
+            HttpStatus.BAD_REQUEST,
+            "Staff activation rejected",
+            "Activation was not accepted",
+        )
+    }
+
+    @ExceptionHandler(IllegalArgumentException::class)
+    fun handleInvalid(ex: IllegalArgumentException): ResponseEntity<ProblemDetail> {
+        return apiProblemFactory.response(
+            HttpStatus.BAD_REQUEST,
+            "Invalid staff request",
+            ex.message ?: "Staff request is invalid",
+        )
+    }
+
+    private fun RuntimeException.safeDetail(): String = message ?: "Staff request was not accepted"
+}
+
+data class ProvisionStaffHttpRequest(
+    @field:NotBlank val fullName: String,
+    val phoneNumber: String? = null,
+    @field:NotNull val propertyId: UUID,
+    @field:NotNull val propertyRoleId: UUID,
+)
+
+data class ProvisionStaffHttpResponse(
+    val userId: UUID,
+    val tenantId: UUID,
+    val staffNumber: String,
+    val phoneNumber: String?,
+    val propertyId: UUID,
+    val propertyRoleId: UUID,
+    val activationSecret: String?,
+    val activationExpiresAt: Instant,
+    val replayed: Boolean,
+)
+
+data class ActivateStaffCredentialHttpRequest(
+    @field:NotNull val tenantId: UUID,
+    @field:NotBlank val staffNumber: String,
+    @field:NotBlank val secret: String,
+    @field:NotBlank val pin: String,
+)
+
+class StaffActivationRejectedException : RuntimeException()
