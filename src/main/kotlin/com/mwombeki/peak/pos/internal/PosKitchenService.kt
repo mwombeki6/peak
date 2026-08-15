@@ -15,7 +15,8 @@ import com.mwombeki.peak.pos.api.PosNotFoundException
 import com.mwombeki.peak.pos.api.PosVoidDisposition
 import com.mwombeki.peak.pos.api.SendPosOrderRequest
 import com.mwombeki.peak.pos.api.VoidPosOrderItemRequest
-import com.mwombeki.peak.realtime.api.BroadcastEventRequest
+import com.mwombeki.peak.realtime.api.RealtimeEventRequest
+import com.mwombeki.peak.realtime.api.RealtimeEventTypes
 import com.mwombeki.peak.realtime.api.RealtimePort
 import java.math.BigDecimal
 import java.sql.ResultSet
@@ -109,17 +110,52 @@ class PosKitchenService(
                 snapshot.consumedQuantity, snapshot.unitCost, snapshot.stockMovementId,
             )
         }
-        ticket(actor.tenantId, propertyId, ticketId).also {
-            commands.recordSideEffects(
-                actor, propertyId, "pos.kitchen_ticket.created", KITCHEN_TICKETS,
-                ticketId, mapOf(
-                    "ticketId" to ticketId, "orderId" to orderId,
-                    "itemCount" to items.size, "consumptionBatchId" to consumed.batchId,
-                ), key,
-            )
-            broadcast(actor.tenantId, propertyId, "KITCHEN_TICKET_CREATED", it)
+ticket(actor.tenantId, propertyId, ticketId).also { created ->
+                commands.recordSideEffects(
+                    actor, propertyId, "pos.kitchen_ticket.created", KITCHEN_TICKETS,
+                    ticketId, mapOf(
+                        "ticketId" to ticketId, "orderId" to orderId,
+                        "itemCount" to items.size, "consumptionBatchId" to consumed.batchId,
+                    ), key,
+                )
+                realtime.ifAvailable {
+                    it.broadcastRealtimeEvent(
+                        RealtimeEventRequest(
+                            tenantId = actor.tenantId,
+                            propertyId = propertyId,
+                            outletId = order.outletId,
+                            eventType = RealtimeEventTypes.POS_ORDER_SENT,
+                            aggregateType = RealtimeEventTypes.AGGREGATE_POS_ORDER,
+                            aggregateId = orderId,
+                            aggregateVersion = orderVersion(actor.tenantId, orderId),
+                            payload = mapOf(
+                                "orderId" to orderId,
+                                "ticketId" to ticketId,
+                                "itemCount" to items.size,
+                            ),
+                        ),
+                    )
+                    it.broadcastRealtimeEvent(
+                        RealtimeEventRequest(
+                            tenantId = actor.tenantId,
+                            propertyId = propertyId,
+                            outletId = order.outletId,
+                            eventType = RealtimeEventTypes.KITCHEN_TICKET_CREATED,
+                            aggregateType = RealtimeEventTypes.AGGREGATE_KITCHEN_TICKET,
+                            aggregateId = ticketId,
+                            aggregateVersion = 0,
+                            payload = mapOf(
+                                "ticketId" to ticketId,
+                                "orderId" to orderId,
+                                "ticketNumber" to created.ticketNumber,
+                                "itemCount" to items.size,
+                                "status" to created.status.name.lowercase(),
+                            ),
+                        ),
+                    )
+                }
+            }
         }
-    }
 
     fun voidItem(
         propertyId: UUID,
@@ -199,7 +235,23 @@ class PosKitchenService(
                     "disposition" to disposition, "returnBatchId" to returnBatch,
                 ), key,
             )
-            broadcast(actor.tenantId, propertyId, "POS_ITEM_VOIDED", it)
+            realtime.ifAvailable {
+                it.broadcastRealtimeEvent(
+                    RealtimeEventRequest(
+                        tenantId = actor.tenantId,
+                        propertyId = propertyId,
+                        outletId = order.outletId,
+                        eventType = RealtimeEventTypes.POS_ORDER_ITEM_VOIDED,
+                        aggregateType = RealtimeEventTypes.AGGREGATE_POS_ORDER,
+                        aggregateId = orderId,
+                        aggregateVersion = orderVersion(actor.tenantId, orderId),
+                        payload = mapOf(
+                            "orderId" to orderId, "itemId" to itemId,
+                            "disposition" to disposition, "returnBatchId" to returnBatch,
+                        ),
+                    ),
+                )
+            }
         }
     }
 
@@ -293,7 +345,24 @@ class PosKitchenService(
                 actor, propertyId, "pos.kitchen_ticket.$target", KITCHEN_TICKETS,
                 ticketId, mapOf("ticketId" to ticketId, "status" to target), key,
             )
-            broadcast(actor.tenantId, propertyId, "KITCHEN_TICKET_UPDATED", it)
+            realtime.ifAvailable {
+                it.broadcastRealtimeEvent(
+                    RealtimeEventRequest(
+                        tenantId = actor.tenantId,
+                        propertyId = propertyId,
+                        outletId = current.outletId,
+                        eventType = "pos.kitchen_ticket.$target",
+                        aggregateType = RealtimeEventTypes.AGGREGATE_KITCHEN_TICKET,
+                        aggregateId = ticketId,
+                        aggregateVersion = ticketVersion(actor.tenantId, ticketId),
+                        payload = mapOf(
+                            "ticketId" to ticketId,
+                            "orderId" to current.orderId,
+                            "status" to target,
+                        ),
+                    ),
+                )
+            }
         }
     }
 
@@ -442,12 +511,22 @@ class PosKitchenService(
         )
     }
 
-    private fun broadcast(tenantId: UUID, propertyId: UUID, type: String, value: Any) {
-        @Suppress("UNCHECKED_CAST")
-        val data = mapper.convertValue(value, Map::class.java) as Map<String, Any?>
-        realtime.ifAvailable {
-            it.broadcastLiveEvent(BroadcastEventRequest(tenantId, propertyId, type, data))
-        }
+    private fun orderVersion(tenantId: UUID, orderId: UUID): Long {
+        return jdbc.queryForObject(
+            "SELECT version FROM pos_orders WHERE tenant_id = ? AND id = ?",
+            Long::class.java,
+            tenantId,
+            orderId,
+        ) ?: 0L
+    }
+
+    private fun ticketVersion(tenantId: UUID, ticketId: UUID): Long {
+        return jdbc.queryForObject(
+            "SELECT version FROM kitchen_tickets WHERE tenant_id = ? AND id = ?",
+            Long::class.java,
+            tenantId,
+            ticketId,
+        ) ?: 0L
     }
 
     private fun requireStatus(ticket: KitchenTicketResponse, expected: KitchenTicketStatus) {

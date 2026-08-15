@@ -40,6 +40,9 @@ import com.mwombeki.peak.reliability.api.IdempotencyReservation
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
+import com.mwombeki.peak.realtime.api.RealtimeEventRequest
+import com.mwombeki.peak.realtime.api.RealtimeEventTypes
+import com.mwombeki.peak.realtime.api.RealtimePort
 import com.mwombeki.peak.shared.context.TenantActor
 import com.mwombeki.peak.shared.context.TenantRequestContext
 import com.mwombeki.peak.shared.outbound.OutboundEndpointPolicy
@@ -52,6 +55,7 @@ import java.sql.Timestamp
 import java.time.LocalDate
 import java.util.UUID
 import io.micrometer.core.instrument.MeterRegistry
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.core.env.Environment
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.JdbcTemplate
@@ -73,6 +77,7 @@ class PaymentService(
     private val outboundEndpointPolicy: OutboundEndpointPolicy,
     private val meterRegistry: MeterRegistry,
     private val environment: Environment,
+    private val realtime: ObjectProvider<RealtimePort>,
     adapters: List<PaymentProvider>,
 ) : PaymentPort, PaymentStatusPort {
     private val providerCodes = adapters.mapTo(mutableSetOf()) { it.providerCode }
@@ -806,6 +811,26 @@ class PaymentService(
                         ),
                     ),
                 )
+            }
+            .also {
+                realtime.ifAvailable {
+                    it.broadcastRealtimeEvent(
+                        RealtimeEventRequest(
+                            tenantId = actor.tenantId,
+                            propertyId = propertyId,
+                            eventType = RealtimeEventTypes.PAYMENT_CREATED,
+                            aggregateType = RealtimeEventTypes.AGGREGATE_PAYMENT_TRANSACTION,
+                            aggregateId = transactionId,
+                            aggregateVersion = 0,
+                            payload = mapOf(
+                                "transactionId" to transactionId,
+                                "posOrderId" to request.posOrderId,
+                                "providerAccountId" to request.providerAccountId,
+                                "amount" to amount,
+                            ),
+                        ),
+                    )
+                }
             }
     }
 

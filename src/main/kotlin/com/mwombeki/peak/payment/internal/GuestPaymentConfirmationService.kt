@@ -2,9 +2,13 @@ package com.mwombeki.peak.payment.internal
 
 import com.mwombeki.peak.billing.api.BillingPort
 import com.mwombeki.peak.billing.api.ConfirmedPaymentRequest
+import com.mwombeki.peak.realtime.api.RealtimeEventRequest
+import com.mwombeki.peak.realtime.api.RealtimeEventTypes
+import com.mwombeki.peak.realtime.api.RealtimePort
 import java.math.BigDecimal
 import java.util.UUID
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionSynchronizationManager
@@ -94,6 +98,7 @@ data class ProviderPaymentObservation(
 class GuestPaymentConfirmationService(
     private val jdbcTemplate: JdbcTemplate,
     private val billingPort: BillingPort,
+    private val realtime: ObjectProvider<RealtimePort>,
 ) {
     private val log = LoggerFactory.getLogger(GuestPaymentConfirmationService::class.java)
 
@@ -186,6 +191,26 @@ class GuestPaymentConfirmationService(
             observation.provider,
             observation.source.label,
         )
+        realtime.ifAvailable {
+            it.broadcastRealtimeEvent(
+                RealtimeEventRequest(
+                    tenantId = observation.tenantId,
+                    propertyId = observation.propertyId,
+                    eventType = RealtimeEventTypes.PAYMENT_SUCCEEDED,
+                    aggregateType = RealtimeEventTypes.AGGREGATE_PAYMENT_TRANSACTION,
+                    aggregateId = observation.transactionId,
+                    aggregateVersion = transactionVersion(observation.tenantId, observation.transactionId),
+                    payload = mapOf(
+                        "transactionId" to observation.transactionId,
+                        "provider" to observation.provider,
+                        "amount" to observation.amount,
+                        "posOrderId" to observation.posOrderId,
+                        "folioId" to observation.folioId,
+                        "providerReference" to observation.providerReference,
+                    ),
+                ),
+            )
+        }
         return true
     }
 
@@ -259,7 +284,7 @@ class GuestPaymentConfirmationService(
      * as the other is how a guest is asked to pay twice.
      */
     fun reject(observation: ProviderPaymentObservation, reason: String): Boolean {
-        return jdbcTemplate.update(
+        val applied = jdbcTemplate.update(
             """
             UPDATE payment_transactions
             SET status = 'failed',
@@ -282,5 +307,37 @@ class GuestPaymentConfirmationService(
             observation.tenantId,
             observation.transactionId,
         ) == 1
+
+        if (applied) {
+            realtime.ifAvailable {
+                it.broadcastRealtimeEvent(
+                    RealtimeEventRequest(
+                        tenantId = observation.tenantId,
+                        propertyId = observation.propertyId,
+                        eventType = RealtimeEventTypes.PAYMENT_FAILED,
+                        aggregateType = RealtimeEventTypes.AGGREGATE_PAYMENT_TRANSACTION,
+                        aggregateId = observation.transactionId,
+                        aggregateVersion = transactionVersion(observation.tenantId, observation.transactionId),
+                        payload = mapOf(
+                            "transactionId" to observation.transactionId,
+                            "provider" to observation.provider,
+                            "reason" to reason,
+                            "posOrderId" to observation.posOrderId,
+                            "folioId" to observation.folioId,
+                        ),
+                    ),
+                )
+            }
+        }
+        return applied
+    }
+
+    private fun transactionVersion(tenantId: UUID, transactionId: UUID): Long? {
+        return jdbcTemplate.queryForObject(
+            "SELECT status_version FROM payment_transactions WHERE tenant_id = ? AND id = ?",
+            Long::class.java,
+            tenantId,
+            transactionId,
+        )
     }
 }

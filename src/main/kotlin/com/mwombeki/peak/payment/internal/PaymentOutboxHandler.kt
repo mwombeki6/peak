@@ -3,6 +3,9 @@ package com.mwombeki.peak.payment.internal
 import com.mwombeki.peak.payment.api.PaymentProvider
 import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderCollectionCommand
+import com.mwombeki.peak.realtime.api.RealtimeEventRequest
+import com.mwombeki.peak.realtime.api.RealtimeEventTypes
+import com.mwombeki.peak.realtime.api.RealtimePort
 import com.mwombeki.peak.reliability.api.ClaimedOutboxEvent
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventHandler
@@ -17,6 +20,7 @@ import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
 import org.springframework.transaction.support.TransactionTemplate
@@ -30,6 +34,7 @@ class PaymentOutboxHandler(
     private val secretResolver: SecretReferenceResolver,
     private val meterRegistry: MeterRegistry,
     private val outboxPort: OutboxPort,
+    private val realtime: ObjectProvider<RealtimePort>,
 ) : OutboxEventHandler {
     private val adaptersByCode = adapters.associateBy { it.providerCode }
 
@@ -156,6 +161,31 @@ class PaymentOutboxHandler(
                 tenantId,
                 work.transactionId,
             )
+            realtime.ifAvailable {
+                it.broadcastRealtimeEvent(
+                    RealtimeEventRequest(
+                        tenantId = tenantId,
+                        propertyId = requireNotNull(event.propertyId) {
+                            "Payment collection events must be property scoped"
+                        },
+                        eventType = RealtimeEventTypes.PAYMENT_PENDING,
+                        aggregateType = RealtimeEventTypes.AGGREGATE_PAYMENT_TRANSACTION,
+                        aggregateId = work.transactionId,
+                        aggregateVersion = jdbcTemplate.queryForObject(
+                            "SELECT status_version FROM payment_transactions " +
+                                "WHERE tenant_id = ? AND id = ?",
+                            Long::class.java,
+                            tenantId,
+                            work.transactionId,
+                        ),
+                        payload = mapOf(
+                            "transactionId" to work.transactionId,
+                            "providerReference" to result.providerReference,
+                            "providerStatus" to result.providerStatus,
+                        ),
+                    ),
+                )
+            }
             outboxPort.enqueue(
                 OutboxEventCommand(
                     aggregateType = "payment_transactions",
