@@ -1793,7 +1793,17 @@ class BillingService(
               AND f.property_id = ?
               AND f.id = ?
               AND f.deleted_at IS NULL
+              AND f.status = 'open'
               AND rr.status = 'checked_in'
+              AND rr.room_id IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM stays s
+                  WHERE s.tenant_id = f.tenant_id
+                    AND s.reservation_id = f.reservation_id
+                    AND s.room_id = rr.room_id
+                    AND s.status <> 'checked_in'
+              )
             """.trimIndent(),
             { rs, _ -> rs.getString("room_number") },
             tenantId,

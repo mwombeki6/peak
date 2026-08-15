@@ -442,7 +442,8 @@ class RouteAccessMatrixCoverageIntegrationTests {
     private fun String.expectedGuardMode(): GuardMode {
         return when {
             this == "/api/v1/session" ||
-                    this == "/api/v1/platform/session" ->
+                    this == "/api/v1/platform/session" ||
+                    this == "/api/v1/staff/sessions/current" ->
                 GuardMode.AUTHENTICATED_IDENTITY
             startsWith("/api/v1/platform/") -> GuardMode.PLATFORM_PERMISSION
             startsWith("/api/v1/public/properties/") -> GuardMode.MODULE_ONLY
@@ -468,6 +469,7 @@ class RouteAccessMatrixCoverageIntegrationTests {
     private fun String.expectedRouteScope(method: RequestMethod): RouteScope {
         return when {
             this == "/api/v1/session" -> RouteScope.TENANT
+            this == "/api/v1/staff/sessions/current" -> RouteScope.TENANT
             this == "/api/v1/platform/session" -> RouteScope.PLATFORM
             startsWith("/api/v1/platform/") -> RouteScope.PLATFORM
             startsWith("/api/v1/public/properties/") -> RouteScope.PUBLIC_PROPERTY

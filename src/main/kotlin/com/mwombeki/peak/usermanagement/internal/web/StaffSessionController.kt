@@ -11,10 +11,12 @@ import java.util.UUID
 import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
 import org.springframework.http.ResponseEntity
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 
 @RestController
@@ -57,7 +59,15 @@ class StaffSessionController(
             tenantId = session.tenantId,
             userId = session.userId,
             outletId = session.outletId,
+            mode = session.mode,
+            terminalName = session.terminalName,
         )
+    }
+
+    @DeleteMapping("/staff/sessions/current")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    fun lockCurrent() {
+        sessions.revokeCurrent()
     }
 
     @ExceptionHandler(DeviceCredentialsRejectedException::class)
@@ -99,4 +109,6 @@ data class StaffSessionHttpResponse(
     val tenantId: UUID,
     val userId: UUID,
     val outletId: UUID?,
+    val mode: String,
+    val terminalName: String,
 )

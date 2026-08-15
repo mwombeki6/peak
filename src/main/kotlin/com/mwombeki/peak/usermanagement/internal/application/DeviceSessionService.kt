@@ -3,6 +3,8 @@ package com.mwombeki.peak.usermanagement.internal.application
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.OperationalSessionAuthentication
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.shared.context.RequestContextHolder
+import com.mwombeki.peak.shared.context.SessionClass
 import java.security.KeyFactory
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -44,6 +46,7 @@ class DeviceSessionService(
     private val transactionTemplate: TransactionTemplate,
     private val credentials: StaffCredentialService,
     private val databaseSessionContext: DatabaseSessionContext,
+    private val requestContextHolder: RequestContextHolder,
     private val properties: OperationalSessionProperties,
     private val clock: Clock,
 ) {
@@ -63,6 +66,8 @@ class DeviceSessionService(
         val tenantId: UUID,
         val userId: UUID,
         val outletId: UUID?,
+        val mode: String,
+        val terminalName: String,
     )
 
     fun issueChallenge(deviceCode: String): Challenge? =
@@ -154,6 +159,23 @@ class DeviceSessionService(
             val userId = credentials.verify(device.tenantId, staffNumber, pin)
                 ?: return@execute null
 
+            jdbcTemplate.queryForObject(
+                "SELECT id FROM paired_devices WHERE id = ? FOR UPDATE",
+                UUID::class.java,
+                device.id,
+            )
+            jdbcTemplate.update(
+                """
+                UPDATE operational_sessions
+                SET revoked_at = now()
+                WHERE device_id = ?
+                  AND tenant_id = ?
+                  AND revoked_at IS NULL
+                """.trimIndent(),
+                device.id,
+                device.tenantId,
+            )
+
             val token = OperationalSessionAuthentication.TOKEN_PREFIX + randomToken(32)
             val expiresAt = clock.instant().plus(properties.sessionValidity)
             jdbcTemplate.update(
@@ -170,6 +192,17 @@ class DeviceSessionService(
                 java.sql.Timestamp.from(expiresAt),
             )
 
+            val named = jdbcTemplate.query(
+                """
+                SELECT mode, terminal_name
+                FROM paired_devices
+                WHERE id = ? AND tenant_id = ?
+                """.trimIndent(),
+                { rs, _ -> rs.getString("mode") to rs.getString("terminal_name") },
+                device.id,
+                device.tenantId,
+            ).first()
+
             OperationalSession(
                 token = token,
                 expiresAt = expiresAt,
@@ -178,8 +211,44 @@ class DeviceSessionService(
                 tenantId = device.tenantId,
                 userId = userId,
                 outletId = device.outletId,
+                mode = named.first,
+                terminalName = named.second,
             )
         }
+
+    /**
+     * Switch Staff / Lock. Revokes this till's current ops_ session without
+     * closing the cashier drawer.
+     */
+    fun revokeCurrent() {
+        transactionTemplate.executeWithoutResult {
+            val context = requestContextHolder.current()
+            require(context.sessionClass == SessionClass.OPERATIONAL) {
+                "An operational session is required to lock this till"
+            }
+            val identity = context.identity
+            require(identity is RequestIdentity.Tenant) {
+                "An operational session is required to lock this till"
+            }
+            val sessionId = requireNotNull(context.boundSessionId) {
+                "An operational session is required to lock this till"
+            }
+            databaseSessionContext.bind(identity)
+            jdbcTemplate.update(
+                """
+                UPDATE operational_sessions
+                SET revoked_at = now()
+                WHERE id = ?
+                  AND tenant_id = ?
+                  AND user_id = ?
+                  AND revoked_at IS NULL
+                """.trimIndent(),
+                sessionId,
+                identity.tenantId,
+                identity.tenantUserId,
+            )
+        }
+    }
 
     private fun lookupDevice(deviceCode: String): DeviceRow? =
         jdbcTemplate.query(

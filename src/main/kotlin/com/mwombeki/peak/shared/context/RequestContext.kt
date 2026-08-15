@@ -39,4 +39,9 @@ data class RequestContext(
      * Null means the till is property-scoped. Never taken from a request body.
      */
     val boundOutletId: UUID? = null,
+    /**
+     * Live operational session row. Null for Keycloak sessions. Used to lock
+     * or switch staff on this till without closing the drawer.
+     */
+    val boundSessionId: UUID? = null,
 )

@@ -47,6 +47,7 @@ class RequestContextResolver(
             },
             boundPropertyId = operational?.propertyId,
             boundOutletId = operational?.outletId,
+            boundSessionId = operational?.sessionId,
         )
     }
 

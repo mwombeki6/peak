@@ -110,6 +110,7 @@ A till does not name its hotel. It generates an Ed25519 keypair and waits. The s
 | Manager (`admin.devices.manage`, strong) | `POST` | `/api/v1/tenants/{tenantId}/devices/pairing-approvals` | Body `{pairingCode, propertyId, outletId?, terminalName, mode}`. The manager chooses the property. |
 | Till (unauthenticated) | `POST` | `/api/v1/devices/challenges` | Device-code challenge. Revoked devices fail closed (no nonce). |
 | Till (unauthenticated) | `POST` | `/api/v1/staff/sessions` | PIN login after a signed challenge. Returns `mode` and `terminalName`. |
+| Till (`ops_` bearer) | `DELETE` | `/api/v1/staff/sessions/current` | Lock / switch staff. Revokes this session; does not close the drawer. |
 | Manager (`admin.devices.manage`, strong) | `POST` | `/api/v1/tenants/{tenantId}/devices/{deviceId}/revoke` | Ends operational sessions. Revival needs a new pairing request and a manager, not the old device row. |
 
 Operator flow: till shows the six-digit code and polls GET until `approved` or `expired`. On `expired`, it POSTs the same public key again. On `approved`, it challenges and the cashier types a PIN. The till never self-nominates a property.

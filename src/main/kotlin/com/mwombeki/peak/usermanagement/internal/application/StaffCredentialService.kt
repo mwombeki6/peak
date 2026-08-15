@@ -100,6 +100,17 @@ class StaffCredentialService(
                 tenantId, userId, encoder.encode(pepper(plaintext)), actorId,
                 java.sql.Timestamp.from(expiresAt),
             )
+            jdbcTemplate.update(
+                """
+                UPDATE operational_sessions
+                SET revoked_at = now()
+                WHERE tenant_id = ?
+                  AND user_id = ?
+                  AND revoked_at IS NULL
+                """.trimIndent(),
+                tenantId,
+                userId,
+            )
         }
 
         return ActivationSecret(plaintext, expiresAt)

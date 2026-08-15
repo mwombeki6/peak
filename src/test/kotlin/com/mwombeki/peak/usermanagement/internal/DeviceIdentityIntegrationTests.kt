@@ -1,19 +1,26 @@
 package com.mwombeki.peak.usermanagement.internal
 
 import com.mwombeki.peak.TestcontainersConfiguration
+import com.mwombeki.peak.shared.context.RequestContext
+import com.mwombeki.peak.shared.context.RequestContextHolder
+import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.shared.context.SessionClass
 import com.mwombeki.peak.usermanagement.internal.application.DevicePairingService
 import com.mwombeki.peak.usermanagement.internal.application.DeviceSessionService
 import com.mwombeki.peak.usermanagement.internal.application.StaffCredentialService
 import java.security.KeyPair
 import java.security.KeyPairGenerator
+import java.security.MessageDigest
 import java.security.Signature
 import java.util.Base64
+import java.util.HexFormat
 import java.util.UUID
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -38,9 +45,11 @@ class DeviceIdentityIntegrationTests {
     @Autowired private lateinit var credentials: StaffCredentialService
     @Autowired private lateinit var jdbcTemplate: JdbcTemplate
     @Autowired private lateinit var transactionTemplate: TransactionTemplate
+    @Autowired private lateinit var requestContextHolder: RequestContextHolder
 
     @AfterTest
     fun resetSession() {
+        requestContextHolder.clear()
         jdbcTemplate.execute("RESET ALL")
     }
 
@@ -189,8 +198,10 @@ class DeviceIdentityIntegrationTests {
         assertEquals(hotel.tenantId, session.tenantId)
         assertEquals(hotel.staffUserId, session.userId)
         assertNull(session.outletId)
+        assertEquals("POS", session.mode)
+        assertEquals("Till 1", session.terminalName)
         val stored = jdbcTemplate.queryForObject(
-            "SELECT token_hash FROM operational_sessions WHERE device_id = ?",
+            "SELECT token_hash FROM operational_sessions WHERE device_id = ? AND revoked_at IS NULL",
             String::class.java,
             paired.deviceId,
         )
@@ -277,6 +288,124 @@ class DeviceIdentityIntegrationTests {
             hotel.staffUserId,
         )
         assertEquals(attemptsBefore, attemptsAfter)
+    }
+
+    @Test
+    fun aSecondPinLoginOnTheSameTillRevokesTheFirstSession() {
+        val hotel = seedHotel()
+        val keys = ed25519()
+        val pin = "418205"
+        activateStaff(hotel, pin)
+        val paired = pair(hotel, keys)
+
+        val first = pinLogin(paired.deviceCode, keys, hotel.staffNumber, pin)
+        val second = pinLogin(paired.deviceCode, keys, hotel.staffNumber, pin)
+
+        assertNotEquals(first.token, second.token)
+        assertEquals(1, liveSessionCount(paired.deviceId))
+        assertEquals(2, sessionCount(paired.deviceId))
+        assertEquals(0, liveSessionCountForToken(first.token, paired.deviceId))
+        assertEquals(1, liveSessionCountForToken(second.token, paired.deviceId))
+    }
+
+    @Test
+    fun issuingANewActivationRevokesLiveOperationalSessions() {
+        val hotel = seedHotel()
+        val keys = ed25519()
+        val pin = "418205"
+        activateStaff(hotel, pin)
+        val paired = pair(hotel, keys)
+        pinLogin(paired.deviceCode, keys, hotel.staffNumber, pin)
+
+        credentials.issueActivation(hotel.tenantId, hotel.staffUserId, hotel.managerId)
+
+        assertEquals(0, liveSessionCount(paired.deviceId))
+        assertEquals(1, sessionCount(paired.deviceId))
+    }
+
+    @Test
+    fun lockingTheCurrentSessionRevokesItWithoutClosingTheTill() {
+        val hotel = seedHotel()
+        val keys = ed25519()
+        val pin = "418205"
+        activateStaff(hotel, pin)
+        val paired = pair(hotel, keys)
+        val session = pinLogin(paired.deviceCode, keys, hotel.staffNumber, pin)
+        val sessionId = jdbcTemplate.queryForObject(
+            """
+            SELECT id FROM operational_sessions
+            WHERE device_id = ? AND revoked_at IS NULL
+            """.trimIndent(),
+            UUID::class.java,
+            paired.deviceId,
+        )
+
+        requestContextHolder.set(
+            RequestContext(
+                identity = RequestIdentity.Tenant(hotel.tenantId, hotel.staffUserId),
+                correlationId = "corr-lock-${hotel.tenantId}",
+                idempotencyKey = null,
+                httpMethod = "DELETE",
+                requestPath = "/api/v1/staff/sessions/current",
+                sessionClass = SessionClass.OPERATIONAL,
+                boundPropertyId = hotel.propertyId,
+                boundSessionId = sessionId,
+            ),
+        )
+        sessions.revokeCurrent()
+
+        assertEquals(0, liveSessionCount(paired.deviceId))
+        assertEquals(0, liveSessionCountForToken(session.token, paired.deviceId))
+    }
+
+    private fun pinLogin(
+        deviceCode: String,
+        keys: KeyPair,
+        staffNumber: String,
+        pin: String,
+    ): DeviceSessionService.OperationalSession {
+        val challenge = requireNotNull(sessions.issueChallenge(deviceCode))
+        return requireNotNull(
+            sessions.login(
+                deviceCode = deviceCode,
+                challengeId = challenge.challengeId,
+                signature = sign(keys, challenge.nonce),
+                staffNumber = staffNumber,
+                pin = pin,
+            ),
+        )
+    }
+
+    private fun liveSessionCount(deviceId: UUID): Int =
+        jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM operational_sessions WHERE device_id = ? AND revoked_at IS NULL",
+            Int::class.java,
+            deviceId,
+        ) ?: 0
+
+    private fun sessionCount(deviceId: UUID): Int =
+        jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM operational_sessions WHERE device_id = ?",
+            Int::class.java,
+            deviceId,
+        ) ?: 0
+
+    private fun liveSessionCountForToken(token: String, deviceId: UUID): Int {
+        val hash = HexFormat.of().formatHex(
+            MessageDigest.getInstance("SHA-256").digest(token.toByteArray(Charsets.UTF_8)),
+        )
+        return jdbcTemplate.queryForObject(
+            """
+            SELECT count(*)
+            FROM operational_sessions
+            WHERE device_id = ?
+              AND revoked_at IS NULL
+              AND token_hash = ?
+            """.trimIndent(),
+            Int::class.java,
+            deviceId,
+            hash,
+        ) ?: 0
     }
 
     private fun pair(

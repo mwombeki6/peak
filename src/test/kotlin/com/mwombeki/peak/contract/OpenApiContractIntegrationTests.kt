@@ -60,6 +60,7 @@ class OpenApiContractIntegrationTests @Autowired constructor(
     private fun assertPublishedTillRoutes(document: JsonNode) {
         val paths = document.path("paths")
         val expected = mapOf(
+            "/api/v1/properties/{propertyId}/pos/room-charge-candidates" to "get",
             "/api/v1/properties/{propertyId}/pos-config/menu-items" to "get",
             "/api/v1/properties/{propertyId}/pos-config/menu-categories" to "get",
             "/api/v1/devices/pairing-requests" to "post",
@@ -68,6 +69,7 @@ class OpenApiContractIntegrationTests @Autowired constructor(
             "/api/v1/tenants/{tenantId}/devices/{deviceId}/revoke" to "post",
             "/api/v1/devices/challenges" to "post",
             "/api/v1/staff/sessions" to "post",
+            "/api/v1/staff/sessions/current" to "delete",
         )
         expected.forEach { (path, method) ->
             assertTrue(
@@ -77,7 +79,7 @@ class OpenApiContractIntegrationTests @Autowired constructor(
         }
         val session = document.path("components").path("schemas")
             .path("StaffSessionHttpResponse").path("properties")
-        listOf("tenantId", "userId", "outletId", "token", "sessionClass", "deviceId", "propertyId")
+        listOf("tenantId", "userId", "outletId", "token", "sessionClass", "deviceId", "propertyId", "mode", "terminalName")
             .forEach { field ->
                 assertTrue(session.has(field), "StaffSessionHttpResponse is missing $field")
             }

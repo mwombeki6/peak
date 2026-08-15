@@ -5,6 +5,7 @@ import com.mwombeki.peak.billing.api.BillingConflictException
 import com.mwombeki.peak.pos.api.AddPosOrderItemRequest
 import com.mwombeki.peak.pos.api.CreatePosOrderRequest
 import com.mwombeki.peak.pos.api.OpenPosSessionRequest
+import com.mwombeki.peak.pos.api.PosConflictException
 import com.mwombeki.peak.pos.api.SettlePosOrderRequest
 import com.mwombeki.peak.shared.context.RequestContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
@@ -47,6 +48,7 @@ class PosRoomChargeIntegrationTests {
 
     @Autowired private lateinit var posOrderService: PosOrderService
     @Autowired private lateinit var posSessionService: PosSessionService
+    @Autowired private lateinit var roomCharge: PosRoomChargeService
     @Autowired private lateinit var requestContextHolder: RequestContextHolder
     @Autowired private lateinit var jdbcTemplate: JdbcTemplate
 
@@ -127,6 +129,80 @@ class PosRoomChargeIntegrationTests {
         }
     }
 
+    @Test
+    fun aPinTillFindsAnInHouseStayByRoomOrGuestName() {
+        val hotel = hotelWithTwoOccupiedRooms()
+        bind(hotel, "idem-search-${hotel.tenantId}")
+
+        val byRoom = roomCharge.listCandidates(hotel.propertyId, "204")
+        assertEquals(1, byRoom.size)
+        assertEquals(hotel.room204Stay, byRoom.single().stayId)
+        assertEquals(hotel.room204Id, byRoom.single().roomId)
+        assertEquals("204", byRoom.single().roomNumber)
+        assertEquals("Amina Hassan", byRoom.single().guestDisplayName)
+        assertTrue(byRoom.single().postingEligible)
+
+        val byName = roomCharge.listCandidates(hotel.propertyId, "Amina")
+        assertEquals(hotel.room204Stay, byName.single().stayId)
+
+        assertEquals(emptyList(), roomCharge.listCandidates(hotel.propertyId, "   "))
+        assertEquals(emptyList(), roomCharge.listCandidates(hotel.propertyId, null))
+    }
+
+    @Test
+    fun chargingByStayIdPostsToThatStayFolio() {
+        val hotel = hotelWithTwoOccupiedRooms()
+
+        bind(hotel, "idem-stay-settle-${hotel.tenantId}")
+        posOrderService.settleOrder(
+            hotel.propertyId,
+            hotel.orderId,
+            SettlePosOrderRequest(
+                paymentMethod = "room_charge",
+                stayId = hotel.room204Stay,
+            ),
+        )
+
+        assertEquals(1, folioChargeCount(hotel.room204Folio))
+        assertEquals("closed", orderStatus(hotel.orderId))
+        assertEquals(0, folioChargeCount(hotel.room208Folio))
+    }
+
+    @Test
+    fun aStayFoundBeforeCheckoutCannotBeChargedAfterIt() {
+        val hotel = hotelWithTwoOccupiedRooms()
+        bind(hotel, "idem-stale-search-${hotel.tenantId}")
+        val candidate = roomCharge.listCandidates(hotel.propertyId, "204").single()
+        assertTrue(candidate.postingEligible)
+
+        jdbcTemplate.update(
+            "UPDATE stays SET status = 'checked_out', check_out_time = now() WHERE id = ?",
+            hotel.room204Stay,
+        )
+        jdbcTemplate.update(
+            "UPDATE reservation_rooms SET status = 'checked_out' WHERE folio_id = ?",
+            hotel.room204Folio,
+        )
+
+        val refused = assertFailsWith<PosConflictException> {
+            bind(hotel, "idem-stale-settle-${hotel.tenantId}")
+            posOrderService.settleOrder(
+                hotel.propertyId,
+                hotel.orderId,
+                SettlePosOrderRequest(
+                    paymentMethod = "room_charge",
+                    stayId = candidate.stayId,
+                    roomNumber = candidate.roomNumber,
+                ),
+            )
+        }
+        assertTrue(refused.message.contains("no longer in-house"), refused.message)
+        assertEquals(0, folioChargeCount(hotel.room204Folio))
+        assertEquals("open", orderStatus(hotel.orderId))
+        bind(hotel, "idem-stale-research-${hotel.tenantId}")
+        assertEquals(emptyList(), roomCharge.listCandidates(hotel.propertyId, "204"))
+    }
+
     private fun settleToRoom(hotel: Hotel, folioId: UUID, roomNumber: String?) {
         bind(hotel, "idem-settle-${UUID.randomUUID()}")
         posOrderService.settleOrder(
@@ -204,8 +280,12 @@ class PosRoomChargeIntegrationTests {
 
         val room204 = insertRoom(tenantId, propertyId, roomTypeId, "204")
         val room208 = insertRoom(tenantId, propertyId, roomTypeId, "208")
-        val folio204 = insertOccupiedStay(tenantId, propertyId, room204, roomTypeId, userId)
-        val folio208 = insertOccupiedStay(tenantId, propertyId, room208, roomTypeId, userId)
+        val occupied204 = insertOccupiedStay(
+            tenantId, propertyId, room204, roomTypeId, "Amina Hassan",
+        )
+        val occupied208 = insertOccupiedStay(
+            tenantId, propertyId, room208, roomTypeId, "Joseph Mwombeki",
+        )
 
         jdbcTemplate.update(
             """
@@ -240,8 +320,12 @@ class PosRoomChargeIntegrationTests {
             propertyId = propertyId,
             userId = userId,
             outletId = outletId,
-            room204Folio = folio204,
-            room208Folio = folio208,
+            room204Id = room204,
+            room208Id = room208,
+            room204Stay = occupied204.stayId,
+            room208Stay = occupied208.stayId,
+            room204Folio = occupied204.folioId,
+            room208Folio = occupied208.folioId,
             orderId = UUID.randomUUID(),
         )
 
@@ -298,11 +382,12 @@ class PosRoomChargeIntegrationTests {
         propertyId: UUID,
         roomId: UUID,
         roomTypeId: UUID,
-        userId: UUID,
-    ): UUID {
+        guestName: String,
+    ): OccupiedStay {
         val guestId = UUID.randomUUID()
         val reservationId = UUID.randomUUID()
         val folioId = UUID.randomUUID()
+        val stayId = UUID.randomUUID()
         val today = LocalDate.now()
 
         jdbcTemplate.update(
@@ -310,7 +395,7 @@ class PosRoomChargeIntegrationTests {
             INSERT INTO guests (id, tenant_id, full_name)
             VALUES (?, ?, ?)
             """.trimIndent(),
-            guestId, tenantId, "Guest $guestId",
+            guestId, tenantId, guestName,
         )
         jdbcTemplate.update(
             """
@@ -338,7 +423,15 @@ class PosRoomChargeIntegrationTests {
             UUID.randomUUID(), tenantId, reservationId, roomTypeId, roomId, folioId,
             today, today.plusDays(1),
         )
-        return folioId
+        jdbcTemplate.update(
+            """
+            INSERT INTO stays (
+                id, tenant_id, reservation_id, room_id, status, check_in_time
+            ) VALUES (?, ?, ?, ?, 'checked_in', now())
+            """.trimIndent(),
+            stayId, tenantId, reservationId, roomId,
+        )
+        return OccupiedStay(stayId = stayId, folioId = folioId)
     }
 
     private fun bind(hotel: Hotel, idempotencyKey: String) {
@@ -353,11 +446,20 @@ class PosRoomChargeIntegrationTests {
         )
     }
 
+    private data class OccupiedStay(
+        val stayId: UUID,
+        val folioId: UUID,
+    )
+
     private data class Hotel(
         val tenantId: UUID,
         val propertyId: UUID,
         val userId: UUID,
         val outletId: UUID,
+        val room204Id: UUID,
+        val room208Id: UUID,
+        val room204Stay: UUID,
+        val room208Stay: UUID,
         val room204Folio: UUID,
         val room208Folio: UUID,
         val orderId: UUID,

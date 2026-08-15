@@ -378,13 +378,14 @@ class RequestContextResolverTests {
         val tenantUserId = UUID.randomUUID()
         val propertyId = UUID.randomUUID()
         val outletId = UUID.randomUUID()
+        val sessionId = UUID.randomUUID()
         val request = MockHttpServletRequest("GET", "/api/v1/properties/$propertyId/pos-orders")
         request.addHeader(PeakRequestHeaders.CORRELATION_ID, "corr-ops-bound")
 
         val context = resolver().resolve(
             request,
             OperationalSessionAuthentication(
-                sessionId = UUID.randomUUID(),
+                sessionId = sessionId,
                 tenantId = tenantId,
                 tenantUserId = tenantUserId,
                 deviceId = UUID.randomUUID(),
@@ -396,6 +397,7 @@ class RequestContextResolverTests {
         assertEquals(SessionClass.OPERATIONAL, context.sessionClass)
         assertEquals(propertyId, context.boundPropertyId)
         assertEquals(outletId, context.boundOutletId)
+        assertEquals(sessionId, context.boundSessionId)
     }
 
     @Test

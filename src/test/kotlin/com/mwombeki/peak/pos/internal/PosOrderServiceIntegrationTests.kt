@@ -64,6 +64,72 @@ class PosOrderServiceIntegrationTests {
     }
 
     @Test
+    fun josephCanOrderOnAminasOpenTillAndCannotCloseIt() {
+        val amina = insertFixture()
+        val joseph = insertUser(amina.tenantId)
+
+        bind(amina, "till-open")
+        val session = posSessionService.openSession(
+            amina.propertyId,
+            OpenPosSessionRequest(
+                outletId = amina.outletId,
+                openingFloat = BigDecimal("50.00"),
+            ),
+        )
+
+        bind(amina, "joseph-order", joseph)
+        val order = posOrderService.createOrder(
+            amina.propertyId,
+            CreatePosOrderRequest(
+                sessionId = session.id,
+                orderType = "dine_in",
+                tableNumber = "B2",
+                clientOperationId = "shared-till-create",
+            ),
+        )
+        assertEquals(joseph, order.servedBy)
+        assertEquals(session.id, order.sessionId)
+
+        bind(amina, "joseph-item", joseph)
+        posOrderService.addItem(
+            amina.propertyId,
+            order.id,
+            AddPosOrderItemRequest(
+                menuItemId = amina.menuItemId,
+                quantity = BigDecimal.ONE,
+                clientOperationId = "shared-till-item",
+            ),
+        )
+
+        bind(amina, "joseph-settle", joseph)
+        val settled = posOrderService.settleOrder(
+            amina.propertyId,
+            order.id,
+            SettlePosOrderRequest(paymentMethod = "cash"),
+        )
+        assertEquals("closed", settled.status)
+        assertEquals(joseph, settled.servedBy)
+
+        bind(amina, "joseph-close", joseph)
+        val refused = assertFailsWith<IllegalArgumentException> {
+            posSessionService.closeSession(
+                amina.propertyId,
+                session.id,
+                ClosePosSessionRequest(actualCash = BigDecimal("61.80")),
+            )
+        }
+        assertTrue(refused.message!!.contains("own POS session"), refused.message)
+
+        bind(amina, "amina-close")
+        val closed = posSessionService.closeSession(
+            amina.propertyId,
+            session.id,
+            ClosePosSessionRequest(actualCash = BigDecimal("61.80")),
+        )
+        assertEquals("closed", closed.status)
+    }
+
+    @Test
     fun `settles server-priced cash order and closes balanced session`() {
         val fixture = insertFixture()
         bind(fixture, "pos-open")
@@ -99,6 +165,7 @@ class PosOrderServiceIntegrationTests {
         assertEquals(BigDecimal("20.00"), pricedOrder.subtotal)
         assertEquals(BigDecimal("3.60"), pricedOrder.taxAmount)
         assertEquals(BigDecimal("23.60"), pricedOrder.totalAmount)
+        assertEquals(fixture.userId, pricedOrder.servedBy)
 
         bind(fixture, "pos-settle")
         val settled = posOrderService.settleOrder(
@@ -568,10 +635,14 @@ class PosOrderServiceIntegrationTests {
         return userId
     }
 
-    private fun bind(fixture: PosFixture, idempotencyKey: String) {
+    private fun bind(
+        fixture: PosFixture,
+        idempotencyKey: String,
+        userId: UUID = fixture.userId,
+    ) {
         requestContextHolder.set(
             RequestContext(
-                identity = RequestIdentity.Tenant(fixture.tenantId, fixture.userId),
+                identity = RequestIdentity.Tenant(fixture.tenantId, userId),
                 correlationId = "corr-$idempotencyKey",
                 idempotencyKey = idempotencyKey,
                 httpMethod = "POST",

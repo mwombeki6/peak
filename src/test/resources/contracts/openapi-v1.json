@@ -22462,7 +22462,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/PropertyReadinessResponse"
+                  "type" : "object"
                 }
               }
             }
@@ -22604,6 +22604,86 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/PropertyChildMutationReceipt"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/properties/bootstrap" : {
+      "post" : {
+        "tags" : [ "property-management-controller" ],
+        "summary" : "Bootstrap First Property",
+        "description" : "Bootstrap First Property",
+        "operationId" : "bootstrapFirstProperty",
+        "parameters" : [ {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreatePropertyRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PropertyBootstrapResponse"
                 }
               }
             }
@@ -29868,6 +29948,75 @@
         }
       }
     },
+    "/api/v1/tenants/{tenantId}/onboarding" : {
+      "get" : {
+        "tags" : [ "tenant-administration-controller" ],
+        "summary" : "Get Tenant Onboarding",
+        "description" : "Get Tenant Onboarding",
+        "operationId" : "getTenantOnboarding",
+        "parameters" : [ {
+          "name" : "tenantId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TenantOnboardingResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/tenants/{tenantId}/commercial" : {
       "get" : {
         "tags" : [ "tenant-commercial-controller" ],
@@ -30789,6 +30938,85 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/PropertyReadinessResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/properties/{propertyId}/pos/room-charge-candidates" : {
+      "get" : {
+        "tags" : [ "pos-room-charge-controller" ],
+        "summary" : "List Candidates",
+        "description" : "List Candidates",
+        "operationId" : "listCandidates",
+        "parameters" : [ {
+          "name" : "propertyId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "query",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/PosRoomChargeCandidateResponse"
+                  }
                 }
               }
             }
@@ -33254,6 +33482,75 @@
         }
       }
     },
+    "/api/v1/platform/tenants/{id}/onboarding" : {
+      "get" : {
+        "tags" : [ "tenant-onboarding-controller" ],
+        "summary" : "Get Onboarding",
+        "description" : "Get Onboarding",
+        "operationId" : "getOnboarding_1",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TenantOnboardingResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/platform/support/tickets" : {
       "get" : {
         "tags" : [ "platform-support-controller" ],
@@ -33904,6 +34201,75 @@
         }
       }
     },
+    "/api/v1/devices/pairing-requests/{pairingRequestId}" : {
+      "get" : {
+        "tags" : [ "device-pairing-controller" ],
+        "summary" : "Pairing Status",
+        "description" : "Pairing Status",
+        "operationId" : "pairingStatus",
+        "parameters" : [ {
+          "name" : "pairingRequestId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PairingStatusHttpResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/communication/delivery-requests" : {
       "get" : {
         "tags" : [ "communication-controller" ],
@@ -34149,6 +34515,69 @@
                 }
               }
             }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/staff/sessions/current" : {
+      "delete" : {
+        "tags" : [ "staff-session-controller" ],
+        "summary" : "Lock Current",
+        "description" : "Lock Current",
+        "operationId" : "lockCurrent",
+        "parameters" : [ {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
           },
           "400" : {
             "description" : "Invalid request",
@@ -37369,6 +37798,12 @@
           "outletId" : {
             "type" : [ "string", "null" ],
             "format" : "uuid"
+          },
+          "mode" : {
+            "type" : "string"
+          },
+          "terminalName" : {
+            "type" : "string"
           }
         }
       },
@@ -38147,6 +38582,10 @@
             "type" : [ "string", "null" ],
             "format" : "date-time"
           },
+          "servedBy" : {
+            "type" : [ "string", "null" ],
+            "format" : "uuid"
+          },
           "items" : {
             "type" : "array",
             "items" : {
@@ -38166,6 +38605,10 @@
             "minLength" : 1
           },
           "folioId" : {
+            "type" : [ "string", "null" ],
+            "format" : "uuid"
+          },
+          "stayId" : {
             "type" : [ "string", "null" ],
             "format" : "uuid"
           },
@@ -40578,6 +41021,125 @@
           }
         }
       },
+      "CreateTaxRateRequest" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "code" : {
+            "type" : "string"
+          },
+          "rate" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "taxType" : {
+            "type" : "string"
+          },
+          "compound" : {
+            "type" : "boolean"
+          },
+          "inclusive" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "OnboardingNextAction" : {
+        "type" : "object",
+        "properties" : {
+          "step" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "why" : {
+            "type" : "string"
+          },
+          "method" : {
+            "type" : "string"
+          },
+          "path" : {
+            "type" : "string"
+          },
+          "bodyHint" : {
+            "type" : [ "object", "null" ],
+            "additionalProperties" : { }
+          }
+        }
+      },
+      "OperatorBlockerView" : {
+        "type" : "object",
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "why" : {
+            "type" : "string"
+          }
+        }
+      },
+      "PropertyBootstrapResponse" : {
+        "type" : "object",
+        "properties" : {
+          "propertyId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "tenantId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "changed" : {
+            "type" : "boolean"
+          },
+          "replayed" : {
+            "type" : "boolean"
+          },
+          "nextAction" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/OnboardingNextAction"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "workflowStatus" : {
+            "type" : "string"
+          },
+          "currentStep" : {
+            "type" : [ "string", "null" ]
+          },
+          "steps" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PropertyOnboardingStepView"
+            }
+          },
+          "blockers" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PropertyGoLiveBlockerView"
+            }
+          },
+          "operatorBlocker" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/OperatorBlockerView"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "ready" : {
+            "type" : "boolean"
+          }
+        }
+      },
       "PropertyGoLiveBlockerView" : {
         "type" : "object",
         "properties" : {
@@ -40610,69 +41172,6 @@
           },
           "detail" : {
             "type" : "string"
-          }
-        }
-      },
-      "PropertyReadinessResponse" : {
-        "type" : "object",
-        "properties" : {
-          "propertyId" : {
-            "type" : "string",
-            "format" : "uuid"
-          },
-          "missingRequirements" : {
-            "type" : "array",
-            "items" : {
-              "type" : "string"
-            }
-          },
-          "workflowStatus" : {
-            "type" : "string"
-          },
-          "currentStep" : {
-            "type" : [ "string", "null" ]
-          },
-          "steps" : {
-            "type" : "array",
-            "items" : {
-              "$ref" : "#/components/schemas/PropertyOnboardingStepView"
-            }
-          },
-          "blockers" : {
-            "type" : "array",
-            "items" : {
-              "$ref" : "#/components/schemas/PropertyGoLiveBlockerView"
-            }
-          },
-          "collectionEnabled" : {
-            "type" : "boolean"
-          },
-          "ready" : {
-            "type" : "boolean"
-          }
-        }
-      },
-      "CreateTaxRateRequest" : {
-        "type" : "object",
-        "properties" : {
-          "name" : {
-            "type" : "string"
-          },
-          "code" : {
-            "type" : "string"
-          },
-          "rate" : {
-            "type" : "number",
-            "format" : "double"
-          },
-          "taxType" : {
-            "type" : "string"
-          },
-          "compound" : {
-            "type" : "boolean"
-          },
-          "inclusive" : {
-            "type" : "boolean"
           }
         }
       },
@@ -40812,6 +41311,30 @@
         },
         "required" : [ "businessEmail", "businessPhone", "entityType", "legalName", "name", "planId", "slug" ]
       },
+      "TenantOnboardingNextAction" : {
+        "type" : "object",
+        "properties" : {
+          "step" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "why" : {
+            "type" : "string"
+          },
+          "method" : {
+            "type" : "string"
+          },
+          "path" : {
+            "type" : "string"
+          },
+          "bodyHint" : {
+            "type" : [ "object", "null" ],
+            "additionalProperties" : { }
+          }
+        }
+      },
       "TenantResponse" : {
         "type" : "object",
         "properties" : {
@@ -40835,6 +41358,13 @@
           },
           "businessEmail" : {
             "type" : "string"
+          },
+          "nextAction" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/TenantOnboardingNextAction"
+            }, {
+              "type" : "null"
+            } ]
           }
         }
       },
@@ -42085,6 +42615,10 @@
       "PairingRequestHttpResponse" : {
         "type" : "object",
         "properties" : {
+          "pairingRequestId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
           "deviceCode" : {
             "type" : "string"
           },
@@ -42819,6 +43353,58 @@
           }
         }
       },
+      "TenantOnboardingResponse" : {
+        "type" : "object",
+        "properties" : {
+          "tenantId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "workflowStatus" : {
+            "type" : "string"
+          },
+          "currentStep" : {
+            "type" : [ "string", "null" ]
+          },
+          "canCreateProperties" : {
+            "type" : "boolean"
+          },
+          "nextAction" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/TenantOnboardingNextAction"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "steps" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TenantOnboardingStepView"
+            }
+          }
+        }
+      },
+      "TenantOnboardingStepView" : {
+        "type" : "object",
+        "properties" : {
+          "key" : {
+            "type" : "string"
+          },
+          "sequence" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "required" : {
+            "type" : "boolean"
+          },
+          "detail" : {
+            "type" : "string"
+          }
+        }
+      },
       "TenantModuleHttpResponse" : {
         "type" : "object",
         "properties" : {
@@ -43413,6 +43999,81 @@
           }
         }
       },
+      "PropertyReadinessResponse" : {
+        "type" : "object",
+        "properties" : {
+          "propertyId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "missingRequirements" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "workflowStatus" : {
+            "type" : "string"
+          },
+          "currentStep" : {
+            "type" : [ "string", "null" ]
+          },
+          "steps" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PropertyOnboardingStepView"
+            }
+          },
+          "blockers" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PropertyGoLiveBlockerView"
+            }
+          },
+          "collectionEnabled" : {
+            "type" : "boolean"
+          },
+          "nextAction" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/OnboardingNextAction"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "operatorBlocker" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/OperatorBlockerView"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "ready" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "PosRoomChargeCandidateResponse" : {
+        "type" : "object",
+        "properties" : {
+          "stayId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "roomId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "roomNumber" : {
+            "type" : "string"
+          },
+          "guestDisplayName" : {
+            "type" : "string"
+          },
+          "postingEligible" : {
+            "type" : "boolean"
+          }
+        }
+      },
       "PosSessionSummaryResponse" : {
         "type" : "object",
         "properties" : {
@@ -43505,6 +44166,20 @@
             "items" : {
               "$ref" : "#/components/schemas/PropertyGoLiveBlockerView"
             }
+          },
+          "nextAction" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/OnboardingNextAction"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "operatorBlocker" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/OperatorBlockerView"
+            }, {
+              "type" : "null"
+            } ]
           },
           "ready" : {
             "type" : "boolean"
@@ -44700,6 +45375,27 @@
           },
           "effective" : {
             "type" : "boolean"
+          }
+        }
+      },
+      "PairingStatusHttpResponse" : {
+        "type" : "object",
+        "properties" : {
+          "status" : {
+            "type" : "string"
+          },
+          "deviceCode" : {
+            "type" : [ "string", "null" ]
+          },
+          "expiresAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "terminalName" : {
+            "type" : [ "string", "null" ]
+          },
+          "mode" : {
+            "type" : [ "string", "null" ]
           }
         }
       },
