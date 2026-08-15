@@ -1,10 +1,12 @@
 package com.mwombeki.peak.realtime.internal.config
 
 import com.mwombeki.peak.shared.context.ExternalIdentityResolver
+import com.mwombeki.peak.shared.context.OperationalSessionAuthentication
 import com.mwombeki.peak.shared.context.RequestContextProperties
 import com.mwombeki.peak.shared.context.RequestContextResolver
 import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.shared.context.ResolvedExternalIdentity
+import com.mwombeki.peak.shared.context.SessionClass
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import java.util.UUID
 import kotlin.test.AfterTest
@@ -40,6 +42,31 @@ class WebSocketHandshakeContextResolverTests {
 
         assertEquals(tenantId, identity?.tenantId)
         assertEquals(tenantUserId, identity?.tenantUserId)
+    }
+
+    @Test
+    fun `resolves operational device session on upgrade`() {
+        val resolver = handshakeResolver(null)
+        val authentication = OperationalSessionAuthentication(
+            sessionId = UUID.randomUUID(),
+            tenantId = tenantId,
+            tenantUserId = tenantUserId,
+            deviceId = UUID.randomUUID(),
+            propertyId = UUID.randomUUID(),
+        )
+        SecurityContextHolder.getContext().authentication = authentication
+        val servletRequest = MockHttpServletRequest("GET", "/ws-connect").apply {
+            addHeader(HttpHeaders.UPGRADE, "websocket")
+            addHeader(HttpHeaders.CONNECTION, "Upgrade")
+            setUserPrincipal(authentication)
+        }
+
+        val context = resolver.resolve(ServletServerHttpRequest(servletRequest))
+        val identity = context?.identity as? RequestIdentity.Tenant
+
+        assertEquals(tenantId, identity?.tenantId)
+        assertEquals(tenantUserId, identity?.tenantUserId)
+        assertEquals(SessionClass.OPERATIONAL, context?.sessionClass)
     }
 
     @Test

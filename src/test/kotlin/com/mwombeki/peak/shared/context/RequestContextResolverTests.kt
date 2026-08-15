@@ -22,6 +22,34 @@ class RequestContextResolverTests {
         assertEquals("corr-123", context.correlationId)
         assertEquals("GET", context.httpMethod)
         assertEquals("/api/v1/public/ping", context.requestPath)
+        assertEquals(SessionClass.STRONG, context.sessionClass)
+    }
+
+    @Test
+    fun resolvesOperationalSessionAsTenantIdentityWithOperationalClass() {
+        val tenantId = UUID.randomUUID()
+        val tenantUserId = UUID.randomUUID()
+        val deviceId = UUID.randomUUID()
+        val propertyId = UUID.randomUUID()
+        val request = MockHttpServletRequest("GET", "/api/v1/properties/$propertyId/pos/orders")
+        request.addHeader(PeakRequestHeaders.CORRELATION_ID, "corr-ops")
+
+        val context = resolver().resolve(
+            request,
+            OperationalSessionAuthentication(
+                sessionId = UUID.randomUUID(),
+                tenantId = tenantId,
+                tenantUserId = tenantUserId,
+                deviceId = deviceId,
+                propertyId = propertyId,
+            ),
+        )
+
+        assertEquals(
+            RequestIdentity.Tenant(tenantId, tenantUserId, "corr-ops"),
+            context.identity,
+        )
+        assertEquals(SessionClass.OPERATIONAL, context.sessionClass)
     }
 
     @Test

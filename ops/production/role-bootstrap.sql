@@ -115,6 +115,22 @@ BEGIN
       NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
   END IF;
 
+  -- Owner of the device-pairing SECURITY DEFINER functions (V120). Pending
+  -- pairing rows have no tenant, so they cannot live under ordinary tenant RLS;
+  -- this role is what those functions run as. NOBYPASSRLS is load-bearing for
+  -- the same reason as the billing owners above.
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_roles
+    WHERE rolname = 'pms_device_pairing_owner'
+  ) THEN
+    CREATE ROLE pms_device_pairing_owner
+      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+  ELSE
+    ALTER ROLE pms_device_pairing_owner
+      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+  END IF;
+
   -- Declared by V1 and referenced by nothing: no object is owned by them and no
   -- grant names them. They are here so the rule can be stated without exceptions —
   -- every role a migration creates exists before a restore — rather than as a list

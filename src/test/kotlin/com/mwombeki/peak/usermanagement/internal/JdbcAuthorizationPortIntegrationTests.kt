@@ -2,8 +2,9 @@ package com.mwombeki.peak.usermanagement.internal
 
 import com.mwombeki.peak.TestcontainersConfiguration
 import com.mwombeki.peak.shared.context.RequestContext
-import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.shared.context.RequestContextHolder
+import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.shared.context.SessionClass
 import com.mwombeki.peak.usermanagement.api.AuthorizationDeniedException
 import com.mwombeki.peak.usermanagement.api.AuthorizationPort
 import com.mwombeki.peak.usermanagement.api.GuardMode
@@ -69,6 +70,109 @@ class JdbcAuthorizationPortIntegrationTests {
                         routeScope = RouteScope.TENANT,
                         permissionCode = "tenant.profile.manage",
                         tenantId = fixture.tenantId,
+                    ),
+                )
+            },
+        )
+
+        assertTrue(decision.allowed)
+        assertEquals(null, decision.reason)
+    }
+
+    @Test
+    fun deniesAnOperationalSessionAStrongPermission() {
+        val fixture = tenantFixture("tenant.profile.manage")
+
+        val decision = requireNotNull(
+            transactionTemplate.execute {
+                insertTenantFixture(fixture)
+                requestContextHolder.set(
+                    requestContext(
+                        identity = RequestIdentity.Tenant(
+                            tenantId = fixture.tenantId,
+                            tenantUserId = fixture.userId,
+                            correlationId = "corr-auth-ops-denied",
+                        ),
+                        sessionClass = SessionClass.OPERATIONAL,
+                    ),
+                )
+
+                authorizationPort.authorize(
+                    RouteAuthorizationRequest(
+                        moduleId = "tenant_admin",
+                        guardMode = GuardMode.STAFF_PERMISSION,
+                        routeScope = RouteScope.TENANT,
+                        permissionCode = "tenant.profile.manage",
+                        tenantId = fixture.tenantId,
+                    ),
+                )
+            },
+        )
+
+        assertFalse(decision.allowed)
+        assertEquals("Session class is insufficient for this permission", decision.reason)
+    }
+
+    @Test
+    fun allowsAnOperationalSessionAnOperationalPermission() {
+        val fixture = propertyPermissionFixture("pos.view")
+
+        val decision = requireNotNull(
+            transactionTemplate.execute {
+                insertPropertyPermissionFixture(fixture, moduleId = "pos")
+                requestContextHolder.set(
+                    requestContext(
+                        identity = RequestIdentity.Tenant(
+                            tenantId = fixture.tenantId,
+                            tenantUserId = fixture.userId,
+                            correlationId = "corr-auth-ops-allowed",
+                        ),
+                        sessionClass = SessionClass.OPERATIONAL,
+                    ),
+                )
+
+                authorizationPort.authorize(
+                    RouteAuthorizationRequest(
+                        moduleId = "pos",
+                        guardMode = GuardMode.STAFF_PERMISSION,
+                        routeScope = RouteScope.PROPERTY,
+                        permissionCode = "pos.view",
+                        tenantId = fixture.tenantId,
+                        propertyId = fixture.propertyId,
+                    ),
+                )
+            },
+        )
+
+        assertTrue(decision.allowed)
+        assertEquals(null, decision.reason)
+    }
+
+    @Test
+    fun aStrongSessionStillSatisfiesAnOperationalPermission() {
+        val fixture = propertyPermissionFixture("pos.view")
+
+        val decision = requireNotNull(
+            transactionTemplate.execute {
+                insertPropertyPermissionFixture(fixture, moduleId = "pos")
+                requestContextHolder.set(
+                    requestContext(
+                        RequestIdentity.Tenant(
+                            tenantId = fixture.tenantId,
+                            tenantUserId = fixture.userId,
+                            correlationId = "corr-auth-strong-ops",
+                        ),
+                    ),
+                )
+
+                authorizationPort.authorize(
+                    RouteAuthorizationRequest(
+                        moduleId = "pos",
+                        guardMode = GuardMode.STAFF_PERMISSION,
+                        routeScope = RouteScope.PROPERTY,
+                        permissionCode = "pos.view",
+                        tenantId = fixture.tenantId,
+                        propertyId = fixture.propertyId,
                     ),
                 )
             },
@@ -658,7 +762,10 @@ class JdbcAuthorizationPortIntegrationTests {
         )
     }
 
-    private fun requestContext(identity: RequestIdentity): RequestContext {
+    private fun requestContext(
+        identity: RequestIdentity,
+        sessionClass: SessionClass = SessionClass.STRONG,
+    ): RequestContext {
         val correlationId = identity.correlationId ?: "corr-auth"
         return RequestContext(
             identity = identity,
@@ -666,6 +773,7 @@ class JdbcAuthorizationPortIntegrationTests {
             idempotencyKey = null,
             httpMethod = "GET",
             requestPath = "/test",
+            sessionClass = sessionClass,
         )
     }
 
@@ -677,6 +785,75 @@ class JdbcAuthorizationPortIntegrationTests {
             roleId = UUID.randomUUID(),
             permissionId = UUID.randomUUID(),
             permissionCode = permissionCode,
+        )
+    }
+
+    private fun propertyPermissionFixture(permissionCode: String): PropertyPermissionFixture {
+        return PropertyPermissionFixture(
+            planId = UUID.randomUUID(),
+            tenantId = UUID.randomUUID(),
+            propertyId = UUID.randomUUID(),
+            userId = UUID.randomUUID(),
+            roleId = UUID.randomUUID(),
+            permissionId = UUID.randomUUID(),
+            permissionCode = permissionCode,
+        )
+    }
+
+    private fun insertPropertyPermissionFixture(
+        fixture: PropertyPermissionFixture,
+        moduleId: String,
+    ) {
+        insertPlan(fixture.planId)
+        insertTenant(fixture.tenantId, fixture.planId)
+        insertTenantModule(fixture.tenantId, moduleId)
+        insertProperty(fixture.tenantId, fixture.propertyId)
+        insertTenantUser(fixture.tenantId, fixture.userId)
+        jdbcTemplate.update(
+            """
+            INSERT INTO property_modules (tenant_id, property_id, module_id, is_enabled, is_configured)
+            VALUES (?, ?, ?, true, true)
+            """.trimIndent(),
+            fixture.tenantId,
+            fixture.propertyId,
+            moduleId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO permissions (id, tenant_id, code, description)
+            VALUES (?, ?, ?, ?)
+            """.trimIndent(),
+            fixture.permissionId,
+            fixture.tenantId,
+            fixture.permissionCode,
+            "Fixture permission ${fixture.permissionCode}",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO roles (id, tenant_id, name)
+            VALUES (?, ?, ?)
+            """.trimIndent(),
+            fixture.roleId,
+            fixture.tenantId,
+            "Property Auth Role ${fixture.roleId}",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO role_permissions (role_id, permission_id)
+            VALUES (?, ?)
+            """.trimIndent(),
+            fixture.roleId,
+            fixture.permissionId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO user_property_roles (user_id, property_id, role_id, tenant_id)
+            VALUES (?, ?, ?, ?)
+            """.trimIndent(),
+            fixture.userId,
+            fixture.propertyId,
+            fixture.roleId,
+            fixture.tenantId,
         )
     }
 
@@ -1012,6 +1189,16 @@ class JdbcAuthorizationPortIntegrationTests {
     private data class TenantFixture(
         val planId: UUID,
         val tenantId: UUID,
+        val userId: UUID,
+        val roleId: UUID,
+        val permissionId: UUID,
+        val permissionCode: String,
+    )
+
+    private data class PropertyPermissionFixture(
+        val planId: UUID,
+        val tenantId: UUID,
+        val propertyId: UUID,
         val userId: UUID,
         val roleId: UUID,
         val permissionId: UUID,

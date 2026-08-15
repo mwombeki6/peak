@@ -40,6 +40,10 @@ class RequestContextResolver(
                 ?.take(MAX_USER_AGENT_LENGTH)
                 ?.takeIf(String::isNotEmpty),
             authentication = resolveAssurance(authentication),
+            sessionClass = when (authentication) {
+                is OperationalSessionAuthentication -> SessionClass.OPERATIONAL
+                else -> SessionClass.STRONG
+            },
         )
     }
 
@@ -149,6 +153,14 @@ class RequestContextResolver(
     ): RequestIdentity? {
         if (!hasAuthenticatedPrincipal()) {
             return null
+        }
+
+        if (this is OperationalSessionAuthentication) {
+            return RequestIdentity.Tenant(
+                tenantId = tenantId,
+                tenantUserId = tenantUserId,
+                correlationId = correlationId,
+            )
         }
 
         if (this !is JwtAuthenticationToken) {

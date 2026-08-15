@@ -45,6 +45,9 @@ credit_note_items,billing,active,billing::api-or-internal-owner
 credit_notes,billing,active,billing::api-or-internal-owner
 currency_rates,deferred,dormant,no-runtime-writes
 departments,property,active,property::api-or-internal-owner
+device_key_history,usermanagement,active,usermanagement::api-or-internal-owner
+device_login_challenges,usermanagement,active,usermanagement::api-or-internal-owner
+device_pairing_requests,usermanagement,active,usermanagement::api-or-internal-owner
 document_sequences,billing,active,billing::api-or-internal-owner
 edge_sync_events,deferred,dormant,no-runtime-writes
 employees,deferred,dormant,no-runtime-writes
@@ -112,11 +115,13 @@ night_audit_close_snapshots,nightaudit,active,nightaudit::api-or-internal-owner
 night_audit_issues,nightaudit,active,nightaudit::api-or-internal-owner
 night_audit_runs,nightaudit,active,nightaudit::api-or-internal-owner
 notifications,communication,active,communication::api-or-internal-owner
+operational_sessions,usermanagement,active,usermanagement::api-or-internal-owner
 organization_unit_properties,property,active,property::api-or-internal-owner
 organization_units,property,active,property::api-or-internal-owner
 ota_room_type_mappings,deferred,dormant,no-runtime-writes
 outbox_events,reliability,active,reliability::api-or-internal-owner
 outlets,pos,active,pos::api-or-internal-owner
+paired_devices,usermanagement,active,usermanagement::api-or-internal-owner
 payment_provider_accounts,payment,active,payment::api-or-internal-owner
 payment_providers,payment,active,payment::api-or-internal-owner
 payment_reconciliation_items,payment,active,payment::api-or-internal-owner

@@ -3,6 +3,7 @@ package com.mwombeki.peak.usermanagement.internal
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.shared.context.SessionClass
 import com.mwombeki.peak.usermanagement.api.AuthorizationDecision
 import com.mwombeki.peak.usermanagement.api.AuthorizationPort
 import com.mwombeki.peak.usermanagement.api.GuardMode
@@ -76,10 +77,23 @@ class JdbcAuthorizationPort(
             request.permissionCode,
         ) == true
 
-        return if (allowed) {
+        if (!allowed) {
+            return AuthorizationDecision.denied("Tenant user lacks required module permission")
+        }
+
+        val requiredClass = jdbcTemplate.query(
+            "SELECT minimum_session_class FROM permission_catalog WHERE code = ?",
+            { rs, _ -> rs.getString("minimum_session_class") },
+            request.permissionCode,
+        ).firstOrNull()
+            ?.let(SessionClass::fromPolicy)
+            ?: SessionClass.STRONG
+
+        val sessionClass = requestContextHolder.current().sessionClass
+        return if (sessionClass.satisfies(requiredClass)) {
             AuthorizationDecision.allowed()
         } else {
-            AuthorizationDecision.denied("Tenant user lacks required module permission")
+            AuthorizationDecision.denied("Session class is insufficient for this permission")
         }
     }
 
