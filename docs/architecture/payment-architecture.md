@@ -804,71 +804,33 @@ TZS-settled properties. Merchant lending, which the transaction ledger makes rea
 
 ## Snippe
 
-Built and uncertified. The contract is documented and unambiguous, which is what made it
-buildable at all.
+The guest rail. Catalog-enabled and recoverable; property ENABLE is still the
+collection gate, and production ENABLE still requires sandbox evidence on the
+account. Peak does not mark production globally certified.
+
+The contract is `docs.snippe.sh/docs/2026-01-25` (the installed
+`snippe-integration` skill):
 
 | Concern | Contract |
 |---|---|
-| Auth | `Authorization: Bearer <api key>` |
-| Hosted checkout | `POST /api/v1/sessions` — `amount` (min 500), `currency` (TZS default), `allowed_methods`, `customer`, `redirect_url`, `webhook_url`, `metadata` |
-| Identifier at initiation | `reference`, e.g. `sess_abc123def456` |
-| Status query | `GET /api/v1/sessions/:reference` — keyed on the same reference |
+| Auth | `Authorization: Bearer snp_…` |
+| Direct push (guest/POS) | `POST /v1/payments` — `payment_type=mobile`, `details.amount` integer TZS (min 500), `phone_number` `255XXXXXXXXX`, `customer.firstname/lastname/email` |
+| Identifier at initiation | `data.reference` (UUID), e.g. `9015c155-9e29-4e8e-8fe6-d5d81553c8e6` |
+| Peak's handle | `metadata.external_reference` — create has no `external_reference` field |
+| Status query | `GET /v1/payments/{reference}` — keyed on Snippe's issued reference |
+| Hosted checkout | `POST /api/v1/sessions` — `amount` (min 500), `currency` TZS, `allowed_methods`, `customer`, `webhook_url`, `metadata` |
 | Webhook signature | `X-Webhook-Signature`, HMAC-SHA256 hex over `{timestamp}.{raw_body}` |
-| Signing key | `GET /api/v1/settings/webhook-secret`, or the dashboard |
+| Webhook `data.external_reference` | Selcom's, not Peak's |
 | Events | `payment.completed`, `payment.failed`, `payment.voided`, `payment.expired` |
 
-Two things stand out against AzamPay. The recovery gate passes cleanly: `reference` is
-returned at initiation and is what the status endpoint accepts. And the signature is
-unambiguous — one header, one algorithm, one message, with an explicit instruction to verify
-against the raw body rather than a re-serialised one, which is the mistake that usually breaks
-HMAC verification.
+Amount units, base URL (`https://api.snippe.sh`), request shape, `snp_` credentials, and metadata echo are settled by the skill. A live sandbox payment is still what an operator records on certify: initiated, confirmed, and independently recovered by status query with the callback dropped. The adapter proves that recovery against a stub transport matching the docs; it does not fake a live run.
 
-`ProviderCollectionResult.redirectUrl` already exists for the hosted checkout URL. The
-`X-Webhook-Signature` scheme needs the raw request body, which the current
-`PlatformBillingWebhookController` already takes as a `String` for exactly this reason.
+`SnippePaymentProvider` implements both flows. Guest/POS collection passes
+`collectionFlow=direct_push`. Missing payer name or email fails in the adapter;
+Peak does not invent a guest.
 
-`SnippePaymentProvider` implements **hosted checkout**, status query and webhook
-verification, with a five-minute replay window on `X-Webhook-Timestamp`.
-
-It also implements the **direct USSD push** — `POST /v1/payments` with
-`payment_type=mobile` and a `phone_number`, which sends the prompt straight to the handset.
-Note the different path prefix (`/v1`, not `/api/v1`) and the different request shape:
-`details.amount`, `details.currency`, `customer.firstname/lastname/email`.
-
-`collection_flow` on the command selects between them, and each flow has its own status
-endpoint. Which one to use is read from the capability registry rather than inferred from
-the shape of a reference — sessions are prefixed `sess_` and payments are bare UUIDs, so
-inference would work today and break the day a prefix changed.
-
-Two things the direct rail needs that a push does not otherwise imply. Snippe requires the
-payer's name and email, which Peak looks up from the tenant user who pressed Pay; sending
-placeholders into a payment record would be worse than failing, so it fails. And the
-documented create-payment body has **no `external_reference` field**, only `metadata` — so
-Peak's reference travels in metadata, and the callback parser looks in both places. Matching
-on Snippe's own reference alone would work until a callback arrived before the initiation
-response had been stored.
-
-The distinction matters for Peak's own billing: the subscription UX is "click Pay, answer
-the prompt", which is the direct rail. Hosted checkout is the better fit for amounts that
-cannot go by USSD at all.
-
-Three things remain before the rail can be enabled, none settleable by reading:
-
-**Amount units.** Snippe documents "Integer (smallest unit)". For TZS the smallest
-circulating unit *is* the shilling, and the magnitudes agree — a documented minimum of 500 is
-sensible in shillings and absurd in hundredths — so the adapter treats the value as whole
-shillings. If that is wrong the failure is safe rather than silent: settlement already refuses
-a callback whose amount disagrees with the attempt, so every payment would be rejected loudly
-rather than settled at a hundredth of its value. One sandbox payment settles it.
-
-**Which credential sessions accept.** The sessions page documents a JWT bearer while the
-payments API and the authentication page document an `snp_` API key. The base URL is
-`https://api.snippe.sh`. That inconsistency is exactly the sort of small documentation
-disagreement that invalidates an adapter, so it is settled by a call rather than by reading.
+ClickPesa stays a dormant complete-loop candidate. `http_gateway` stays off.
 
 **Bank collection is not established.** Snippe documents bank *payouts* to 40+ Tanzanian
 banks, and hosted sessions list `allowed_methods: ["mobile_money"]`. Supporting bank
 disbursement is not the same as accepting bank collection, and no row claims otherwise.
-
-**Certification**, on the same terms as any other rail: a sandbox payment initiated, confirmed
-by callback, and then independently recovered by status query with the callback dropped.

@@ -28,18 +28,15 @@ import org.testcontainers.junit.jupiter.Testcontainers
  *      -> payment_transactions row carrying the network
  *      -> outbox event
  *      -> worker -> adapter -> USSD push
- *      -> provider confirmation -> folio payment posted        <-- see the note below
+ *      -> provider confirmation -> folio payment posted
  * ```
  *
- * Everything above the line is exercised here. The confirmation leg is **not**, and not
- * because it is hard to test: the guest webhook route is
- * `/api/v1/payments/webhooks/clickpesa` and `PaymentWebhookService` refuses any provider
- * that is not ClickPesa. So there is exactly one guest rail with a complete loop, and it is
- * the one marked dormant. A launch narrative of "front desk clicks, guest gets a prompt,
- * hotel is auto-reconciled" does not yet exist on the rail Peak intends to launch with.
- *
- * That is a gap in the product, not in the tests, and writing a green end-to-end test
- * against a rail that cannot confirm would hide it.
+ * Initiation is exercised here. Confirmation is covered by
+ * `AnyProviderCallbackConfirmsIntegrationTests` (signed callback on any guest
+ * rail, including Snippe) and by the Snippe adapter's dropped-callback status
+ * query. ClickPesa remains a dormant complete-loop candidate, not the launch
+ * rail; these fixtures still use it where the test is about network recording
+ * rather than which PSP Peak will collect on.
  */
 @Import(TestcontainersConfiguration::class)
 @SpringBootTest
