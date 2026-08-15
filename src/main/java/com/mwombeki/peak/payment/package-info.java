@@ -9,7 +9,8 @@
                 "audit::api",
                 "reliability::api",
                 "billing::api",
-                "realtime::api"
+                "realtime::api",
+                "communications::api"
         }
 )
 package com.mwombeki.peak.payment;

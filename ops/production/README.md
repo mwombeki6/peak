@@ -104,8 +104,15 @@ ops/scripts/deploy.sh
 - Keep `PEAK_ALLOW_TRUSTED_JWT_IDENTITY_CLAIMS=false` in production.
 - Keep `PEAK_COMMUNICATION_DELIVERY_LOCAL_PROVIDER_ENABLED=false` in production.
 - Route worker SMS to Beem (`PEAK_COMMUNICATION_ROUTING_SMS=beem`) with an API
-  key, secret, and active Sender ID. WhatsApp is send-only and stays unrouted
-  until a from-number is set. There is no inbound WhatsApp webhook.
+  key, secret, and active Sender ID. Guest WhatsApp is optional: leave
+  `PEAK_COMMUNICATION_ROUTING_WHATSAPP` empty until a Beem WhatsApp from-number
+  exists. Routing it to `beem` also requires
+  `PEAK_COMMUNICATION_PROVIDERS_BEEM_WHATSAPP_FROM`, an HTTPS
+  `PEAK_COMMUNICATION_PROVIDERS_BEEM_WHATSAPP_CALLBACK_URL`, and
+  `apichatcore.beem.africa` on the outbound allowlist. The callback is a
+  delivery receipt only — Peak does not run an inbound WhatsApp chatbot.
+  Beem Moja session text only works inside a 24-hour customer-care window;
+  Peak does not invent a template-broadcast host.
 - Configure the worker HTTP communication gateway with an HTTPS base URL and a
   secret API key for email. The provider contract is `POST /v1/messages`.
 - Generate a random 32-byte envelope key, encode it as base64, store it in

@@ -39,6 +39,19 @@ class NotificationRoutingEnvBindingTests {
         )
     }
 
+    @Test
+    fun whatsappRoutingBindsFromTheComposeEnvironmentVariable() {
+        val bound = bindFromEnvironment(
+            "PEAK_COMMUNICATION_ROUTING_WHATSAPP" to "beem",
+        )
+
+        assertEquals(
+            mapOf("whatsapp" to "beem"),
+            bound.channelRoutes(),
+            "PEAK_COMMUNICATION_ROUTING_WHATSAPP must reach peak.communication.routing.whatsapp",
+        )
+    }
+
     /**
      * The shape that does not work, kept so nobody reintroduces it.
      *

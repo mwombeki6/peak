@@ -421,6 +421,28 @@ if [ "$(value_of PEAK_COMMUNICATION_ROUTING_SMS)" != "beem" ]; then
   fail "PEAK_COMMUNICATION_ROUTING_SMS must be beem"
 fi
 
+whatsapp_route="$(value_of PEAK_COMMUNICATION_ROUTING_WHATSAPP)"
+if [ "$whatsapp_route" = "local" ]; then
+  fail "PEAK_COMMUNICATION_ROUTING_WHATSAPP must not be local in production"
+fi
+if [ "$whatsapp_route" = "beem" ]; then
+  if [ -z "$(value_of PEAK_COMMUNICATION_PROVIDERS_BEEM_WHATSAPP_FROM)" ]; then
+    fail "PEAK_COMMUNICATION_PROVIDERS_BEEM_WHATSAPP_FROM is required when WhatsApp is routed to beem"
+  fi
+  callback="$(value_of PEAK_COMMUNICATION_PROVIDERS_BEEM_WHATSAPP_CALLBACK_URL)"
+  if [ -z "$callback" ]; then
+    fail "PEAK_COMMUNICATION_PROVIDERS_BEEM_WHATSAPP_CALLBACK_URL is required when WhatsApp is routed to beem"
+  fi
+  case "$callback" in
+    https://*) ;;
+    *) fail "PEAK_COMMUNICATION_PROVIDERS_BEEM_WHATSAPP_CALLBACK_URL must use https" ;;
+  esac
+  case ",$(value_of PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS)," in
+    *,apichatcore.beem.africa,*) ;;
+    *) fail "PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS must include apichatcore.beem.africa when WhatsApp is routed to beem" ;;
+  esac
+fi
+
 if [ "$(value_of PEAK_COMMUNICATION_PROVIDERS_BEEM_ENABLED)" != "true" ]; then
   fail "PEAK_COMMUNICATION_PROVIDERS_BEEM_ENABLED must be true in production"
 fi

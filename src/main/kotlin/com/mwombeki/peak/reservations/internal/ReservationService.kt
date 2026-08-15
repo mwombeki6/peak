@@ -4,6 +4,9 @@ import com.mwombeki.peak.audit.api.AuditPort
 import com.mwombeki.peak.audit.api.AuditResource
 import com.mwombeki.peak.audit.api.TenantAuditEvent
 import com.mwombeki.peak.billing.api.BillingPort
+import com.mwombeki.peak.communication.api.GuestNotificationCommand
+import com.mwombeki.peak.communication.api.GuestNotificationPort
+import com.mwombeki.peak.communication.api.GuestNotificationPurposes
 import com.mwombeki.peak.reliability.api.IdempotencyCommand
 import com.mwombeki.peak.reliability.api.IdempotencyPort
 import com.mwombeki.peak.reliability.api.IdempotencyReservation
@@ -46,6 +49,7 @@ class ReservationService(
     private val jdbcTemplate: JdbcTemplate,
     private val tenantRequestContext: TenantRequestContext,
     private val billingPort: BillingPort,
+    private val guestNotificationPort: GuestNotificationPort,
     private val idempotencyPort: IdempotencyPort,
     private val auditPort: AuditPort,
     private val outboxPort: OutboxPort,
@@ -61,7 +65,7 @@ class ReservationService(
     ): ReservationCheckInSnapshot {
         return jdbcTemplate.query(
             """
-            SELECT r.status, r.check_in_date, r.check_out_date,
+            SELECT r.status, r.check_in_date, r.check_out_date, r.primary_guest_id,
                    rr.id AS reservation_room_id, rr.room_type_id, rr.room_id, rr.folio_id
             FROM reservations r
             JOIN reservation_rooms rr
@@ -82,6 +86,7 @@ class ReservationService(
                     roomTypeId = rs.getObject("room_type_id", UUID::class.java),
                     roomId = rs.getObject("room_id", UUID::class.java),
                     folioId = rs.getObject("folio_id", UUID::class.java),
+                    primaryGuestId = rs.getObject("primary_guest_id", UUID::class.java),
                 )
             },
             tenantId,
@@ -654,6 +659,7 @@ class ReservationService(
         requireGuestUsable(actor.tenantId, propertyId, request.primaryGuestId)
         val reservationId = UUID.randomUUID()
         val reservationRoomId = UUID.randomUUID()
+        val confirmation = confirmationNumber()
         val totalAmount = totalRoomAmount(request.checkInDate, request.checkOutDate, request.ratePerNight)
         jdbcTemplate.update(
             """
@@ -668,7 +674,7 @@ class ReservationService(
             actor.tenantId,
             propertyId,
             request.primaryGuestId,
-            confirmationNumber(),
+            confirmation,
             request.checkInDate,
             request.checkOutDate,
             request.adults,
@@ -740,6 +746,21 @@ class ReservationService(
                 "totalAmount" to totalAmount,
             ),
             idempotencyKeyId = idempotencyKeyId,
+        )
+        guestNotificationPort.notifyIfReachable(
+            GuestNotificationCommand(
+                tenantId = actor.tenantId,
+                propertyId = propertyId,
+                guestId = request.primaryGuestId,
+                purpose = GuestNotificationPurposes.RESERVATION,
+                aggregateType = RESERVATIONS,
+                aggregateId = reservationId,
+                variables = mapOf(
+                    "propertyName" to propertyName(actor.tenantId, propertyId),
+                    "confirmationNumber" to confirmation,
+                    "checkInDate" to request.checkInDate.toString(),
+                ),
+            ),
         )
         return ReservationMutationReceipt(reservationId, propertyId, "confirmed", folioId, changed = true, replayed = false)
     }
@@ -1096,6 +1117,19 @@ class ReservationService(
             tenantId,
             guestId,
         ).singleOrNull()
+    }
+
+    private fun propertyName(tenantId: UUID, propertyId: UUID): String {
+        return jdbcTemplate.query(
+            """
+            SELECT name
+            FROM properties
+            WHERE tenant_id = ? AND id = ?
+            """.trimIndent(),
+            { rs, _ -> rs.getString("name") },
+            tenantId,
+            propertyId,
+        ).firstOrNull()?.trim().orEmpty()
     }
 
     private fun totalRoomAmount(checkInDate: LocalDate, checkOutDate: LocalDate, ratePerNight: BigDecimal): BigDecimal {

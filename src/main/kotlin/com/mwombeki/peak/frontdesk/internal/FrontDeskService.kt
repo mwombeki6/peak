@@ -4,6 +4,9 @@ import com.mwombeki.peak.audit.api.AuditPort
 import com.mwombeki.peak.audit.api.AuditResource
 import com.mwombeki.peak.audit.api.TenantAuditEvent
 import com.mwombeki.peak.billing.api.BillingPort
+import com.mwombeki.peak.communication.api.GuestNotificationCommand
+import com.mwombeki.peak.communication.api.GuestNotificationPort
+import com.mwombeki.peak.communication.api.GuestNotificationPurposes
 import com.mwombeki.peak.frontdesk.api.CheckInRequest
 import com.mwombeki.peak.frontdesk.api.CheckoutRequest
 import com.mwombeki.peak.frontdesk.api.FrontDeskConflictException
@@ -47,6 +50,7 @@ class FrontDeskService(
     private val propertyOperationsPort: PropertyOperationsPort,
     private val guestIdentityReadinessPort: GuestIdentityReadinessPort,
     private val billingPort: BillingPort,
+    private val guestNotificationPort: GuestNotificationPort,
     private val fiscalStatusPort: FiscalStatusPort,
     private val idempotencyPort: IdempotencyPort,
     private val auditPort: AuditPort,
@@ -344,6 +348,19 @@ class FrontDeskService(
             ),
             idempotencyKeyId = idempotencyKeyId,
         )
+        guestNotificationPort.notifyIfReachable(
+            GuestNotificationCommand(
+                tenantId = actor.tenantId,
+                propertyId = propertyId,
+                guestId = reservation.primaryGuestId,
+                purpose = GuestNotificationPurposes.CHECK_IN,
+                aggregateType = STAYS,
+                aggregateId = stayId,
+                variables = mapOf(
+                    "propertyName" to propertyName(actor.tenantId, propertyId),
+                ),
+            ),
+        )
         return FrontDeskMutationReceipt(
             propertyId = propertyId,
             reservationId = reservationId,
@@ -615,6 +632,19 @@ class FrontDeskService(
             is FrontDeskMutationReceipt -> response.stayId ?: response.reservationId
             else -> null
         }
+    }
+
+    private fun propertyName(tenantId: UUID, propertyId: UUID): String {
+        return jdbcTemplate.query(
+            """
+            SELECT name
+            FROM properties
+            WHERE tenant_id = ? AND id = ?
+            """.trimIndent(),
+            { rs, _ -> rs.getString("name") },
+            tenantId,
+            propertyId,
+        ).firstOrNull()?.trim().orEmpty()
     }
 
     private fun mapStay(rs: ResultSet, rowNumber: Int): StayResponse {

@@ -142,12 +142,13 @@ peak:
     # SMS to Beem and email to the HTTP gateway, and refuses to start if it names
     # an adapter that is not enabled — which is the intended way to find out.
     #
-    # whatsapp and voice_phone are deliberately absent: WhatsApp is send-only and
-    # only inside an active Beem session, so a default pointing at it would break
-    # startup everywhere it is not bought.
+    # whatsapp stays blank until a Beem from-number exists. Routing it without
+    # that number fails worker startup. voice_phone is the same shape.
     routing:
       email: ${PEAK_COMMUNICATION_ROUTING_EMAIL:local}
       sms: ${PEAK_COMMUNICATION_ROUTING_SMS:local}
+      whatsapp: ${PEAK_COMMUNICATION_ROUTING_WHATSAPP:}
+      voice-phone: ${PEAK_COMMUNICATION_ROUTING_VOICE_PHONE:}
     providers:
       beem:
         enabled: ${PEAK_COMMUNICATION_PROVIDERS_BEEM_ENABLED:false}
@@ -157,6 +158,7 @@ peak:
         secret-key: ${PEAK_COMMUNICATION_PROVIDERS_BEEM_SECRET_KEY:}
         source-addr: ${PEAK_COMMUNICATION_PROVIDERS_BEEM_SOURCE_ADDR:}
         whatsapp-from: ${PEAK_COMMUNICATION_PROVIDERS_BEEM_WHATSAPP_FROM:}
+        whatsapp-callback-url: ${PEAK_COMMUNICATION_PROVIDERS_BEEM_WHATSAPP_CALLBACK_URL:}
   usermanagement:
     invitation:
       expose-token-in-response: ${PEAK_INVITATION_EXPOSE_TOKEN_IN_RESPONSE:false}

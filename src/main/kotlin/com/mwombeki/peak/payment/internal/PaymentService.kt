@@ -7,6 +7,9 @@ import com.mwombeki.peak.billing.api.BillingPort
 import com.mwombeki.peak.billing.api.ConfirmedPaymentRequest
 import com.mwombeki.peak.billing.api.ConfirmedPaymentRefundRequest
 import com.mwombeki.peak.billing.api.ConfirmedPaymentReversalRequest
+import com.mwombeki.peak.communication.api.GuestNotificationCommand
+import com.mwombeki.peak.communication.api.GuestNotificationPort
+import com.mwombeki.peak.communication.api.GuestNotificationPurposes
 import com.mwombeki.peak.payment.api.CashSessionResponse
 import com.mwombeki.peak.payment.api.CloseCashSessionRequest
 import com.mwombeki.peak.payment.api.CollectCashPaymentRequest
@@ -72,6 +75,7 @@ class PaymentService(
     private val auditPort: AuditPort,
     private val outboxPort: OutboxPort,
     private val billingPort: BillingPort,
+    private val guestNotificationPort: GuestNotificationPort,
     private val transactionTemplate: TransactionTemplate,
     private val objectMapper: ObjectMapper,
     private val secretResolver: SecretReferenceResolver,
@@ -564,6 +568,23 @@ class PaymentService(
                             ),
                         ),
                     )
+                    guestIdForFolio(actor.tenantId, propertyId, request.folioId)?.let { guestId ->
+                        guestNotificationPort.notifyIfReachable(
+                            GuestNotificationCommand(
+                                tenantId = actor.tenantId,
+                                propertyId = propertyId,
+                                guestId = guestId,
+                                purpose = GuestNotificationPurposes.PAYMENT_PROMPT,
+                                aggregateType = PAYMENT_TRANSACTIONS,
+                                aggregateId = transactionId,
+                                variables = mapOf(
+                                    "propertyName" to propertyName(actor.tenantId, propertyId),
+                                    "amount" to amount.toPlainString(),
+                                    "currency" to folio.currency,
+                                ),
+                            ),
+                        )
+                    }
                 }
         }
     }
@@ -2192,6 +2213,44 @@ class PaymentService(
             "Payment amount exceeds the outstanding folio balance"
         }
         return folio
+    }
+
+    private fun guestIdForFolio(
+        tenantId: UUID,
+        propertyId: UUID,
+        folioId: UUID,
+    ): UUID? {
+        return jdbcTemplate.query(
+            """
+            SELECT r.primary_guest_id
+            FROM reservation_rooms rr
+            JOIN reservations r
+              ON r.tenant_id = rr.tenant_id
+             AND r.id = rr.reservation_id
+             AND r.deleted_at IS NULL
+            WHERE rr.tenant_id = ?
+              AND r.property_id = ?
+              AND rr.folio_id = ?
+            LIMIT 1
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("primary_guest_id", UUID::class.java) },
+            tenantId,
+            propertyId,
+            folioId,
+        ).firstOrNull()
+    }
+
+    private fun propertyName(tenantId: UUID, propertyId: UUID): String {
+        return jdbcTemplate.query(
+            """
+            SELECT name
+            FROM properties
+            WHERE tenant_id = ? AND id = ?
+            """.trimIndent(),
+            { rs, _ -> rs.getString("name") },
+            tenantId,
+            propertyId,
+        ).firstOrNull()?.trim().orEmpty()
     }
 
     private fun requireCashSession(

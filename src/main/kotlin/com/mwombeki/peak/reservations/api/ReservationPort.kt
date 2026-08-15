@@ -75,6 +75,7 @@ data class ReservationCheckInSnapshot(
     val roomTypeId: UUID,
     val roomId: UUID?,
     val folioId: UUID?,
+    val primaryGuestId: UUID,
 )
 
 @NamedInterface("api")
