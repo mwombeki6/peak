@@ -27,6 +27,11 @@ accounts, checksum callbacks, refunds, reversals, and reconciliation.
 
 ## Snippe
 
+Two merchants, one brand. They never share credentials or webhooks.
+
+- **Tenant pays Peak**: Peak-owned Snippe via `peak.platformbilling` (`primary-provider=snippe`, webhook `/api/v1/platform-billing/webhooks/snippe`). Not `payment_provider_accounts`.
+- **Guest pays hotel**: property `payment_provider_accounts` (optional after activate). Guest callbacks stay on `/api/v1/payments/webhooks/{provider}/accounts/{providerAccountId}`.
+
 Guest and POS collection is **direct push**: `POST /v1/payments` with
 `payment_type=mobile`, TZS integers (minimum 500), and the payer's name and
 email. Peak's handle travels in `metadata.external_reference`. Webhook

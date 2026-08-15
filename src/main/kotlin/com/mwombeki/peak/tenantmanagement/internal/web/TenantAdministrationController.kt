@@ -9,6 +9,7 @@ import com.mwombeki.peak.tenantmanagement.api.TenantAdministrationPort
 import com.mwombeki.peak.tenantmanagement.api.TenantModuleCommand
 import com.mwombeki.peak.tenantmanagement.api.TenantModuleMutationReceipt
 import com.mwombeki.peak.tenantmanagement.api.TenantModuleSummary
+import com.mwombeki.peak.tenantmanagement.api.TenantOnboardingResponse
 import com.mwombeki.peak.tenantmanagement.api.TenantReadinessResponse
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
@@ -64,6 +65,13 @@ class TenantAdministrationController(
         @PathVariable tenantId: UUID,
     ): TenantReadinessResponse {
         return tenantAdministrationPort.getTenantReadiness(tenantId)
+    }
+
+    @GetMapping("/onboarding")
+    fun getTenantOnboarding(
+        @PathVariable tenantId: UUID,
+    ): TenantOnboardingResponse {
+        return tenantAdministrationPort.getTenantOnboarding(tenantId)
     }
 
     @ExceptionHandler(TenantAdministrationNotFoundException::class)

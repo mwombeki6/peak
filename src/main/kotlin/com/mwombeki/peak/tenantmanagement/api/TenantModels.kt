@@ -84,4 +84,5 @@ data class TenantResponse(
     val status: TenantStatus,
     val planId: UUID,
     val businessEmail: String,
+    val nextAction: TenantOnboardingNextAction? = null,
 )

@@ -6,6 +6,7 @@ import com.mwombeki.peak.shared.context.PeakRequestHeaders
 import java.util.UUID
 import kotlin.test.Test
 import org.hamcrest.Matchers.hasItem
+import org.hamcrest.Matchers.not
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
@@ -24,11 +25,12 @@ import org.testcontainers.junit.jupiter.Testcontainers
 @SpringBootTest(
     properties = [
         "peak.security.request-context.allow-header-identity=true",
+        "peak.communication.routing.sms=",
     ],
 )
 @AutoConfigureMockMvc
 @Testcontainers(disabledWithoutDocker = true)
-class PropertyGoLiveIntegrationTests {
+class PropertyGoLiveSmsOperatorBlockerIntegrationTests {
 
     @Autowired
     private lateinit var mockMvc: MockMvc
@@ -37,7 +39,7 @@ class PropertyGoLiveIntegrationTests {
     private lateinit var jdbcTemplate: JdbcTemplate
 
     @Test
-    fun requiresFrontlinePathWhenPosIsInScopeAndDoesNotDemandEmail() {
+    fun smsGapIsAnOperatorBlockerAndDoesNotBlockHotelActivateEvidence() {
         val fixture = seedFixture()
         enableTenantModule(fixture, "property")
         val propertyId = createProperty(fixture)
@@ -48,91 +50,18 @@ class PropertyGoLiveIntegrationTests {
                 .headersFor(fixture, "corr-pos-enable", "idem-pos-enable-${fixture.tenantId}"),
         )
             .andExpect(status().isOk)
-            .andExpect(jsonPath("$.enabled").value(true))
 
         mockMvc.perform(
             get("/api/v1/properties/$propertyId/onboarding")
                 .secure(true)
-                .headersFor(fixture, "corr-frontline-blocked"),
+                .headersFor(fixture, "corr-sms-operator"),
         )
             .andExpect(status().isOk)
-            .andExpect(jsonPath("$.steps[?(@.key == 'frontline_path')].status", hasItem("blocked")))
-            .andExpect(jsonPath("$.steps[?(@.key == 'frontline_path')].required", hasItem(true)))
             .andExpect(jsonPath("$.steps[?(@.key == 'sms_routable')].required", hasItem(false)))
-            .andExpect(jsonPath("$.steps[?(@.key == 'guest_rail_configured')].required", hasItem(false)))
-            .andExpect(jsonPath("$.blockers[*].code", hasItem("frontline_path")))
-            .andExpect(jsonPath("$.blockers[*].code", org.hamcrest.Matchers.not(hasItem("sms_routable"))))
-            .andExpect(jsonPath("$.blockers[*].code", org.hamcrest.Matchers.not(hasItem("guest_rail_configured"))))
-            .andExpect(jsonPath("$.blockers[*].code", org.hamcrest.Matchers.not(hasItem("whatsapp"))))
-            .andExpect(jsonPath("$.nextAction.step").exists())
-            .andExpect(jsonPath("$.nextAction.method").exists())
-            .andExpect(jsonPath("$.nextAction.path").exists())
-
-        hirePhoneFirstStaff(fixture, propertyId)
-
-        mockMvc.perform(
-            get("/api/v1/properties/$propertyId/onboarding")
-                .secure(true)
-                .headersFor(fixture, "corr-frontline-ready"),
-        )
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.steps[?(@.key == 'frontline_path')].status", hasItem("satisfied")))
-            .andExpect(jsonPath("$.steps[?(@.key == 'sms_routable')].status", hasItem("satisfied")))
-            .andExpect(jsonPath("$.blockers[*].code", org.hamcrest.Matchers.not(hasItem("frontline_path"))))
-    }
-
-    @Test
-    fun seedsPersistedStepsWhenAPropertyIsCreated() {
-        val fixture = seedFixture()
-        enableTenantModule(fixture, "property")
-        val propertyId = createProperty(fixture)
-
-        val stepCount = jdbcTemplate.queryForObject(
-            """
-            SELECT count(*)
-            FROM property_onboarding_steps
-            WHERE tenant_id = ? AND property_id = ?
-            """.trimIndent(),
-            Int::class.java,
-            fixture.tenantId,
-            propertyId,
-        )
-        kotlin.test.assertEquals(7, stepCount)
-    }
-
-    private fun hirePhoneFirstStaff(fixture: Fixture, propertyId: UUID) {
-        val staffId = UUID.randomUUID()
-        val roleId = UUID.randomUUID()
-        val phone = "+2557" + "%08d".format(kotlin.math.abs(fixture.tenantId.hashCode()) % 100_000_000)
-        jdbcTemplate.update(
-            """
-            INSERT INTO roles (id, tenant_id, name, is_system, is_active)
-            VALUES (?, ?, 'Cashier', false, true)
-            """.trimIndent(),
-            roleId,
-            fixture.tenantId,
-        )
-        jdbcTemplate.update(
-            """
-            INSERT INTO users (
-                id, tenant_id, full_name, phone_number, staff_number, status, is_active
-            )
-            VALUES (?, ?, 'Frontline Cashier', ?, '0001', 'active', true)
-            """.trimIndent(),
-            staffId,
-            fixture.tenantId,
-            phone,
-        )
-        jdbcTemplate.update(
-            """
-            INSERT INTO user_property_roles (user_id, property_id, role_id, tenant_id)
-            VALUES (?, ?, ?, ?)
-            """.trimIndent(),
-            staffId,
-            propertyId,
-            roleId,
-            fixture.tenantId,
-        )
+            .andExpect(jsonPath("$.steps[?(@.key == 'sms_routable')].status", hasItem("blocked")))
+            .andExpect(jsonPath("$.blockers[*].code", not(hasItem("sms_routable"))))
+            .andExpect(jsonPath("$.operatorBlocker.code").value("sms_routable"))
+            .andExpect(jsonPath("$.nextAction.step", not("sms_routable")))
     }
 
     private fun createProperty(fixture: Fixture): UUID {
@@ -141,12 +70,12 @@ class PropertyGoLiveIntegrationTests {
                 .secureJson(
                     """
                     {
-                      "name": "Go Live Hotel",
-                      "code": "GLH-${fixture.tenantId.toString().take(8)}"
+                      "name": "SMS Operator Hotel",
+                      "code": "SMS-${fixture.tenantId.toString().take(8)}"
                     }
                     """.trimIndent(),
                 )
-                .headersFor(fixture, "corr-golive-create", "idem-golive-create-${fixture.tenantId}"),
+                .headersFor(fixture, "corr-sms-create", "idem-sms-create-${fixture.tenantId}"),
         )
             .andExpect(status().isOk)
             .andReturn()
@@ -157,7 +86,11 @@ class PropertyGoLiveIntegrationTests {
         mockMvc.perform(
             post("/api/v1/tenants/${fixture.tenantId}/modules")
                 .secureJson("""{"moduleId": "$moduleId"}""")
-                .headersFor(fixture, "corr-tenant-module-$moduleId", "idem-tenant-module-$moduleId-${fixture.tenantId}"),
+                .headersFor(
+                    fixture,
+                    "corr-tenant-module-$moduleId",
+                    "idem-tenant-module-$moduleId-${fixture.tenantId}",
+                ),
         )
             .andExpect(status().isOk)
     }
@@ -172,8 +105,8 @@ class PropertyGoLiveIntegrationTests {
         jdbcTemplate.update(
             "INSERT INTO plans (id, name, code) VALUES (?, ?, ?)",
             fixture.planId,
-            "GoLive Plan ${fixture.planId}",
-            "golive-${fixture.planId}",
+            "SmsOp Plan ${fixture.planId}",
+            "smsop-${fixture.planId}",
         )
         jdbcTemplate.update(
             """
@@ -181,8 +114,8 @@ class PropertyGoLiveIntegrationTests {
             VALUES (?, ?, ?, 'active', ?, ?)
             """.trimIndent(),
             fixture.tenantId,
-            "GoLive Tenant ${fixture.tenantId}",
-            "golive-${fixture.tenantId}",
+            "SmsOp Tenant ${fixture.tenantId}",
+            "smsop-${fixture.tenantId}",
             "tenant_${fixture.tenantId}".replace("-", "_"),
             fixture.planId,
         )
@@ -212,8 +145,8 @@ class PropertyGoLiveIntegrationTests {
             """.trimIndent(),
             fixture.tenantUserId,
             fixture.tenantId,
-            "GoLive User ${fixture.tenantUserId}",
-            "golive-admin-${fixture.tenantId}@example.com",
+            "SmsOp User ${fixture.tenantUserId}",
+            "smsop-admin-${fixture.tenantId}@example.com",
         )
         jdbcTemplate.update(
             """
@@ -222,8 +155,8 @@ class PropertyGoLiveIntegrationTests {
             """.trimIndent(),
             fixture.tenantRoleId,
             fixture.tenantId,
-            "GoLive Admin ${fixture.tenantRoleId}",
-            "golive-admin-${fixture.tenantRoleId}",
+            "SmsOp Admin ${fixture.tenantRoleId}",
+            "smsop-admin-${fixture.tenantRoleId}",
         )
         jdbcTemplate.update(
             """

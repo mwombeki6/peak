@@ -8,6 +8,7 @@ interface TenantAdministrationPort {
     fun enableTenantModule(command: TenantModuleCommand): TenantModuleMutationReceipt
     fun disableTenantModule(command: TenantModuleCommand): TenantModuleMutationReceipt
     fun getTenantReadiness(tenantId: UUID): TenantReadinessResponse
+    fun getTenantOnboarding(tenantId: UUID): TenantOnboardingResponse
 }
 
 data class TenantModuleCommand(

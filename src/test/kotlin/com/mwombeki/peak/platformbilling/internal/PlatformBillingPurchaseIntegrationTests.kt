@@ -3,6 +3,7 @@ package com.mwombeki.peak.platformbilling.internal
 import com.mwombeki.peak.TestcontainersConfiguration
 import com.mwombeki.peak.platformbilling.api.PlatformBillingConflictException
 import com.mwombeki.peak.platformbilling.api.PlatformBillingPort
+import com.mwombeki.peak.platformbilling.api.CollectionFlow
 import com.mwombeki.peak.platformbilling.api.PaymentMethod
 import com.mwombeki.peak.platformbilling.api.ProductKind
 import com.mwombeki.peak.platformbilling.api.PurchaseStatus
@@ -255,14 +256,18 @@ class PlatformBillingPurchaseIntegrationTests {
             "precondition: the selection should exceed the mobile money ceiling",
         )
 
-        val mobileMoney = quote.paymentMethods.single { it.method == PaymentMethod.MOBILE_MONEY }
-        assertFalse(
-            mobileMoney.eligible,
-            "mobile money cannot carry ${quote.totalAmount.toPlainString()} in one transaction",
+        val mobileMoney = quote.paymentMethods.filter {
+            it.method == PaymentMethod.MOBILE_MONEY &&
+                it.collectionFlow == CollectionFlow.DIRECT_PUSH
+        }
+        assertTrue(mobileMoney.isNotEmpty(), "Peak must offer Snippe direct_push mobile money")
+        assertTrue(
+            mobileMoney.all { !it.eligible },
+            "direct_push cannot carry ${quote.totalAmount.toPlainString()} in one transaction",
         )
         assertTrue(
-            mobileMoney.ineligibleReason.orEmpty().contains("limit"),
-            "the customer must be told why: ${mobileMoney.ineligibleReason}",
+            mobileMoney.all { it.ineligibleReason.orEmpty().contains("limit") },
+            "the customer must be told why: ${mobileMoney.map { it.ineligibleReason }}",
         )
     }
 
@@ -279,6 +284,14 @@ class PlatformBillingPurchaseIntegrationTests {
         assertTrue(
             quote.paymentMethods.any { it.method == PaymentMethod.MOBILE_MONEY && it.eligible },
             "a 30,000 TZS monthly subscription is exactly what USSD is for",
+        )
+        val eligibleMobile = quote.paymentMethods.filter {
+            it.method == PaymentMethod.MOBILE_MONEY && it.eligible
+        }
+        assertEquals(setOf("snippe"), eligibleMobile.map { it.provider }.toSet())
+        assertTrue(
+            eligibleMobile.any { it.collectionFlow == CollectionFlow.DIRECT_PUSH },
+            "Peak SaaS collection is Snippe direct_push, not a hotel account",
         )
     }
 

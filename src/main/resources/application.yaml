@@ -68,6 +68,17 @@ peak:
       http-gateway:
         connect-timeout: ${PEAK_PAYMENT_HTTP_CONNECT_TIMEOUT:3s}
         request-timeout: ${PEAK_PAYMENT_HTTP_REQUEST_TIMEOUT:15s}
+  # Peak SaaS collection into Peak's own merchant. Not hotel guest rails
+  # (`payment_provider_accounts`). Webhook: POST /api/v1/platform-billing/webhooks/snippe
+  platformbilling:
+    enabled: ${PEAK_PLATFORMBILLING_ENABLED:true}
+    primary-provider: ${PEAK_PLATFORMBILLING_PRIMARY_PROVIDER:snippe}
+    fallback-provider: ${PEAK_PLATFORMBILLING_FALLBACK_PROVIDER:}
+    app-name: ${PEAK_PLATFORMBILLING_APP_NAME:}
+    client-id-secret-ref: ${PEAK_PLATFORMBILLING_CLIENT_ID_SECRET_REF:}
+    api-key-secret-ref: ${PEAK_PLATFORMBILLING_API_KEY_SECRET_REF:}
+    checksum-key-secret-ref: ${PEAK_PLATFORMBILLING_CHECKSUM_KEY_SECRET_REF:}
+    endpoint-url: ${PEAK_PLATFORMBILLING_ENDPOINT_URL:}
   fiscal:
     providers:
       http-gateway:

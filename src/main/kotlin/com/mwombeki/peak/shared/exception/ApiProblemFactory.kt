@@ -17,6 +17,7 @@ class ApiProblemFactory(
         status: HttpStatus,
         title: String,
         detail: String?,
+        properties: Map<String, Any?> = emptyMap(),
     ): ResponseEntity<ProblemDetail> {
         val context = requestContextHolder.currentOrNull()
         val problem = ProblemDetail.forStatusAndDetail(
@@ -26,6 +27,11 @@ class ApiProblemFactory(
         problem.title = title
         problem.setProperty("traceId", context?.correlationId ?: UUID.randomUUID().toString())
         problem.setProperty("path", context?.requestPath ?: "")
+        properties.forEach { (key, value) ->
+            if (value != null) {
+                problem.setProperty(key, value)
+            }
+        }
         return ResponseEntity.status(status).body(problem)
     }
 }

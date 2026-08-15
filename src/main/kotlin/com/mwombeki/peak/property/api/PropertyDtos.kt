@@ -66,6 +66,8 @@ data class PropertyReadinessResponse(
     val steps: List<PropertyOnboardingStepView> = emptyList(),
     val blockers: List<PropertyGoLiveBlockerView> = emptyList(),
     val collectionEnabled: Boolean = false,
+    val nextAction: OnboardingNextAction? = null,
+    val operatorBlocker: OperatorBlockerView? = null,
 )
 
 data class PropertyOnboardingResponse(
@@ -77,6 +79,46 @@ data class PropertyOnboardingResponse(
     val collectionEnabled: Boolean,
     val steps: List<PropertyOnboardingStepView>,
     val blockers: List<PropertyGoLiveBlockerView>,
+    val nextAction: OnboardingNextAction? = null,
+    val operatorBlocker: OperatorBlockerView? = null,
+)
+
+data class PropertyBootstrapResponse(
+    val propertyId: UUID,
+    val tenantId: UUID,
+    val status: String,
+    val changed: Boolean,
+    val replayed: Boolean,
+    val nextAction: OnboardingNextAction?,
+    val workflowStatus: String,
+    val currentStep: String?,
+    val isReady: Boolean,
+    val steps: List<PropertyOnboardingStepView>,
+    val blockers: List<PropertyGoLiveBlockerView>,
+    val operatorBlocker: OperatorBlockerView?,
+)
+
+/**
+ * The one hotel-fixable thing to do now. [path] is the versioned API the wizard
+ * should call. [bodyHint] is a sample body, not a secret or a fake rail.
+ */
+data class OnboardingNextAction(
+    val step: String,
+    val title: String,
+    val why: String,
+    val method: String,
+    val path: String,
+    val bodyHint: Map<String, Any?>? = null,
+)
+
+/**
+ * A Peak-ops fact the hotel cannot change. SMS routing is
+ * `PEAK_COMMUNICATION_ROUTING_SMS` / `peak.communication.routing.sms`.
+ */
+data class OperatorBlockerView(
+    val code: String,
+    val title: String,
+    val why: String,
 )
 
 data class PropertyOnboardingStepView(
@@ -299,9 +341,25 @@ class PropertyManagementNotFoundException(
     message: String,
 ) : PropertyManagementException(message)
 
-class PropertyManagementConflictException(
+open class PropertyManagementConflictException(
     message: String,
 ) : PropertyManagementException(message)
+
+class PropertyActivationBlockedException(
+    message: String,
+    val nextAction: OnboardingNextAction?,
+    val blockers: List<PropertyGoLiveBlockerView>,
+    val operatorBlocker: OperatorBlockerView?,
+) : PropertyManagementConflictException(message)
+
+data class PropertyActivationBlockedResponse(
+    val title: String,
+    val detail: String,
+    val status: Int = 409,
+    val nextAction: OnboardingNextAction?,
+    val blockers: List<PropertyGoLiveBlockerView>,
+    val operatorBlocker: OperatorBlockerView?,
+)
 
 class PropertyManagementInProgressException(
     message: String,

@@ -17,14 +17,13 @@ import org.springframework.boot.context.properties.ConfigurationProperties
 data class PlatformBillingProperties(
     val enabled: Boolean = true,
     /**
-     * Provider used for new collections.
+     * Provider used for new Peak SaaS collections.
      *
-     * Defaults to the adapter that exists and has been tested against a documented
-     * contract. It previously defaulted to a provider with no adapter, which meant a
-     * correctly configured deployment would still have thrown at the first customer
-     * payment — the least forgiving moment to discover a configuration error.
+     * Snippe is Peak's own merchant, not a hotel `payment_provider_accounts`
+     * row. Tenants do not pick a PSP during onboarding. AzamPay is only a
+     * fallback when [fallbackProvider] is set and that adapter is registered.
      */
-    val primaryProvider: String = "azampay",
+    val primaryProvider: String = "snippe",
     /** Tried when the primary refuses to initiate; blank disables failover. */
     val fallbackProvider: String = "",
     val appName: String = "",

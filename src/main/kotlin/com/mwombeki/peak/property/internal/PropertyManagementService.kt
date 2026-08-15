@@ -15,6 +15,8 @@ import com.mwombeki.peak.property.api.CreateRoomTypeRequest
 import com.mwombeki.peak.property.api.CreateTaxRateRequest
 import com.mwombeki.peak.property.api.DepartmentResponse
 import com.mwombeki.peak.property.api.FloorResponse
+import com.mwombeki.peak.property.api.PropertyActivationBlockedException
+import com.mwombeki.peak.property.api.PropertyBootstrapResponse
 import com.mwombeki.peak.property.api.PropertyChildMutationReceipt
 import com.mwombeki.peak.property.api.PropertyManagementConflictException
 import com.mwombeki.peak.property.api.PropertyManagementInProgressException
@@ -381,73 +383,30 @@ class PropertyManagementService(
             resourceType = "properties",
             replayType = PropertyMutationReceipt::class.java,
         ) { identity, reservationId ->
-            requireTenantCapacity(identity.tenantId, "limit.properties")
-            val propertyId = UUID.randomUUID()
-            try {
-                jdbcTemplate.update(
-                    """
-                    INSERT INTO properties (
-                        id, tenant_id, name, location, code, type, status,
-                        is_active, timezone, business_date_offset, business_date
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, false, ?, ?,
-                            ((now() AT TIME ZONE ?)::date + ?))
-                    """.trimIndent(),
-                    propertyId,
-                    identity.tenantId,
-                    request.name.normalizedRequired("name"),
-                    request.location?.trimmedOrNull(),
-                    request.code?.normalizedCode(),
-                    request.type.normalizedRequired("type").uppercase(),
-                    PROPERTY_STATUS_DRAFT,
-                    request.timezone.validatedTimezone(),
-                    request.businessDateOffset.validatedBusinessDateOffset(),
-                    request.timezone.validatedTimezone(),
-                    request.businessDateOffset.validatedBusinessDateOffset(),
-                )
-            } catch (ex: DuplicateKeyException) {
-                throw PropertyManagementConflictException("Property code is already in use")
-            }
-
-            tenantModuleConfigurationPort.enableConfiguredModule(
-                ConfigureTenantModuleCommand(
-                    tenantId = identity.tenantId,
-                    moduleId = PROPERTY_MODULE_ID,
-                    source = "system",
-                ),
-            )
-            upsertPropertyModule(identity.tenantId, propertyId, PROPERTY_MODULE_ID, enabled = true)
-            propertyAccessBootstrapPort.ensurePropertyAdministrator(
-                EnsurePropertyAdministratorCommand(
-                    tenantId = identity.tenantId,
-                    propertyId = propertyId,
-                    tenantUserId = identity.tenantUserId,
-                ),
-            )
-            goLiveEvaluator.ensureWorkflow(identity.tenantId, propertyId)
-
+            val propertyId = insertDraftProperty(identity, request, reservationId)
             PropertyMutationReceipt(
                 propertyId = propertyId,
                 status = PROPERTY_STATUS_DRAFT,
                 changed = true,
                 replayed = false,
-            ).also { receipt ->
-                recordPropertySideEffects(
-                    tenantId = identity.tenantId,
-                    propertyId = propertyId,
-                    action = "property.created",
-                    eventType = "property.created",
-                    aggregateType = "properties",
-                    aggregateId = propertyId,
-                    payload = mapOf(
-                        "propertyId" to propertyId,
-                        "name" to request.name.normalizedRequired("name"),
-                        "code" to request.code?.normalizedCode(),
-                        "status" to receipt.status,
-                    ),
-                    idempotencyKeyId = reservationId,
+            )
+        }
+    }
+
+    override fun bootstrapFirstProperty(request: CreatePropertyRequest): PropertyBootstrapResponse {
+        return mutate(
+            operationType = "property.bootstrap",
+            requestPayload = request,
+            resourceType = "properties",
+            replayType = PropertyBootstrapResponse::class.java,
+        ) { identity, reservationId ->
+            val propertyId = insertDraftProperty(identity, request, reservationId)
+            goLiveEvaluator.evaluateAndPersist(identity.tenantId, propertyId)
+                .toBootstrapResponse(
+                    status = PROPERTY_STATUS_DRAFT,
+                    changed = true,
+                    replayed = false,
                 )
-            }
         }
     }
 
@@ -593,12 +552,17 @@ class PropertyManagementService(
                         outcome = AuditOutcome.FAILURE,
                         after = mapOf(
                             "missing" to readiness.blockers.map { it.code },
+                            "nextAction" to readiness.nextAction?.step,
                             "collectionEnabled" to readiness.collectionEnabled,
                         ),
                     ),
                 )
-                throw PropertyManagementConflictException(
-                    "Cannot activate property until readiness requirements are complete.",
+                throw PropertyActivationBlockedException(
+                    readiness.nextAction?.why
+                        ?: "Cannot activate property until readiness requirements are complete.",
+                    nextAction = readiness.nextAction,
+                    blockers = readiness.blockers,
+                    operatorBlocker = readiness.operatorBlocker,
                 )
             }
 
@@ -2206,6 +2170,73 @@ class PropertyManagementService(
         }
     }
 
+    private fun insertDraftProperty(
+        identity: TenantIdentity,
+        request: CreatePropertyRequest,
+        reservationId: UUID,
+    ): UUID {
+        requireTenantCapacity(identity.tenantId, "limit.properties")
+        val propertyId = UUID.randomUUID()
+        try {
+            jdbcTemplate.update(
+                """
+                INSERT INTO properties (
+                    id, tenant_id, name, location, code, type, status,
+                    is_active, timezone, business_date_offset, business_date
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, false, ?, ?,
+                        ((now() AT TIME ZONE ?)::date + ?))
+                """.trimIndent(),
+                propertyId,
+                identity.tenantId,
+                request.name.normalizedRequired("name"),
+                request.location?.trimmedOrNull(),
+                request.code?.normalizedCode(),
+                request.type.normalizedRequired("type").uppercase(),
+                PROPERTY_STATUS_DRAFT,
+                request.timezone.validatedTimezone(),
+                request.businessDateOffset.validatedBusinessDateOffset(),
+                request.timezone.validatedTimezone(),
+                request.businessDateOffset.validatedBusinessDateOffset(),
+            )
+        } catch (ex: DuplicateKeyException) {
+            throw PropertyManagementConflictException("Property code is already in use")
+        }
+
+        tenantModuleConfigurationPort.enableConfiguredModule(
+            ConfigureTenantModuleCommand(
+                tenantId = identity.tenantId,
+                moduleId = PROPERTY_MODULE_ID,
+                source = "system",
+            ),
+        )
+        upsertPropertyModule(identity.tenantId, propertyId, PROPERTY_MODULE_ID, enabled = true)
+        propertyAccessBootstrapPort.ensurePropertyAdministrator(
+            EnsurePropertyAdministratorCommand(
+                tenantId = identity.tenantId,
+                propertyId = propertyId,
+                tenantUserId = identity.tenantUserId,
+            ),
+        )
+        goLiveEvaluator.ensureWorkflow(identity.tenantId, propertyId)
+        recordPropertySideEffects(
+            tenantId = identity.tenantId,
+            propertyId = propertyId,
+            action = "property.created",
+            eventType = "property.created",
+            aggregateType = "properties",
+            aggregateId = propertyId,
+            payload = mapOf(
+                "propertyId" to propertyId,
+                "name" to request.name.normalizedRequired("name"),
+                "code" to request.code?.normalizedCode(),
+                "status" to PROPERTY_STATUS_DRAFT,
+            ),
+            idempotencyKeyId = reservationId,
+        )
+        return propertyId
+    }
+
     private fun upsertPropertyModule(
         tenantId: UUID,
         propertyId: UUID,
@@ -2390,6 +2421,7 @@ class PropertyManagementService(
             is PropertyModuleMutationReceipt -> receipt.propertyId
             is RoomStatusMutationReceipt -> receipt.roomId
             is PropertyReadinessResponse -> receipt.propertyId
+            is PropertyBootstrapResponse -> receipt.propertyId
             else -> null
         }
     }
@@ -2401,6 +2433,7 @@ class PropertyManagementService(
             is PropertyChildMutationReceipt -> copy(replayed = true) as T
             is PropertyModuleMutationReceipt -> copy(replayed = true) as T
             is RoomStatusMutationReceipt -> copy(replayed = true) as T
+            is PropertyBootstrapResponse -> copy(replayed = true) as T
             else -> this
         }
     }

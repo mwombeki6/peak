@@ -1,7 +1,10 @@
 package com.mwombeki.peak.property.internal
 
+import com.mwombeki.peak.property.api.OnboardingNextAction
+import com.mwombeki.peak.property.api.OperatorBlockerView
 import com.mwombeki.peak.property.api.PropertyGoLiveBlockerView
 import com.mwombeki.peak.property.api.PropertyManagementNotFoundException
+import com.mwombeki.peak.property.api.PropertyBootstrapResponse
 import com.mwombeki.peak.property.api.PropertyOnboardingResponse
 import com.mwombeki.peak.property.api.PropertyOnboardingStepView
 import com.mwombeki.peak.property.api.PropertyReadinessResponse
@@ -14,11 +17,12 @@ import tools.jackson.databind.ObjectMapper
 /**
  * Property go-live from evidence, not a checklist a manager can tick.
  *
- * Inventory readiness already existed. Identity, a configured guest rail, and
- * a frontline path did not join it, so [activate][com.mwombeki.peak.property.api.PropertyPort.activateProperty]
- * would succeed for a hotel that could not actually open. Each step is
- * recomputed from tables this module is allowed to read. Persisted rows are
- * that snapshot. This evaluator never writes [payment_provider_accounts].
+ * Inventory, a Keycloak Property Administrator, and a frontline path (when POS
+ * or front desk is in scope) are required. A hotel guest rail is optional after
+ * activate — collecting guest USSD is a later ENABLE on the hotel merchant, not
+ * a second Snippe onboarding. Peak SaaS collection lives in
+ * `peak.platformbilling`, never [payment_provider_accounts]. This evaluator
+ * never writes that table.
  */
 @Component
 class PropertyGoLiveEvaluator(
@@ -126,15 +130,30 @@ class PropertyGoLiveEvaluator(
             ?.key
             ?: STEP_GO_LIVE
 
+        val isReady = preActivationReady && property.status !in TERMINAL_STATUSES
+        val operatorBlocker = PropertyOnboardingGuide.operatorBlocker(
+            steps.firstOrNull { it.key == STEP_SMS },
+        )
+        val nextAction = PropertyOnboardingGuide.nextAction(
+            tenantId = tenantId,
+            propertyId = propertyId,
+            currentStep = currentStep,
+            isReady = isReady,
+            workflowStatus = workflowStatus,
+            blockers = blockers,
+        )
+
         return PropertyGoLiveSnapshot(
             tenantId = tenantId,
             propertyId = propertyId,
             workflowStatus = workflowStatus,
             currentStep = currentStep,
-            isReady = preActivationReady && property.status !in TERMINAL_STATUSES,
+            isReady = isReady,
             collectionEnabled = collectionEnabled,
             steps = steps,
             blockers = blockers,
+            nextAction = nextAction,
+            operatorBlocker = operatorBlocker,
         )
     }
 
@@ -503,16 +522,18 @@ class PropertyGoLiveEvaluator(
             propertyId,
         )
         val ok = configured > 0
+        // Hotel guest collection is optional after activate. Requiring it here
+        // made hotels think they were onboarding Peak/Snippe a second time.
         return EvaluatedStep(
             key = STEP_GUEST_RAIL,
             sequence = 5,
-            required = true,
+            required = false,
             status = if (ok) STATUS_SATISFIED else STATUS_BLOCKED,
             blockerCode = if (ok) null else "guest_rail_configured",
             detail = if (ok) {
-                "A recoverable guest rail is configured for this property. Collection still requires ENABLE."
+                "A recoverable guest rail is configured. Collection still requires ENABLE. This is not Peak SaaS onboarding."
             } else {
-                "This property needs a configured guest rail (Snippe or another catalog-enabled recoverable rail). ENABLE is the collection gate, not a save or go-live checkbox."
+                "Guest mobile money is optional after activate. Configure the hotel's own Snippe account later to collect guest payments. Activate is not blocked."
             },
             evidence = mapOf("configuredAccounts" to configured),
         )
@@ -527,25 +548,34 @@ class PropertyGoLiveEvaluator(
                 status = STATUS_SKIPPED,
                 blockerCode = null,
                 detail = "Staff activation SMS is not required until POS or front desk is in scope.",
-                evidence = mapOf("inScope" to false, "whatsappRequired" to false),
+                evidence = mapOf(
+                    "inScope" to false,
+                    "smsRoutable" to false,
+                    "whatsappRequired" to false,
+                ),
             )
         }
         val routable = environment.getProperty("peak.communication.routing.sms")
             .orEmpty()
             .trim()
             .isNotEmpty()
+        // PEAK_COMMUNICATION_ROUTING_SMS is Peak deployment config (Beem). A
+        // hotel cannot set it. Do not block property activate on it — surface
+        // operatorBlocker instead so Peak ops can route SMS without stalling
+        // the wizard on an env var.
         return EvaluatedStep(
             key = STEP_SMS,
             sequence = 6,
-            required = true,
+            required = false,
             status = if (routable) STATUS_SATISFIED else STATUS_BLOCKED,
             blockerCode = if (routable) null else "sms_routable",
             detail = if (routable) {
                 "SMS can be delivered for staff activation. WhatsApp is optional."
             } else {
-                "Staff activation SMS must be routable (Beem in production) before POS or front desk can go live. WhatsApp is not required."
+                "Staff SMS is not routable on this Peak deployment. Peak ops must set PEAK_COMMUNICATION_ROUTING_SMS (Beem). The hotel cannot fix this, so activate is not blocked."
             },
             evidence = mapOf(
+                "inScope" to true,
                 "smsRoutable" to routable,
                 "whatsappRequired" to false,
             ),
@@ -561,9 +591,9 @@ class PropertyGoLiveEvaluator(
             status = if (active) STATUS_SATISFIED else "pending",
             blockerCode = null,
             detail = if (active) {
-                "Property is active. Collection is a separate ENABLE on the guest rail."
+                "Property is active. Guest collection is a later ENABLE on the hotel merchant, not a second onboarding."
             } else {
-                "Activate after the other required steps are satisfied. This does not enable collection."
+                "Activate after the other required steps are satisfied. Guest collection is optional afterwards."
             },
             evidence = mapOf(
                 "status" to property.status,
@@ -669,6 +699,8 @@ class PropertyGoLiveEvaluator(
         val collectionEnabled: Boolean,
         val steps: List<EvaluatedStep>,
         val blockers: List<PropertyGoLiveBlockerView>,
+        val nextAction: OnboardingNextAction?,
+        val operatorBlocker: OperatorBlockerView?,
     ) {
         fun toReadinessResponse(): PropertyReadinessResponse {
             return PropertyReadinessResponse(
@@ -680,6 +712,8 @@ class PropertyGoLiveEvaluator(
                 steps = stepViews(),
                 blockers = blockers,
                 collectionEnabled = collectionEnabled,
+                nextAction = nextAction,
+                operatorBlocker = operatorBlocker,
             )
         }
 
@@ -693,6 +727,29 @@ class PropertyGoLiveEvaluator(
                 collectionEnabled = collectionEnabled,
                 steps = stepViews(),
                 blockers = blockers,
+                nextAction = nextAction,
+                operatorBlocker = operatorBlocker,
+            )
+        }
+
+        fun toBootstrapResponse(
+            status: String,
+            changed: Boolean,
+            replayed: Boolean,
+        ): PropertyBootstrapResponse {
+            return PropertyBootstrapResponse(
+                propertyId = propertyId,
+                tenantId = tenantId,
+                status = status,
+                changed = changed,
+                replayed = replayed,
+                nextAction = nextAction,
+                workflowStatus = workflowStatus,
+                currentStep = currentStep,
+                isReady = isReady,
+                steps = stepViews(),
+                blockers = blockers,
+                operatorBlocker = operatorBlocker,
             )
         }
 

@@ -12,7 +12,9 @@ import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.tenantmanagement.api.Tenant
+import com.mwombeki.peak.tenantmanagement.api.TenantOnboardingNextAction
 import com.mwombeki.peak.tenantmanagement.api.TenantOnboardingPort
+import com.mwombeki.peak.tenantmanagement.api.TenantOnboardingResponse
 import com.mwombeki.peak.tenantmanagement.api.TenantProfile
 import com.mwombeki.peak.tenantmanagement.api.TenantRegisterRequest
 import com.mwombeki.peak.tenantmanagement.api.TenantResponse
@@ -39,6 +41,7 @@ class TenantOnboardingService(
     private val platformAccessPort: PlatformAccessPort,
     private val objectMapper: ObjectMapper,
     private val jdbcTemplate: JdbcTemplate,
+    private val launchEvaluator: TenantLaunchEvaluator,
 ) : TenantOnboardingPort {
 
     @Transactional
@@ -115,8 +118,18 @@ class TenantOnboardingService(
                 ),
                 idempotencyKeyId = idempotencyKeyId,
             )
-            response(tenant, profile)
+            response(tenant, profile, launchEvaluator.evaluate(tenantId).nextAction)
         }
+    }
+
+    @Transactional(readOnly = true)
+    override fun getOnboarding(tenantId: UUID): TenantOnboardingResponse {
+        requirePlatformAccess(
+            tenantId = tenantId,
+            permissionCode = "platform.tenants.view",
+            operation = "platform.tenants.onboarding",
+        )
+        return launchEvaluator.evaluate(tenantId)
     }
 
     @Transactional(readOnly = true)
@@ -130,7 +143,7 @@ class TenantOnboardingService(
         val profile = tenantProfileRepository.findByTenantId(id)
             ?: throw IllegalStateException("Tenant profile is missing for tenant $id")
 
-        return response(tenant, profile)
+        return response(tenant, profile, launchEvaluator.evaluate(id).nextAction)
     }
 
     private fun idempotentMutation(
@@ -229,6 +242,7 @@ class TenantOnboardingService(
     private fun response(
         tenant: Tenant,
         profile: TenantProfile,
+        nextAction: TenantOnboardingNextAction? = null,
     ): TenantResponse {
         return TenantResponse(
             id = tenant.id,
@@ -237,6 +251,7 @@ class TenantOnboardingService(
             status = tenant.status,
             planId = tenant.planId,
             businessEmail = profile.businessEmail,
+            nextAction = nextAction,
         )
     }
 

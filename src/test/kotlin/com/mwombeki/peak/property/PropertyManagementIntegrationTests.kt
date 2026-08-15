@@ -244,7 +244,9 @@ class PropertyManagementIntegrationTests {
             .andExpect(jsonPath("$.isReady").value(false))
             .andExpect(jsonPath("$.collectionEnabled").value(false))
             .andExpect(jsonPath("$.blockers[*].code", hasItem("strong_manager")))
-            .andExpect(jsonPath("$.blockers[*].code", hasItem("guest_rail_configured")))
+            .andExpect(jsonPath("$.blockers[*].code", org.hamcrest.Matchers.not(hasItem("guest_rail_configured"))))
+            .andExpect(jsonPath("$.nextAction.step").value("strong_manager"))
+            .andExpect(jsonPath("$.nextAction.path").exists())
             .andExpect(jsonPath("$.blockers[*].code", org.hamcrest.Matchers.not(hasItem("whatsapp"))))
             .andExpect(jsonPath("$.blockers[*].code", org.hamcrest.Matchers.not(hasItem("fiscal"))))
             .andExpect(jsonPath("$.blockers[*].code", org.hamcrest.Matchers.not(hasItem("nida"))))
@@ -266,9 +268,12 @@ class PropertyManagementIntegrationTests {
                 .headersFor(fixture, "corr-property-activate-blocked", "idem-property-activate-blocked-${fixture.tenantId}"),
         )
             .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.nextAction.step").value("strong_manager"))
+            .andExpect(jsonPath("$.nextAction.method").value("POST"))
+            .andExpect(jsonPath("$.nextAction.path").exists())
+            .andExpect(jsonPath("$.blockers[*].code", hasItem("strong_manager")))
 
         linkStrongIdentity(fixture)
-        configureGuestRail(fixture, propertyId, enabled = false)
 
         mockMvc.perform(
             get("/api/v1/properties/$propertyId/readiness")
@@ -322,14 +327,14 @@ class PropertyManagementIntegrationTests {
         assertTrue(propertyRoleAssigned(fixture.tenantId, fixture.tenantUserId, propertyId))
         assertEquals(floorId, requireFloorId(fixture.tenantId, buildingId, 1))
         assertEquals(
-            "configured",
+            0,
             jdbcTemplate.queryForObject(
                 """
-                SELECT lifecycle_status
+                SELECT count(*)
                 FROM payment_provider_accounts
                 WHERE tenant_id = ? AND property_id = ?
                 """.trimIndent(),
-                String::class.java,
+                Int::class.java,
                 fixture.tenantId,
                 propertyId,
             ),
@@ -697,39 +702,6 @@ class PropertyManagementIntegrationTests {
             fixture.tenantId,
             fixture.tenantUserId,
             "property-admin-${fixture.tenantId}@example.com",
-        )
-    }
-
-    private fun configureGuestRail(
-        fixture: PropertyFixture,
-        propertyId: UUID,
-        enabled: Boolean,
-    ) {
-        val providerId = UUID.randomUUID()
-        jdbcTemplate.update(
-            """
-            INSERT INTO payment_providers (
-                id, tenant_id, provider_code, name, provider_type, is_active
-            ) VALUES (?, ?, 'snippe', 'Snippe', 'mobile_money', true)
-            """.trimIndent(),
-            providerId,
-            fixture.tenantId,
-        )
-        jdbcTemplate.update(
-            """
-            INSERT INTO payment_provider_accounts (
-                id, tenant_id, property_id, provider_id, account_name, client_id,
-                secret_ref, api_key_secret_ref, checksum_key_secret_ref, endpoint_url,
-                is_default, is_active, environment, lifecycle_status
-            ) VALUES (?, ?, ?, ?, 'Hotel Snippe', 'MERCHANT-001',
-                      'literal:api-secret', 'literal:api-secret', 'literal:checksum-secret',
-                      'https://api.snippe.sh', true, true, 'sandbox', ?)
-            """.trimIndent(),
-            UUID.randomUUID(),
-            fixture.tenantId,
-            propertyId,
-            providerId,
-            if (enabled) "enabled" else "configured",
         )
     }
 

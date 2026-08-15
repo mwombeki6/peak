@@ -29,6 +29,7 @@ Supported states are `draft`, `active`, `suspended`, `frozen`, `archived`, and `
 | Method | Route | Permission | Scope |
 | --- | --- | --- | --- |
 | `POST` | `/api/v1/properties` | `property.manage` | tenant |
+| `POST` | `/api/v1/properties/bootstrap` | `property.manage` | tenant |
 | `GET` | `/api/v1/properties` | `property.view` | tenant |
 | `GET` | `/api/v1/properties/{propertyId}` | `property.view` | property |
 | `PUT` | `/api/v1/properties/{propertyId}` | `property.manage` | property |
@@ -63,11 +64,18 @@ Activation is denied until the property step machine has no required blockers:
 - Property exists and is distinct from the tenant.
 - At least one STRONG (Keycloak) Property Administrator is assigned.
 - Hotel inventory is in place: building, floor, room type, room, revenue center, tax, positive base rates, `property` module, verified business contact.
-- If POS, front desk, or reservations is enabled: a frontline path exists (phone-first staff or an equivalent operational property role). Frontline staff do not need email.
-- A guest rail is at least CONFIGURED (Snippe or another catalog-enabled recoverable rail). ENABLE is the collection gate and is not flipped by activation.
-- If frontline is in scope: SMS is routable for staff activation. WhatsApp is optional. Inbound WhatsApp is out of scope.
+- If POS, front desk, or reservations is enabled: a frontline path exists (phone-first staff or an equivalent operational property role). Frontline staff do not need email. POS cashier PIN login is for tills (`POST /staff/sessions`), not go-live.
+- Guest mobile money is **not** a go-live blocker. Collecting guest USSD is a later CONFIGURE/ENABLE on the hotel's own Snippe merchant (`payment_provider_accounts`). Hotels do not onboard Snippe as a second product.
+- Fiscal/NIDA are not go-live blockers.
+- SMS routing is not a hotel activate blocker. WhatsApp is optional. Inbound WhatsApp is out of scope.
 
-`GET /api/v1/properties/{propertyId}/onboarding` returns persisted steps and remaining blockers. Evidence is recomputed on every read.
+`GET /api/v1/properties/{propertyId}/onboarding` and `GET /api/v1/properties/{propertyId}/readiness` return persisted steps, remaining hotel blockers, a single `nextAction` `{ step, title, why, method, path, bodyHint }`, and optional `operatorBlocker`. Evidence is recomputed on every read.
+
+`POST /api/v1/properties/bootstrap` creates a distinct property, attaches the acting STRONG manager as Property Administrator, seeds no rooms, and returns that `nextAction` (usually inventory).
+
+Activate is the last hotel step. A 409 names the same `nextAction`, not a generic refusal.
+
+`sms_routable` is Peak deployment config (`PEAK_COMMUNICATION_ROUTING_SMS`). It is not a hotel task and does not block activate. When frontline is in scope and SMS is not routed, the response sets `operatorBlocker` so Peak ops can route Beem. Bootstrap does not auto-ENABLE Snippe, auto-pair tills, or skip rooms/rates. Guest collection is optional after activate.
 
 ## Operational Notes
 

@@ -60,7 +60,7 @@ class PaymentMethodEligibilityService(
             { rs, _ ->
                 val method = PaymentMethod.fromDatabase(rs.getString("payment_method"))
                 val minAmount = rs.getBigDecimal("min_amount")
-                val maxAmount = rs.getBigDecimal("max_amount")
+                val maxAmount = ceilingFor(method, rs.getBigDecimal("max_amount"))
                 val reason = ineligibleReason(amount, currency, minAmount, maxAmount)
 
                 PaymentMethodOption(
@@ -116,7 +116,12 @@ class PaymentMethodEligibilityService(
         require(capability != null && capability.isEnabled) {
             "${label(method)} is not available through $provider for $currency"
         }
-        ineligibleReason(amount, currency, capability.minAmount, capability.maxAmount)?.let {
+        ineligibleReason(
+            amount,
+            currency,
+            capability.minAmount,
+            ceilingFor(method, capability.maxAmount),
+        )?.let {
             throw IllegalArgumentException(it)
         }
     }
@@ -156,6 +161,19 @@ class PaymentMethodEligibilityService(
             method.databaseValue,
             currency,
         ).firstOrNull() ?: CollectionFlow.DIRECT_PUSH
+    }
+
+    /**
+     * Peak SaaS mobile money cannot exceed [PlatformBillingProperties.maxCollectableAmount],
+     * even when the catalog row has no ceiling (Snippe guest rails leave max NULL).
+     * Bank and card are not USSD and keep the catalog limit only.
+     */
+    private fun ceilingFor(method: PaymentMethod, catalogMax: BigDecimal?): BigDecimal? {
+        if (method != PaymentMethod.MOBILE_MONEY) {
+            return catalogMax
+        }
+        val platformCeiling = properties.maxCollectableAmount
+        return if (catalogMax == null) platformCeiling else catalogMax.min(platformCeiling)
     }
 
     private fun ineligibleReason(

@@ -8,8 +8,9 @@ These routes require a platform identity and the corresponding platform tenant p
 
 | Method | Route | Permission | Purpose |
 | --- | --- | --- | --- |
-| `POST` | `/api/v1/platform/tenants` | `platform.tenants.manage` | Register a tenant and canonical business profile. |
+| `POST` | `/api/v1/platform/tenants` | `platform.tenants.manage` | Register a tenant and canonical business profile. Returns `nextAction` for linking a Keycloak admin. |
 | `GET` | `/api/v1/platform/tenants/{id}` | `platform.tenants.view` | View tenant account and profile state. |
+| `GET` | `/api/v1/platform/tenants/{id}/onboarding` | `platform.tenants.view` | Short launch machine: registered → Keycloak admin → Pay Peak when unpaid → can create properties. |
 | `PATCH` | `/api/v1/platform/tenants/{id}/status` | `platform.tenants.manage` | Change tenant lifecycle status. |
 | `POST` | `/api/v1/platform/tenants/{id}/administrators` | `platform.security.manage` | Provision an initial or recovery tenant administrator and OIDC identity. |
 | `POST` | `/api/v1/platform/tenants/{id}/profile/verify` | `platform.tenants.verify` | Mark a reviewed business profile as verified. |
@@ -27,7 +28,8 @@ These routes require a tenant identity and route-guard permission coverage:
 | `GET` | `/api/v1/tenants/{tenantId}/modules` | `module.view` | List tenant-level module enablement state. |
 | `POST` | `/api/v1/tenants/{tenantId}/modules` | `module.manage` | Enable an active tenant-visible module. |
 | `DELETE` | `/api/v1/tenants/{tenantId}/modules/{moduleId}` | `module.manage` | Disable a tenant-level module without deleting configuration history. |
-| `GET` | `/api/v1/tenants/{tenantId}/readiness` | `tenant.profile.view` | Return readiness status and missing requirements. |
+| `GET` | `/api/v1/tenants/{tenantId}/readiness` | `tenant.profile.view` | Return operational readiness status and missing requirements. |
+| `GET` | `/api/v1/tenants/{tenantId}/onboarding` | `tenant.profile.view` | Short launch machine and the single `nextAction` (Pay Peak when unpaid, otherwise bootstrap first property). |
 
 Mutating module routes require `Idempotency-Key`. Successful changes write tenant audit entries, enqueue platform outbox events, and emit `peak.tenant.module.command{operation,result}` metrics.
 
@@ -47,7 +49,7 @@ The controllers rely on the request-context and route-guard pipeline. Platform s
 
 Tenant module changes are idempotent, audited, and outbox-backed. Module ids are validated against active `module_catalog` rows, and disabled or mismatched tenant identities are rejected before mutation.
 
-Normal onboarding requires no SQL. A platform operator registers the tenant, provisions its administrator, verifies the reviewed profile, and the tenant administrator completes modules, contacts, consent, report recipients, and property setup through APIs.
+Normal launch is two short machines, one PSP brand. A platform operator registers the tenant and links a Keycloak administrator (`POST /administrators`, email/OIDC — not a till PIN). Unpaid standing's `nextAction` is Pay Peak via existing platform billing (`POST /api/v1/tenants/{id}/billing/purchases`, then `.../payments` direct_push into Peak's own Snippe merchant). A living trial can still bootstrap. That STRONG admin bootstraps the first property and follows property `nextAction` until activate. Hotel guest collection is a later ENABLE on the hotel merchant, not a second Snippe onboarding. Operational readiness (verification, report recipients, extra contacts) is a separate GET and is not the launch wizard. POS cashier PIN (`POST /staff/sessions`) is for tills, not this wizard.
 
 ## Database Tables
 
