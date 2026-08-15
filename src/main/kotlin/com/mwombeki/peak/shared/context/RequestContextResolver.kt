@@ -138,7 +138,10 @@ class RequestContextResolver(
     }
 
     private fun Authentication?.hasAuthenticatedPrincipal(): Boolean {
-        return this != null && this !is AnonymousAuthenticationToken && isAuthenticated
+        return this != null &&
+            this !is AnonymousAuthenticationToken &&
+            this !is HeaderIdentityAuthentication &&
+            isAuthenticated
     }
 
     private fun Authentication?.toRequestIdentity(

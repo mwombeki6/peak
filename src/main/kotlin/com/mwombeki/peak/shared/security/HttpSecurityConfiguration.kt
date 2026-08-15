@@ -13,6 +13,7 @@ import org.springframework.security.oauth2.jwt.JwtDecoder
 import org.springframework.security.oauth2.jwt.JwtValidators
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder
 import org.springframework.security.web.SecurityFilterChain
+import org.springframework.security.web.access.intercept.AuthorizationFilter
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter
 import org.springframework.web.cors.CorsConfiguration
 import org.springframework.web.cors.CorsConfigurationSource
@@ -25,7 +26,15 @@ class HttpSecurityConfiguration(
     private val problemWriter: SecurityProblemWriter,
 ) {
     @Bean
-    fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
+    fun webSocketHeaderIdentityFilter(
+        requestContextProperties: com.mwombeki.peak.shared.context.RequestContextProperties,
+    ): WebSocketHeaderIdentityFilter = WebSocketHeaderIdentityFilter(requestContextProperties)
+
+    @Bean
+    fun securityFilterChain(
+        http: HttpSecurity,
+        webSocketHeaderIdentityFilter: WebSocketHeaderIdentityFilter,
+    ): SecurityFilterChain {
         http
             .csrf { csrf -> csrf.disable() }
             .cors { }
@@ -35,6 +44,7 @@ class HttpSecurityConfiguration(
             .securityContext { securityContext ->
                 securityContext.requireExplicitSave(false)
             }
+            .addFilterBefore(webSocketHeaderIdentityFilter, AuthorizationFilter::class.java)
             .formLogin { formLogin -> formLogin.disable() }
             .httpBasic { httpBasic -> httpBasic.disable() }
             .logout { logout -> logout.disable() }
