@@ -189,6 +189,8 @@ property_frontdesk_settings,frontdesk,active,frontdesk::api-or-internal-owner
 property_housekeeping_settings,housekeeping,active,housekeeping::api-or-internal-owner
 property_module_configs,property,active,property::api-or-internal-owner
 property_modules,property,active,property::api-or-internal-owner
+property_onboarding_states,property,active,property::api-or-internal-owner
+property_onboarding_steps,property,active,property::api-or-internal-owner
 property_pos_settings,pos,active,pos::api-or-internal-owner
 property_reservation_settings,reservations,active,reservations::api-or-internal-owner
 purchase_order_approvals,procurement,active,procurement::api-or-internal-owner
