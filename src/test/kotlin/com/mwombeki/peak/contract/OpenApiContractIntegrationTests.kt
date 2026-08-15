@@ -54,6 +54,37 @@ class OpenApiContractIntegrationTests @Autowired constructor(
         )
 
         assertEffectiveSecurity(current)
+        assertPublishedTillRoutes(current)
+    }
+
+    private fun assertPublishedTillRoutes(document: JsonNode) {
+        val paths = document.path("paths")
+        val expected = mapOf(
+            "/api/v1/properties/{propertyId}/pos-config/menu-items" to "get",
+            "/api/v1/properties/{propertyId}/pos-config/menu-categories" to "get",
+            "/api/v1/devices/pairing-requests" to "post",
+            "/api/v1/tenants/{tenantId}/devices/pairing-approvals" to "post",
+            "/api/v1/tenants/{tenantId}/devices/{deviceId}/revoke" to "post",
+            "/api/v1/devices/challenges" to "post",
+            "/api/v1/staff/sessions" to "post",
+        )
+        expected.forEach { (path, method) ->
+            assertTrue(
+                paths.path(path).has(method),
+                "OpenAPI is missing $method $path",
+            )
+        }
+        val session = document.path("components").path("schemas")
+            .path("StaffSessionHttpResponse").path("properties")
+        listOf("tenantId", "userId", "outletId", "token", "sessionClass", "deviceId", "propertyId")
+            .forEach { field ->
+                assertTrue(session.has(field), "StaffSessionHttpResponse is missing $field")
+            }
+        val challenge = document.path("components").path("schemas")
+            .path("DeviceChallengeHttpResponse").path("properties")
+        listOf("challengeId", "nonce", "expiresAt").forEach { field ->
+            assertTrue(challenge.has(field), "DeviceChallengeHttpResponse is missing $field")
+        }
     }
 
     private fun currentDocument(): JsonNode {
