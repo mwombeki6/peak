@@ -103,8 +103,11 @@ ops/scripts/deploy.sh
 - Keep `PEAK_ALLOW_HEADER_IDENTITY=false` in production.
 - Keep `PEAK_ALLOW_TRUSTED_JWT_IDENTITY_CLAIMS=false` in production.
 - Keep `PEAK_COMMUNICATION_DELIVERY_LOCAL_PROVIDER_ENABLED=false` in production.
+- Route worker SMS to Beem (`PEAK_COMMUNICATION_ROUTING_SMS=beem`) with an API
+  key, secret, and active Sender ID. WhatsApp is send-only and stays unrouted
+  until a from-number is set. There is no inbound WhatsApp webhook.
 - Configure the worker HTTP communication gateway with an HTTPS base URL and a
-  secret API key. The provider contract is `POST /v1/messages`.
+  secret API key for email. The provider contract is `POST /v1/messages`.
 - Generate a random 32-byte envelope key, encode it as base64, store it in
   `PEAK_ENVELOPE_KEY_BASE64`, and keep
   `PEAK_ENVELOPE_KEY_REFERENCE=env:PEAK_ENVELOPE_KEY_BASE64`.
@@ -145,8 +148,9 @@ ops/scripts/deploy.sh
 - Enforce the same restriction at the host/network egress layer using the
   provider-published destination ranges. The application allowlist does not
   replace DNS and firewall controls.
-- Set `PEAK_PAYMENT_PRODUCTION_APPROVED_PROVIDER_CODES=clickpesa` only after the
+- Set `PEAK_PAYMENT_PRODUCTION_APPROVED_PROVIDER_CODES=snippe` only after the
   protected sandbox workflow passes and certification evidence is recorded.
+  ClickPesa may be listed alongside (`snippe,clickpesa`) but is not the guest rail.
 - Keep `PEAK_FISCAL_PRODUCTION_APPROVED_PROVIDER_CODES` empty until a TRA vendor
   adapter is selected and certified. Contract mocks and the signed simulator
   cannot run under the production profile.

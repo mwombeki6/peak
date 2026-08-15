@@ -57,6 +57,9 @@ peak:
       cleanup-interval-ms: ${PEAK_REALTIME_JOURNAL_CLEANUP_INTERVAL_MS:60000}
   payment:
     providers:
+      snippe:
+        base-url: ${PEAK_SNIPPE_BASE_URL:https://api.snippe.sh}
+        webhook-tolerance: ${PEAK_SNIPPE_WEBHOOK_TOLERANCE:5m}
       clickpesa:
         connect-timeout: ${PEAK_CLICKPESA_CONNECT_TIMEOUT:3s}
         request-timeout: ${PEAK_CLICKPESA_REQUEST_TIMEOUT:15s}
@@ -135,15 +138,25 @@ peak:
     # supports four channels and must still be told which it is responsible for.
     #
     # These name the local provider because that is what is registered by default
-    # (matchIfMissing), so development behaves as it always did. Production overrides them
-    # to the gateway and refuses to start if it names an adapter that is not enabled —
-    # which is the intended way to find out.
+    # (matchIfMissing), so development behaves as it always did. Production routes
+    # SMS to Beem and email to the HTTP gateway, and refuses to start if it names
+    # an adapter that is not enabled — which is the intended way to find out.
     #
-    # whatsapp and voice_phone are deliberately absent: nothing serves them, and a default
-    # pointing at an adapter nobody enabled would break startup everywhere.
+    # whatsapp and voice_phone are deliberately absent: WhatsApp is send-only and
+    # only inside an active Beem session, so a default pointing at it would break
+    # startup everywhere it is not bought.
     routing:
       email: ${PEAK_COMMUNICATION_ROUTING_EMAIL:local}
       sms: ${PEAK_COMMUNICATION_ROUTING_SMS:local}
+    providers:
+      beem:
+        enabled: ${PEAK_COMMUNICATION_PROVIDERS_BEEM_ENABLED:false}
+        sms-base-url: ${PEAK_COMMUNICATION_PROVIDERS_BEEM_SMS_BASE_URL:https://apisms.beem.africa}
+        whatsapp-base-url: ${PEAK_COMMUNICATION_PROVIDERS_BEEM_WHATSAPP_BASE_URL:https://apichatcore.beem.africa}
+        api-key: ${PEAK_COMMUNICATION_PROVIDERS_BEEM_API_KEY:}
+        secret-key: ${PEAK_COMMUNICATION_PROVIDERS_BEEM_SECRET_KEY:}
+        source-addr: ${PEAK_COMMUNICATION_PROVIDERS_BEEM_SOURCE_ADDR:}
+        whatsapp-from: ${PEAK_COMMUNICATION_PROVIDERS_BEEM_WHATSAPP_FROM:}
   usermanagement:
     invitation:
       expose-token-in-response: ${PEAK_INVITATION_EXPOSE_TOKEN_IN_RESPONSE:false}

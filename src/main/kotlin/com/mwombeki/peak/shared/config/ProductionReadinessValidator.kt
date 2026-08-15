@@ -300,6 +300,47 @@ class ProductionReadinessValidator(
         requireTrue(apiKey != "change-me" && apiKey?.contains("CHANGE_ME") != true) {
             "peak.communication.delivery.http-provider.api-key must not use a placeholder"
         }
+
+        val emailRoute = environment.getProperty("peak.communication.routing.email").orEmpty().trim()
+        val smsRoute = environment.getProperty("peak.communication.routing.sms").orEmpty().trim()
+        val whatsappRoute = environment.getProperty("peak.communication.routing.whatsapp")
+            .orEmpty().trim()
+        requirePresent(emailRoute) {
+            "peak.communication.routing.email must name the adapter that delivers email"
+        }
+        requirePresent(smsRoute) {
+            "peak.communication.routing.sms must name the adapter that delivers sms"
+        }
+        requireTrue(emailRoute != "local" && smsRoute != "local") {
+            "peak.communication.routing must not use the local provider in prod"
+        }
+
+        if (smsRoute == "beem" || whatsappRoute == "beem") {
+            val beemEnabled = environment.getProperty(
+                "peak.communication.providers.beem.enabled",
+                Boolean::class.java,
+                false,
+            )
+            requireTrue(beemEnabled) {
+                "peak.communication.providers.beem.enabled must be true when a channel is routed to beem"
+            }
+            requirePresent(environment.getProperty("peak.communication.providers.beem.api-key")) {
+                "peak.communication.providers.beem.api-key is required when Beem is routed"
+            }
+            requirePresent(environment.getProperty("peak.communication.providers.beem.secret-key")) {
+                "peak.communication.providers.beem.secret-key is required when Beem is routed"
+            }
+        }
+        if (smsRoute == "beem") {
+            requirePresent(environment.getProperty("peak.communication.providers.beem.source-addr")) {
+                "peak.communication.providers.beem.source-addr is required when SMS is routed to beem"
+            }
+        }
+        if (whatsappRoute == "beem") {
+            requirePresent(environment.getProperty("peak.communication.providers.beem.whatsapp-from")) {
+                "peak.communication.providers.beem.whatsapp-from is required when WhatsApp is routed to beem"
+            }
+        }
     }
 
     private fun MutableList<String>.validateSecretEnvelope() {

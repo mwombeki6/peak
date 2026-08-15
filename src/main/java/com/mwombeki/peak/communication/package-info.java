@@ -6,7 +6,8 @@
                 "reliability::api",
                 "shared::context",
                 "shared::exception",
-                "shared::secrets"
+                "shared::secrets",
+                "shared::outbound"
         }
 )
 package com.mwombeki.peak.communication;

@@ -159,6 +159,31 @@ class ProductionReadinessValidatorTests {
     }
 
     @Test
+    fun rejectsWorkerRuntimeWhenSmsIsRoutedToBeemWithoutCredentials() {
+        val error = assertFailsWith<IllegalStateException> {
+            validator(
+                environment = secureProdEnvironment()
+                    .withProperty("spring.datasource.username", "peak_worker")
+                    .withProperty("spring.datasource.password", "not-local-secret")
+                    .withProperty("spring.flyway.enabled", "false")
+                    .withProperty("spring.main.web-application-type", "none")
+                    .withProperty("peak.reliability.outbox.worker.enabled", "true")
+                    .withProperty("peak.communication.providers.beem.api-key", "")
+                    .withProperty("peak.communication.providers.beem.secret-key", "")
+                    .withProperty("peak.communication.providers.beem.source-addr", ""),
+                runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.WORKER),
+                httpSecurityProperties = secureHttpProperties(),
+                requestContextProperties = secureRequestContextProperties(),
+            ).afterSingletonsInstantiated()
+        }
+
+        val message = requireNotNull(error.message)
+        assertTrue(message.contains("providers.beem.api-key"), message)
+        assertTrue(message.contains("providers.beem.secret-key"), message)
+        assertTrue(message.contains("providers.beem.source-addr"), message)
+    }
+
+    @Test
     fun allowsProductionApiRuntimeOnlyWhenFlywayIsDisabled() {
         validator(
             environment = secureProdEnvironment()
@@ -419,10 +444,13 @@ class ProductionReadinessValidatorTests {
                 "peak.communication.delivery.http-provider.base-url",
                 "https://communications.peak.example.com",
             )
-            .withProperty(
-                "peak.communication.delivery.http-provider.api-key",
-                "secure-communication-provider-key",
-            )
+            .withProperty("peak.communication.delivery.http-provider.api-key", "secure-communication-provider-key")
+            .withProperty("peak.communication.routing.email", "http-gateway")
+            .withProperty("peak.communication.routing.sms", "beem")
+            .withProperty("peak.communication.providers.beem.enabled", "true")
+            .withProperty("peak.communication.providers.beem.api-key", "beem-api-key")
+            .withProperty("peak.communication.providers.beem.secret-key", "beem-secret-key")
+            .withProperty("peak.communication.providers.beem.source-addr", "PEAK")
             .withProperty(
                 "peak.security.envelope.key-reference",
                 "env:PEAK_ENVELOPE_KEY",
