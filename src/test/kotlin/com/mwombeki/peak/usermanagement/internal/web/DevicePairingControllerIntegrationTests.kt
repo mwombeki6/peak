@@ -14,6 +14,8 @@ import org.springframework.context.annotation.Import
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.MvcResult
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
@@ -34,42 +36,25 @@ class DevicePairingControllerIntegrationTests {
 
     @Test
     fun anUnauthenticatedTerminalCanRequestPairing() {
-        val publicKey = Base64.getEncoder().encodeToString(
-            KeyPairGenerator.getInstance("Ed25519").generateKeyPair().public.encoded,
-        )
-
         mockMvc.perform(
             post("/api/v1/devices/pairing-requests")
                 .secure(true)
                 .contentType(MediaType.APPLICATION_JSON)
                 .header(PeakRequestHeaders.CORRELATION_ID, "corr-pairing-request")
-                .content("""{"publicKey":"$publicKey"}"""),
+                .content("""{"publicKey":"${newPublicKey()}"}"""),
         )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.deviceCode").value(startsWith("dev_")))
             .andExpect(jsonPath("$.pairingCode").isString)
             .andExpect(jsonPath("$.fingerprint").isString)
+            .andExpect(jsonPath("$.pairingRequestId").isString)
     }
 
     @Test
     fun aManagerApprovesPairingThroughTheSecuredRoute() {
         val fixture = seedManager()
-        val publicKey = Base64.getEncoder().encodeToString(
-            KeyPairGenerator.getInstance("Ed25519").generateKeyPair().public.encoded,
-        )
-        val requested = mockMvc.perform(
-            post("/api/v1/devices/pairing-requests")
-                .secure(true)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("""{"publicKey":"$publicKey"}"""),
-        )
-            .andExpect(status().isOk)
-            .andReturn()
-
-        val pairingCode = com.jayway.jsonpath.JsonPath.read<String>(
-            requested.response.contentAsString,
-            "$.pairingCode",
-        )
+        val requested = requestPairing(newPublicKey())
+        val pairingCode = readString(requested, "$.pairingCode")
 
         mockMvc.perform(
             post("/api/v1/tenants/${fixture.tenantId}/devices/pairing-approvals")
@@ -93,6 +78,132 @@ class DevicePairingControllerIntegrationTests {
             .andExpect(jsonPath("$.deviceId").isString)
             .andExpect(jsonPath("$.deviceCode").value(startsWith("dev_")))
     }
+
+    @Test
+    fun aPendingPairingPollLeaksNoPropertyOrTenant() {
+        val requested = requestPairing(newPublicKey())
+        val pairingRequestId = readString(requested, "$.pairingRequestId")
+
+        mockMvc.perform(
+            get("/api/v1/devices/pairing-requests/$pairingRequestId")
+                .secure(true)
+                .header(PeakRequestHeaders.CORRELATION_ID, "corr-pairing-poll-pending"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.status").value("pending"))
+            .andExpect(jsonPath("$.propertyId").doesNotExist())
+            .andExpect(jsonPath("$.tenantId").doesNotExist())
+            .andExpect(jsonPath("$.outletId").doesNotExist())
+            .andExpect(jsonPath("$.terminalName").doesNotExist())
+            .andExpect(jsonPath("$.mode").doesNotExist())
+            .andExpect(jsonPath("$.deviceCode").doesNotExist())
+            .andExpect(jsonPath("$.pairingCode").doesNotExist())
+    }
+
+    @Test
+    fun anApprovedPairingPollReturnsWorkspaceWithoutProperty() {
+        val fixture = seedManager()
+        val requested = requestPairing(newPublicKey())
+        val pairingRequestId = readString(requested, "$.pairingRequestId")
+        val deviceCode = readString(requested, "$.deviceCode")
+        val pairingCode = readString(requested, "$.pairingCode")
+
+        approve(fixture, pairingCode)
+
+        mockMvc.perform(
+            get("/api/v1/devices/pairing-requests/$pairingRequestId")
+                .secure(true)
+                .header(PeakRequestHeaders.CORRELATION_ID, "corr-pairing-poll-approved"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.status").value("approved"))
+            .andExpect(jsonPath("$.deviceCode").value(deviceCode))
+            .andExpect(jsonPath("$.expiresAt").isString)
+            .andExpect(jsonPath("$.terminalName").value("Till 1"))
+            .andExpect(jsonPath("$.mode").value("POS"))
+            .andExpect(jsonPath("$.propertyId").doesNotExist())
+            .andExpect(jsonPath("$.tenantId").doesNotExist())
+            .andExpect(jsonPath("$.outletId").doesNotExist())
+            .andExpect(jsonPath("$.pairingCode").doesNotExist())
+    }
+
+    @Test
+    fun anExpiredPairingCodeCanBeRegeneratedWithTheSamePublicKey() {
+        val publicKey = newPublicKey()
+        val first = requestPairing(publicKey)
+        val firstId = readString(first, "$.pairingRequestId")
+        val firstCode = readString(first, "$.pairingCode")
+
+        jdbcTemplate.update(
+            """
+            UPDATE device_pairing_requests
+            SET expires_at = now() - interval '1 second'
+            WHERE id = ?::uuid
+            """.trimIndent(),
+            firstId,
+        )
+
+        mockMvc.perform(
+            get("/api/v1/devices/pairing-requests/$firstId")
+                .secure(true)
+                .header(PeakRequestHeaders.CORRELATION_ID, "corr-pairing-poll-expired"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.status").value("expired"))
+            .andExpect(jsonPath("$.propertyId").doesNotExist())
+            .andExpect(jsonPath("$.tenantId").doesNotExist())
+
+        val second = requestPairing(publicKey)
+        val secondCode = readString(second, "$.pairingCode")
+        kotlin.test.assertNotEquals(firstCode, secondCode)
+
+        mockMvc.perform(
+            get("/api/v1/devices/pairing-requests/$firstId").secure(true),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.status").value("expired"))
+    }
+
+    private fun requestPairing(publicKey: String): MvcResult {
+        return mockMvc.perform(
+            post("/api/v1/devices/pairing-requests")
+                .secure(true)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"publicKey":"$publicKey"}"""),
+        )
+            .andExpect(status().isOk)
+            .andReturn()
+    }
+
+    private fun approve(fixture: Fixture, pairingCode: String): MvcResult {
+        return mockMvc.perform(
+            post("/api/v1/tenants/${fixture.tenantId}/devices/pairing-approvals")
+                .secure(true)
+                .contentType(MediaType.APPLICATION_JSON)
+                .header(PeakRequestHeaders.TENANT_ID, fixture.tenantId.toString())
+                .header(PeakRequestHeaders.TENANT_USER_ID, fixture.userId.toString())
+                .content(
+                    """
+                    {
+                      "pairingCode": "$pairingCode",
+                      "propertyId": "${fixture.propertyId}",
+                      "terminalName": "Till 1",
+                      "mode": "POS"
+                    }
+                    """.trimIndent(),
+                ),
+        )
+            .andExpect(status().isOk)
+            .andReturn()
+    }
+
+    private fun newPublicKey(): String =
+        Base64.getEncoder().encodeToString(
+            KeyPairGenerator.getInstance("Ed25519").generateKeyPair().public.encoded,
+        )
+
+    private fun readString(result: MvcResult, path: String): String =
+        com.jayway.jsonpath.JsonPath.read(result.response.contentAsString, path)
 
     private fun seedManager(): Fixture {
         val fixture = Fixture(

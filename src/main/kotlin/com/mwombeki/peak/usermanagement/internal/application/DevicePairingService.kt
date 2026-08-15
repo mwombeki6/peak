@@ -6,9 +6,11 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.time.Clock
 import java.time.Duration
+import java.time.Instant
 import java.util.Base64
 import java.util.HexFormat
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
@@ -22,6 +24,9 @@ data class DevicePairingProperties(
      * pairing their own terminal into someone's restaurant by working through the space.
      */
     val maxAttempts: Int = 5,
+    /** Caps unauthenticated pairing creates per public key. No Redis; process-local. */
+    val maxCreatesPerKey: Int = 5,
+    val createWindow: Duration = Duration.ofMinutes(5),
 )
 
 /**
@@ -38,6 +43,9 @@ data class DevicePairingProperties(
  * Pending requests have no tenant. Inserts and lookups go through SECURITY DEFINER functions
  * owned by `pms_device_pairing_owner`, so ordinary tenant RLS cannot read a waiting code.
  * This service never writes `pos_terminals`.
+ *
+ * An expired (or still-pending) wait may POST the same public key again. That abandons the
+ * previous pending row and issues a new pairing code. The pairing code is not a JWT.
  */
 @Service
 class DevicePairingService(
@@ -48,6 +56,8 @@ class DevicePairingService(
     private val clock: Clock,
 ) {
     private val random = SecureRandom()
+    private val createLock = Any()
+    private val recentCreates = ConcurrentHashMap<String, MutableList<Instant>>()
 
     /** What the manager chooses when they approve. Mode is workspace routing, not authority. */
     data class Approval(
@@ -58,10 +68,24 @@ class DevicePairingService(
     )
 
     data class PairingRequest(
+        val id: UUID,
         val deviceCode: String,
         val code: String,
         val fingerprint: String,
-        val expiresAt: java.time.Instant,
+        val expiresAt: Instant,
+    )
+
+    /**
+     * What an unpaired till may learn while it waits. Pending, expired, and denied
+     * expose only [status]. Approved adds the device code it already holds, the code
+     * expiry, and workspace routing — never tenant, property, or guest data.
+     */
+    data class PairingStatus(
+        val status: String,
+        val deviceCode: String? = null,
+        val expiresAt: Instant? = null,
+        val terminalName: String? = null,
+        val mode: String? = null,
     )
 
     data class PairedDevice(val deviceId: UUID, val deviceCode: String)
@@ -71,34 +95,93 @@ class DevicePairingService(
      *
      * Unauthenticated on purpose: at this moment nobody has decided which hotel this device
      * belongs to, and it has nothing to authenticate with. Everything it can do until a manager
-     * approves is wait.
+     * approves is wait. The same public key may be posted again after expiry — that replaces
+     * the pending row rather than requiring a new keypair.
      */
     fun requestPairing(publicKey: String): PairingRequest {
         val normalizedKey = publicKey.trim()
         val fingerprint = fingerprint(normalizedKey)
+        throttleCreate(fingerprint)
         val deviceCode = "dev_" + randomToken(32)
         val code = (1..CODE_DIGITS).map { random.nextInt(10) }.joinToString("")
         val expiresAt = clock.instant().plus(properties.codeValidity)
 
-        transactionTemplate.executeWithoutResult {
-            jdbcTemplate.queryForObject(
-                "SELECT abandon_colliding_device_pairings(?, ?)",
-                Int::class.java,
-                code,
-                normalizedKey,
-            )
-            jdbcTemplate.queryForObject(
-                "SELECT insert_pending_device_pairing(?, ?, ?, ?, ?)",
-                UUID::class.java,
-                deviceCode,
-                normalizedKey,
-                fingerprint,
-                code,
-                java.sql.Timestamp.from(expiresAt),
-            )
+        val id = requireNotNull(
+            transactionTemplate.execute {
+                jdbcTemplate.queryForObject(
+                    "SELECT abandon_colliding_device_pairings(?, ?)",
+                    Int::class.java,
+                    code,
+                    normalizedKey,
+                )
+                jdbcTemplate.queryForObject(
+                    "SELECT insert_pending_device_pairing(?, ?, ?, ?, ?)",
+                    UUID::class.java,
+                    deviceCode,
+                    normalizedKey,
+                    fingerprint,
+                    code,
+                    java.sql.Timestamp.from(expiresAt),
+                )
+            },
+        )
+
+        return PairingRequest(id, deviceCode, code, fingerprint, expiresAt)
+    }
+
+    fun status(pairingRequestId: UUID): PairingStatus? {
+        val row = transactionTemplate.execute {
+            jdbcTemplate.query(
+                """
+                SELECT status, device_code, expires_at, attempts, terminal_name, mode
+                FROM lookup_device_pairing_status(?)
+                """.trimIndent(),
+                { rs, _ ->
+                    StatusRow(
+                        status = rs.getString("status"),
+                        deviceCode = rs.getString("device_code"),
+                        expiresAt = rs.getTimestamp("expires_at").toInstant(),
+                        attempts = rs.getInt("attempts"),
+                        terminalName = rs.getString("terminal_name"),
+                        mode = rs.getString("mode"),
+                    )
+                },
+                pairingRequestId,
+            ).firstOrNull()
+        } ?: return null
+
+        val now = clock.instant()
+        if (row.status == "pending" && !row.expiresAt.isAfter(now)) {
+            transactionTemplate.executeWithoutResult {
+                jdbcTemplate.queryForObject(
+                    "SELECT mark_device_pairing_expired(?)",
+                    Int::class.java,
+                    pairingRequestId,
+                )
+            }
+            return PairingStatus(status = "expired")
         }
 
-        return PairingRequest(deviceCode, code, fingerprint, expiresAt)
+        val apiStatus = when {
+            row.status == "approved" -> "approved"
+            row.status == "abandoned" -> "denied"
+            row.status == "expired" -> "expired"
+            row.status == "pending" && row.attempts >= properties.maxAttempts -> "denied"
+            row.status == "pending" -> "pending"
+            else -> "denied"
+        }
+
+        if (apiStatus != "approved") {
+            return PairingStatus(status = apiStatus)
+        }
+
+        return PairingStatus(
+            status = "approved",
+            deviceCode = row.deviceCode,
+            expiresAt = row.expiresAt,
+            terminalName = row.terminalName,
+            mode = row.mode,
+        )
     }
 
     /**
@@ -269,6 +352,19 @@ class DevicePairingService(
         return HexFormat.ofDelimiter(":").withUpperCase().formatHex(digest.copyOf(FINGERPRINT_BYTES))
     }
 
+    private fun throttleCreate(fingerprint: String) {
+        val now = clock.instant()
+        val windowStart = now.minus(properties.createWindow)
+        synchronized(createLock) {
+            val times = recentCreates.getOrPut(fingerprint) { mutableListOf() }
+            times.removeAll { !it.isAfter(windowStart) }
+            if (times.size >= properties.maxCreatesPerKey) {
+                throw PairingCreateThrottledException()
+            }
+            times.add(now)
+        }
+    }
+
     private sealed class ApprovalResult {
         data class Ok(val device: PairedDevice) : ApprovalResult()
         data class Failure(val error: RuntimeException) : ApprovalResult()
@@ -285,7 +381,16 @@ class DevicePairingService(
         val publicKey: String,
         val fingerprint: String,
         val attempts: Int,
-        val expiresAt: java.time.Instant,
+        val expiresAt: Instant,
+    )
+
+    private data class StatusRow(
+        val status: String,
+        val deviceCode: String,
+        val expiresAt: Instant,
+        val attempts: Int,
+        val terminalName: String?,
+        val mode: String?,
     )
 
     private companion object {
@@ -294,3 +399,7 @@ class DevicePairingService(
         val ALLOWED_MODES = setOf("POS", "KITCHEN_DISPLAY", "BAR_DISPLAY", "CASHIER")
     }
 }
+
+class PairingCreateThrottledException : RuntimeException(
+    "Too many pairing requests from this terminal. Wait and try again.",
+)

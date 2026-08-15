@@ -1,9 +1,11 @@
 package com.mwombeki.peak.usermanagement.internal.web
 
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.shared.exception.ApiProblemFactory
 import com.mwombeki.peak.usermanagement.internal.application.DevicePairingService
+import com.mwombeki.peak.usermanagement.internal.application.PairingCreateThrottledException
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
 import java.time.Instant
@@ -12,6 +14,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.ExceptionHandler
+import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -31,10 +34,26 @@ class DevicePairingController(
     ): PairingRequestHttpResponse {
         val issued = pairing.requestPairing(request.publicKey)
         return PairingRequestHttpResponse(
+            pairingRequestId = issued.id,
             deviceCode = issued.deviceCode,
             pairingCode = issued.code,
             fingerprint = issued.fingerprint,
             expiresAt = issued.expiresAt,
+        )
+    }
+
+    @GetMapping("/devices/pairing-requests/{pairingRequestId}")
+    fun pairingStatus(
+        @PathVariable pairingRequestId: UUID,
+    ): PairingStatusHttpResponse {
+        val status = pairing.status(pairingRequestId)
+            ?: throw PairingStatusNotFoundException()
+        return PairingStatusHttpResponse(
+            status = status.status,
+            deviceCode = status.deviceCode,
+            expiresAt = status.expiresAt,
+            terminalName = status.terminalName,
+            mode = status.mode,
         )
     }
 
@@ -87,17 +106,47 @@ class DevicePairingController(
             ex.message ?: "This pairing can no longer be approved",
         )
     }
+
+    @ExceptionHandler(PairingCreateThrottledException::class)
+    fun handleThrottled(ex: PairingCreateThrottledException): ResponseEntity<ProblemDetail> {
+        return apiProblemFactory.response(
+            HttpStatus.TOO_MANY_REQUESTS,
+            "Too many pairing requests",
+            ex.message,
+        )
+    }
+
+    @ExceptionHandler(PairingStatusNotFoundException::class)
+    fun handleMissing(): ResponseEntity<ProblemDetail> {
+        return apiProblemFactory.response(
+            HttpStatus.NOT_FOUND,
+            "Pairing request not found",
+            "That pairing request is not waiting",
+        )
+    }
 }
+
+internal class PairingStatusNotFoundException : RuntimeException()
 
 data class PairingRequestHttpRequest(
     @field:NotBlank val publicKey: String,
 )
 
 data class PairingRequestHttpResponse(
+    val pairingRequestId: UUID,
     val deviceCode: String,
     val pairingCode: String,
     val fingerprint: String,
     val expiresAt: Instant,
+)
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
+data class PairingStatusHttpResponse(
+    val status: String,
+    val deviceCode: String? = null,
+    val expiresAt: Instant? = null,
+    val terminalName: String? = null,
+    val mode: String? = null,
 )
 
 data class PairingApprovalHttpRequest(

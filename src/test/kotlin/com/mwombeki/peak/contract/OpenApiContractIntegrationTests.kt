@@ -63,6 +63,7 @@ class OpenApiContractIntegrationTests @Autowired constructor(
             "/api/v1/properties/{propertyId}/pos-config/menu-items" to "get",
             "/api/v1/properties/{propertyId}/pos-config/menu-categories" to "get",
             "/api/v1/devices/pairing-requests" to "post",
+            "/api/v1/devices/pairing-requests/{pairingRequestId}" to "get",
             "/api/v1/tenants/{tenantId}/devices/pairing-approvals" to "post",
             "/api/v1/tenants/{tenantId}/devices/{deviceId}/revoke" to "post",
             "/api/v1/devices/challenges" to "post",
@@ -85,6 +86,21 @@ class OpenApiContractIntegrationTests @Autowired constructor(
         listOf("challengeId", "nonce", "expiresAt").forEach { field ->
             assertTrue(challenge.has(field), "DeviceChallengeHttpResponse is missing $field")
         }
+        val pairingStatus = document.path("components").path("schemas")
+            .path("PairingStatusHttpResponse").path("properties")
+        assertTrue(pairingStatus.has("status"), "PairingStatusHttpResponse is missing status")
+        listOf("propertyId", "tenantId", "outletId").forEach { field ->
+            assertTrue(
+                !pairingStatus.has(field),
+                "PairingStatusHttpResponse must not publish $field",
+            )
+        }
+        val pairingRequest = document.path("components").path("schemas")
+            .path("PairingRequestHttpResponse").path("properties")
+        assertTrue(
+            pairingRequest.has("pairingRequestId"),
+            "PairingRequestHttpResponse is missing pairingRequestId",
+        )
     }
 
     private fun currentDocument(): JsonNode {

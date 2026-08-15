@@ -97,7 +97,22 @@ Tenant user lifecycle and identity-link revocation routes also require `tenant.u
 
 Tenant invitations only create new tenant users. They cannot reactivate or relink an existing active, invited, locked, or disabled account; existing accounts must use the lifecycle and identity-link administration routes. Acceptance revalidates that the invited dynamic role is still active and assignable.
 
-Frontline staff are not invited through Keycloak. `POST /api/v1/tenants/{tenantId}/staff` (`tenant.users.manage`, strong session) creates a user with no email, allocates `staff_number`, assigns an operational property role, and issues a PIN activation. When `phoneNumber` is present the secret is enqueued as SMS (`staff.credential.activation.issued`); when it is absent the one-time secret is returned once so a manager can hand it over in person. `POST /api/v1/staff/credentials/activate` is public: staff number, secret, and the PIN the staff member chose. A role that contains any strong permission is refused — that person still needs an email invitation. PIN login (`POST /staff/sessions`) is for POS cashiers and other till/frontline staff. It is not used to create a tenant, pay Peak, or activate a property; owners stay on Keycloak.
+Frontline staff are not invited through Keycloak. `POST /api/v1/tenants/{tenantId}/staff` (`tenant.users.manage`, strong session) creates a user with no email, allocates `staff_number`, assigns an operational property role, and issues a PIN activation. When `phoneNumber` is present the secret is enqueued as SMS (`staff.credential.activation.issued`); when it is absent the one-time secret is returned once so a manager can hand it over in person. `POST /api/v1/staff/credentials/activate` is public: staff number, secret, and the PIN the staff member chose. Issuing a new activation (PIN reset) immediately kills the old PIN and revokes that user's live `ops_` sessions. A role that contains any strong permission is refused — that person still needs an email invitation. PIN login (`POST /api/v1/staff/sessions`) is for POS cashiers and other till/frontline staff. It returns `mode` and `terminalName` from the paired device. A new login on the same device revokes any other live session on that till (one occupant). `DELETE /api/v1/staff/sessions/current` with the `ops_` bearer locks or switches staff without closing the drawer. PIN login is not used to create a tenant, pay Peak, or activate a property; owners stay on Keycloak.
+
+## Device pairing
+
+A till does not name its hotel. It generates an Ed25519 keypair and waits. The six-digit pairing code is a lookup, not a credential and not a JWT. Creates are throttled per public key (5 / 5 min); wrong approval guesses stay at 5 / 5 min.
+
+| Actor | Method | Route | What happens |
+| --- | --- | --- | --- |
+| Till (unauthenticated) | `POST` | `/api/v1/devices/pairing-requests` | Body `{publicKey}`. Returns `pairingRequestId`, `pairingCode`, `deviceCode`, `expiresAt`. The same public key may be posted again after expiry; that replaces the pending wait. |
+| Till (unauthenticated) | `GET` | `/api/v1/devices/pairing-requests/{pairingRequestId}` | Truthful wait. `status` is `pending`, `approved`, `expired`, or `denied`. Pending leaks nothing — no tenant, property, or workspace. Approved may add `deviceCode`, `expiresAt`, `terminalName`, and `mode`. Never guest data. |
+| Manager (`admin.devices.manage`, strong) | `POST` | `/api/v1/tenants/{tenantId}/devices/pairing-approvals` | Body `{pairingCode, propertyId, outletId?, terminalName, mode}`. The manager chooses the property. |
+| Till (unauthenticated) | `POST` | `/api/v1/devices/challenges` | Device-code challenge. Revoked devices fail closed (no nonce). |
+| Till (unauthenticated) | `POST` | `/api/v1/staff/sessions` | PIN login after a signed challenge. Returns `mode` and `terminalName`. |
+| Manager (`admin.devices.manage`, strong) | `POST` | `/api/v1/tenants/{tenantId}/devices/{deviceId}/revoke` | Ends operational sessions. Revival needs a new pairing request and a manager, not the old device row. |
+
+Operator flow: till shows the six-digit code and polls GET until `approved` or `expired`. On `expired`, it POSTs the same public key again. On `approved`, it challenges and the cashier types a PIN. The till never self-nominates a property.
 
 ## Tenant-Managed Property Access API
 
