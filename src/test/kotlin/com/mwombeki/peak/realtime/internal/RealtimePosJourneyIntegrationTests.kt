@@ -21,6 +21,8 @@ import com.mwombeki.peak.shared.context.RequestIdentity
 import java.math.BigDecimal
 import java.net.URI
 import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
 import java.net.http.WebSocket
 import java.time.Duration
 import java.time.Instant
@@ -191,6 +193,58 @@ class RealtimePosJourneyIntegrationTests {
         assertEquals("cash", (settledEvent["payload"] as Map<*, *>)["settlementMethod"])
         assertEquals("confirmed", (settledEvent["payload"] as Map<*, *>)["settlementStatus"])
         assertEquals("closed", settled.status)
+        assertNotNull(settledEvent["sequenceId"], "live envelopes carry the committed journal position")
+
+        // REST backfill: the same committed events are replayable after a cursor, so a client
+        // connecting after the fact sees no gap and can deduplicate live envelopes by position.
+        val replayResponse = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .build()
+            .send(
+                HttpRequest.newBuilder(
+                    URI.create(
+                        "http://localhost:$port/api/v1/properties/" +
+                            "${fixture.propertyId}/realtime/events?after=0",
+                    ),
+                )
+                    .header("X-Peak-Tenant-Id", fixture.tenantId.toString())
+                    .header("X-Peak-Tenant-User-Id", fixture.userId.toString())
+                    .GET()
+                    .build(),
+                HttpResponse.BodyHandlers.ofString(),
+            )
+        assertEquals(200, replayResponse.statusCode())
+        @Suppress("UNCHECKED_CAST")
+        val replayBody = objectMapper.readValue(
+            replayResponse.body(),
+            Map::class.java,
+        ) as Map<String, Any?>
+        @Suppress("UNCHECKED_CAST")
+        val replayEvents = replayBody["events"] as List<Map<String, Any?>>
+        assertEquals(
+            listOf(
+                "pos.session.opened",
+                "pos.order.created",
+                "pos.order.updated",
+                "pos.order.sent",
+                "pos.kitchen_ticket.created",
+                "pos.kitchen_ticket.preparing",
+                "pos.kitchen_ticket.ready",
+                "pos.kitchen_ticket.delivered",
+                "payments.pos.cash.collected",
+                "pos.order.settled",
+            ),
+            replayEvents.map { it["type"] },
+            "backfill must replay every committed event in order",
+        )
+        val replayPositions = replayEvents.map { (it["sequenceId"] as Number).toLong() }
+        assertEquals(replayPositions.sorted(), replayPositions)
+        assertEquals(replayPositions.last(), (settledEvent["sequenceId"] as Number).toLong())
+        assertEquals(
+            replayPositions.last(),
+            (replayBody["nextCursor"] as Number).toLong(),
+            "nextCursor resumes exactly after the last replayed event",
+        )
 
         socket.closeQuietly()
     }

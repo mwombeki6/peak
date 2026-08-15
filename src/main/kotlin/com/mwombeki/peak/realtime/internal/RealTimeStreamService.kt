@@ -44,6 +44,7 @@ class RealtimeStreamService(
     /** Maps a stored event to the canonical envelope delivered to subscribers. */
     companion object {
         fun envelope(event: StoredRealtimeEvent): Map<String, Any?> = mapOf(
+            "sequenceId" to event.sequenceId,
             "eventId" to event.eventId.toString(),
             "type" to event.eventType,
             "schemaVersion" to event.schemaVersion,

@@ -135,6 +135,22 @@ class RealtimeEventJournal(
         }
         val sequenceId = lastEventId.toLongOrNull()
             ?: throw IllegalArgumentException("Last-Event-ID must be a numeric realtime sequence.")
+        return replayPage(tenantId, propertyId, sequenceId, properties.replayLimit)
+    }
+
+    /**
+     * Paged replay for REST backfill: every committed event strictly after the cursor,
+     * ascending, capped at [limit] (clamped to the journal's configured replay limit).
+     */
+    fun replayPage(
+        tenantId: UUID,
+        propertyId: UUID,
+        afterSequence: Long,
+        limit: Int,
+    ): List<StoredRealtimeEvent> {
+        require(afterSequence >= 0) {
+            "Realtime replay cursor must be non-negative"
+        }
         return jdbcTemplate.query(
             """
             SELECT sequence_id, event_id, tenant_id, property_id,
@@ -146,8 +162,8 @@ class RealtimeEventJournal(
             ::mapEvent,
             tenantId,
             propertyId,
-            sequenceId,
-            properties.replayLimit,
+            afterSequence,
+            limit.coerceIn(1, properties.replayLimit),
         ).also { events ->
             meterRegistry.counter("peak.realtime.journal.events.replayed")
                 .increment(events.size.toDouble())

@@ -114,7 +114,7 @@ class PopulatedMigrationUpgradeIntegrationTests @Autowired constructor(
                 .dataSource(url, postgres.username, postgres.password)
                 .load()
             upgraded.migrate()
-            assertEquals("118", upgraded.info().current().version.version)
+            assertEquals("119", upgraded.info().current().version.version)
 
             DriverManager.getConnection(url, postgres.username, postgres.password).use { connection ->
                 connection.prepareStatement(
