@@ -22,6 +22,9 @@ class RealtimeEventJournalIntegrationTests {
     @Autowired
     private lateinit var jdbcTemplate: JdbcTemplate
 
+    @Autowired
+    private lateinit var transactionTemplate: org.springframework.transaction.support.TransactionTemplate
+
     @Test
     fun persistsOrderedEventsForCrossNodePollingAndScopedResume() {
         val fixture = insertFixture()
@@ -126,6 +129,68 @@ class RealtimeEventJournalIntegrationTests {
         assertEquals(
             "vacant_clean",
             (mirrored.payload["data"] as Map<*, *>)["status"],
+        )
+    }
+
+    @Test
+    fun `rolled back business transaction leaves no journal event behind`() {
+        val fixture = insertFixture()
+        val before = journal.latestSequence()
+        assertFailsWith<IllegalStateException> {
+            transactionTemplate.execute {
+                journal.append(
+                    tenantId = fixture.tenantId,
+                    propertyId = fixture.propertyId,
+                    eventType = "pos.session.opened",
+                    payload = mapOf("sessionId" to UUID.randomUUID()),
+                )
+                throw IllegalStateException("boom")
+            }
+        }
+        assertEquals(
+            emptyList(),
+            journal.replayAfter(
+                fixture.tenantId,
+                fixture.propertyId,
+                before.toString(),
+            ),
+            "A committed-event stream must never announce state that was rolled back",
+        )
+    }
+
+    @Test
+    fun `skips mirroring for canonical pos and payment broadcast families`() {
+        val fixture = insertFixture()
+        val before = journal.latestSequence()
+        val aggregateId = UUID.randomUUID()
+        listOf("pos.order.created", "pos.kitchen_ticket.ready", "pos.session.opened", "payment.succeeded")
+            .forEachIndexed { index, eventType ->
+                jdbcTemplate.update(
+                    """
+                    INSERT INTO outbox_events (
+                        id, tenant_id, property_id, aggregate_type, aggregate_id,
+                        event_type, destination, payload, correlation_id
+                    )
+                    VALUES (?, ?, ?, 'pos_order', ?, ?, 'platform', ?::jsonb, ?)
+                    """.trimIndent(),
+                    UUID.randomUUID(),
+                    fixture.tenantId,
+                    fixture.propertyId,
+                    aggregateId,
+                    eventType,
+                    """{"aggregateId":"$aggregateId"}""",
+                    "mirror-skip-$index",
+                )
+            }
+
+        assertEquals(
+            emptyList(),
+            journal.replayAfter(
+                fixture.tenantId,
+                fixture.propertyId,
+                before.toString(),
+            ),
+            "Canonically broadcast events must reach subscribers once, in the canonical envelope",
         )
     }
 
