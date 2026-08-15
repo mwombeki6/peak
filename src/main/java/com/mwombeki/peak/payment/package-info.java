@@ -8,7 +8,8 @@
                 "shared::secrets",
                 "audit::api",
                 "reliability::api",
-                "billing::api"
+                "billing::api",
+                "realtime::api"
         }
 )
 package com.mwombeki.peak.payment;
