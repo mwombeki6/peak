@@ -184,6 +184,50 @@ class ProductionReadinessValidatorTests {
     }
 
     @Test
+    fun allowsWorkerRuntimeWhenWhatsAppStaysUnrouted() {
+        validator(
+            environment = secureProdEnvironment()
+                .withProperty("spring.datasource.username", "peak_worker")
+                .withProperty("spring.datasource.password", "not-local-secret")
+                .withProperty("spring.flyway.enabled", "false")
+                .withProperty("spring.main.web-application-type", "none")
+                .withProperty("peak.reliability.outbox.worker.enabled", "true"),
+            runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.WORKER),
+            httpSecurityProperties = secureHttpProperties(),
+            requestContextProperties = secureRequestContextProperties(),
+        ).afterSingletonsInstantiated()
+    }
+
+    @Test
+    fun rejectsWorkerRuntimeWhenWhatsAppIsRoutedToBeemWithoutAFromNumberOrCallback() {
+        val error = assertFailsWith<IllegalStateException> {
+            validator(
+                environment = secureProdEnvironment()
+                    .withProperty("spring.datasource.username", "peak_worker")
+                    .withProperty("spring.datasource.password", "not-local-secret")
+                    .withProperty("spring.flyway.enabled", "false")
+                    .withProperty("spring.main.web-application-type", "none")
+                    .withProperty("peak.reliability.outbox.worker.enabled", "true")
+                    .withProperty("peak.communication.routing.whatsapp", "beem")
+                    .withProperty("peak.communication.providers.beem.whatsapp-from", "")
+                    .withProperty("peak.communication.providers.beem.whatsapp-callback-url", "")
+                    .withProperty(
+                        "peak.security.outbound.allowed-provider-hosts",
+                        "apisms.beem.africa,payments.example.com",
+                    ),
+                runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.WORKER),
+                httpSecurityProperties = secureHttpProperties(),
+                requestContextProperties = secureRequestContextProperties(),
+            ).afterSingletonsInstantiated()
+        }
+
+        val message = requireNotNull(error.message)
+        assertTrue(message.contains("providers.beem.whatsapp-from"), message)
+        assertTrue(message.contains("providers.beem.whatsapp-callback-url"), message)
+        assertTrue(message.contains("apichatcore.beem.africa"), message)
+    }
+
+    @Test
     fun allowsProductionApiRuntimeOnlyWhenFlywayIsDisabled() {
         validator(
             environment = secureProdEnvironment()

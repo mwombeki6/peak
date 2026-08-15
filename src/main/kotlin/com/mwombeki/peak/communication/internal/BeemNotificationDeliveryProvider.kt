@@ -12,9 +12,10 @@ import org.springframework.stereotype.Component
 import tools.jackson.databind.ObjectMapper
 
 /**
- * Sends SMS and WhatsApp through Beem. Does not receive either.
+ * Sends SMS and WhatsApp through Beem.
  *
- * Contract is [docs.beem.africa](https://docs.beem.africa/index.html):
+ * Contract is [docs.beem.africa](https://docs.beem.africa/index.html) and the
+ * Moja send sample on [beem.africa/conversational-api](https://beem.africa/conversational-api/):
  *
  *  * SMS: `POST https://apisms.beem.africa/v1/send` with HTTP Basic
  *    (`api_key`:`secret_key`). Body is `source_addr`, `encoding`, `message`,
@@ -22,9 +23,11 @@ import tools.jackson.databind.ObjectMapper
  *    `code` 100 and `request_id`.
  *  * WhatsApp (Moja session text): `POST https://apichatcore.beem.africa/v1/chatapi`
  *    with the same Basic auth. Body is `from`, `to`, `channel=whatsapp`,
- *    `message_type=text`, `text`, and a UUIDv4 `transaction_id`. That path
- *    only delivers inside an active 24-hour session. Inbound webhooks and
- *    template broadcast are out of this adapter.
+ *    `message_type=text`, `text`, a UUIDv4 `transaction_id`, and optional
+ *    `callback_url`. That path only delivers inside an active 24-hour
+ *    session. Peak does not call a template-broadcast URL: Beem's public
+ *    WhatsApp template sample has no documented host. Inbound chat is not
+ *    a product; `callback_url` is only a delivery receipt.
  *
  * Routing, not [supports], decides which channel this deployment actually
  * uses. WhatsApp stays unconfigured until a from-number is set.
@@ -40,6 +43,12 @@ data class BeemProperties(
     val sourceAddr: String = "",
     /** WhatsApp Business number, international digits, no leading `+`. */
     val whatsappFrom: String = "",
+    /**
+     * Public HTTPS origin Peak asks Beem to POST delivery receipts to.
+     * Required in production when WhatsApp is routed to Beem; empty means
+     * Peak will not learn whether a guest message was delivered.
+     */
+    val whatsappCallbackUrl: String = "",
     val connectTimeout: Duration = Duration.ofSeconds(3),
     val requestTimeout: Duration = Duration.ofSeconds(10),
 )
@@ -146,20 +155,34 @@ class BeemNotificationDeliveryProvider(
             "peak.communication.providers.beem.whatsapp-from is required"
         }
         val transactionId = command.outboxEventId
-        val body = mapOf(
-            "from" to from,
-            "to" to internationalDigits(command.recipient),
-            "channel" to "whatsapp",
-            "transaction_id" to transactionId.toString(),
-            "message_type" to "text",
-            "text" to command.content,
-        )
+        val body = buildMap<String, Any> {
+            put("from", from)
+            put("to", internationalDigits(command.recipient))
+            put("channel", "whatsapp")
+            put("transaction_id", transactionId.toString())
+            put("message_type", "text")
+            put("text", command.content)
+            val callbackBase = properties.whatsappCallbackUrl.trim()
+            if (callbackBase.isNotEmpty()) {
+                put(
+                    "callback_url",
+                    BeemWhatsAppCallback.callbackUrl(
+                        publicBase = callbackBase,
+                        transactionId = transactionId,
+                        secretKey = properties.secretKey,
+                    ),
+                )
+            }
+        }
         val response = postJson(whatsappEndpoint(), body)
         val root = objectMapper.readTree(response)
         check(root.path("message").asString("").equals("success", ignoreCase = true)) {
             "Beem WhatsApp was not accepted: ${root.path("message").asString("")}"
         }
-        return NotificationDeliveryResult(providerMessageId = transactionId.toString())
+        return NotificationDeliveryResult(
+            providerMessageId = transactionId.toString(),
+            awaitingReceipt = properties.whatsappCallbackUrl.isNotBlank(),
+        )
     }
 
     private fun postJson(endpoint: URI, body: Map<String, Any>): String {

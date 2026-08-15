@@ -112,7 +112,7 @@ class NotificationDeliveryProcessor(
                     content = payload.content,
                 ),
             )
-            finishDelivered(tenantId, event, work, result)
+            finishAccepted(tenantId, event, work, result)
         } catch (ex: Exception) {
             finishFailed(tenantId, event, work, ex)
             throw ex
@@ -240,6 +240,67 @@ class NotificationDeliveryProcessor(
             event.maxAttempts,
         )
         return deliveryRequestId
+    }
+
+    private fun finishAccepted(
+        tenantId: UUID,
+        event: ClaimedOutboxEvent,
+        work: DeliveryWork,
+        result: NotificationDeliveryResult,
+    ) {
+        if (result.awaitingReceipt) {
+            finishSubmitted(tenantId, event, work, result)
+            return
+        }
+        finishDelivered(tenantId, event, work, result)
+    }
+
+    private fun finishSubmitted(
+        tenantId: UUID,
+        event: ClaimedOutboxEvent,
+        work: DeliveryWork,
+        result: NotificationDeliveryResult,
+    ) {
+        transactionTemplate.executeWithoutResult {
+            bindTenant(tenantId)
+            jdbcTemplate.update(
+                """
+                UPDATE communication_delivery_attempts
+                SET provider_message_id = ?,
+                    error_message = NULL
+                WHERE tenant_id = ?
+                  AND delivery_request_id = ?
+                  AND outbox_event_id = ?
+                  AND attempt_number = ?
+                """.trimIndent(),
+                result.providerMessageId,
+                tenantId,
+                work.deliveryRequestId,
+                event.id,
+                event.attemptCount,
+            )
+            jdbcTemplate.update(
+                """
+                UPDATE communication_delivery_requests
+                SET status = 'sending',
+                    attempt_count = GREATEST(attempt_count, ?),
+                    failed_at = NULL,
+                    last_error = NULL,
+                    updated_at = now()
+                WHERE id = ? AND tenant_id = ?
+                """.trimIndent(),
+                event.attemptCount,
+                work.deliveryRequestId,
+                tenantId,
+            )
+        }
+        logger.info(
+            "Submitted communication request {} outboxEventId={} channel={} provider={} awaitingReceipt=true",
+            work.deliveryRequestId,
+            event.id,
+            work.channel,
+            work.provider,
+        )
     }
 
     private fun finishDelivered(
@@ -660,6 +721,7 @@ data class NotificationDeliveryCommand(
 
 data class NotificationDeliveryResult(
     val providerMessageId: String,
+    val awaitingReceipt: Boolean = false,
 )
 
 @Component

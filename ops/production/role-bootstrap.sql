@@ -115,6 +115,18 @@ BEGIN
       NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
   END IF;
 
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_roles
+    WHERE rolname = 'pms_communication_webhook_scope_owner'
+  ) THEN
+    CREATE ROLE pms_communication_webhook_scope_owner
+      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+  ELSE
+    ALTER ROLE pms_communication_webhook_scope_owner
+      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+  END IF;
+
   -- Owner of the device-pairing SECURITY DEFINER functions (V120). Pending
   -- pairing rows have no tenant, so they cannot live under ordinary tenant RLS;
   -- this role is what those functions run as. NOBYPASSRLS is load-bearing for

@@ -135,7 +135,13 @@ class OpenApiContractIntegrationTests @Autowired constructor(
             pathEntry.value.properties()
                 .filter { it.key in HTTP_METHODS }
                 .forEach { operation ->
-                    if (pathEntry.key != "/api/v1/payments/webhooks/clickpesa/{providerAccountId}") {
+                    if (isPublicWebhookPath(pathEntry.key)) {
+                        val security = operation.value.path("security")
+                        assertTrue(
+                            security.isArray && security.isEmpty,
+                            "${operation.key.uppercase()} ${pathEntry.key} must publish empty security",
+                        )
+                    } else {
                         val security = operation.value.path("security")
                         assertTrue(
                             security.isMissingNode || security.any { it.has("bearerAuth") },
@@ -151,5 +157,12 @@ class OpenApiContractIntegrationTests @Autowired constructor(
         val BASELINE: Path = Path.of("src/test/resources/contracts/openapi-v1.json")
         val BUILD_CONTRACT: Path = Path.of("build/contracts/openapi-v1.json")
         val HTTP_METHODS = setOf("get", "post", "put", "patch", "delete", "head", "options")
+
+        fun isPublicWebhookPath(path: String): Boolean {
+            return path.startsWith("/api/v1/payments/webhooks/") ||
+                path.startsWith("/api/v1/platform-billing/webhooks/") ||
+                path.startsWith("/api/v1/communication/webhooks/")
+        }
     }
 }
+

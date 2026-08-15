@@ -102,7 +102,7 @@ class OpenApiConfiguration {
                     }
 
                     if (method.name.equals(HttpMethod.POST.name(), ignoreCase = true) &&
-                        path == CLICKPESA_WEBHOOK_PATH
+                        isPublicWebhookPath(path)
                     ) {
                         operation.security = emptyList()
                     }
@@ -126,9 +126,13 @@ class OpenApiConfiguration {
     private companion object {
         const val BEARER_AUTH = "bearerAuth"
         const val API_PROBLEM = "ApiProblem"
-        const val CLICKPESA_WEBHOOK_PATH =
-            "/api/v1/payments/webhooks/clickpesa/{providerAccountId}"
         val UNSAFE_METHODS = setOf("POST", "PUT", "PATCH", "DELETE")
+
+        fun isPublicWebhookPath(path: String): Boolean {
+            return path.startsWith("/api/v1/payments/webhooks/") ||
+                path.startsWith("/api/v1/platform-billing/webhooks/") ||
+                path.startsWith("/api/v1/communication/webhooks/")
+        }
 
         fun problemResponse(description: String): ApiResponse {
             return ApiResponse()

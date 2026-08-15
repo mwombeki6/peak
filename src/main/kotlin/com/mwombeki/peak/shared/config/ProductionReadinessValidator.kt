@@ -273,6 +273,15 @@ class ProductionReadinessValidator(
         }
 
         if (runtimeProperties.mode != PeakRuntimeMode.WORKER) {
+            if (runtimeProperties.mode == PeakRuntimeMode.API) {
+                val whatsappRoute = environment.getProperty("peak.communication.routing.whatsapp")
+                    .orEmpty().trim()
+                if (whatsappRoute == "beem") {
+                    requirePresent(environment.getProperty("peak.communication.providers.beem.secret-key")) {
+                        "peak.communication.providers.beem.secret-key is required on API when WhatsApp is routed to beem"
+                    }
+                }
+            }
             return
         }
 
@@ -314,6 +323,9 @@ class ProductionReadinessValidator(
         requireTrue(emailRoute != "local" && smsRoute != "local") {
             "peak.communication.routing must not use the local provider in prod"
         }
+        requireTrue(whatsappRoute.isBlank() || whatsappRoute != "local") {
+            "peak.communication.routing.whatsapp must not use the local provider in prod"
+        }
 
         if (smsRoute == "beem" || whatsappRoute == "beem") {
             val beemEnabled = environment.getProperty(
@@ -339,6 +351,19 @@ class ProductionReadinessValidator(
         if (whatsappRoute == "beem") {
             requirePresent(environment.getProperty("peak.communication.providers.beem.whatsapp-from")) {
                 "peak.communication.providers.beem.whatsapp-from is required when WhatsApp is routed to beem"
+            }
+            val callbackUrl = environment.getProperty(
+                "peak.communication.providers.beem.whatsapp-callback-url",
+            )
+            requirePresent(callbackUrl) {
+                "peak.communication.providers.beem.whatsapp-callback-url is required when WhatsApp is routed to beem"
+            }
+            requireTrue(callbackUrl?.startsWith("https://") == true || acceptanceProfile) {
+                "peak.communication.providers.beem.whatsapp-callback-url must use https in prod"
+            }
+            val hosts = configuredList("peak.security.outbound.allowed-provider-hosts")
+            requireTrue(hosts.any { it.equals(BEEM_WHATSAPP_HOST, ignoreCase = true) }) {
+                "peak.security.outbound.allowed-provider-hosts must include $BEEM_WHATSAPP_HOST when WhatsApp is routed to beem"
             }
         }
     }
@@ -454,6 +479,7 @@ class ProductionReadinessValidator(
         const val WORKER_RUNTIME_USER = "peak_worker"
         const val WEB_APPLICATION_TYPE_NONE = "none"
         const val FORWARD_HEADERS_NATIVE = "native"
+        const val BEEM_WHATSAPP_HOST = "apichatcore.beem.africa"
         val OUTBOUND_HOST_PATTERN = Regex(
             "^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+" +
                     "[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$",

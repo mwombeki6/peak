@@ -442,6 +442,7 @@ class RouteAccessMatrixCoverageIntegrationTests {
             // settles Peak's revenue into Peak's own merchant account, and the two must
             // not share a route or a credential source.
             startsWith("/api/v1/platform-billing/webhooks/") -> GuardMode.PUBLIC_TOKEN
+            startsWith("/api/v1/communication/webhooks/") -> GuardMode.PUBLIC_TOKEN
             this == "/api/v1/invitations/accept" -> GuardMode.PUBLIC_TOKEN
             this == "/api/v1/staff/sessions" ||
                     this == "/api/v1/staff/credentials/activate" ||
@@ -465,6 +466,7 @@ class RouteAccessMatrixCoverageIntegrationTests {
             // and refuses a route carrying tenant or property variables. The wrong one
             // satisfies the check constraint and then denies every callback at runtime.
             startsWith("/api/v1/platform-billing/webhooks/") -> RouteScope.PUBLIC
+            startsWith("/api/v1/communication/webhooks/") -> RouteScope.PUBLIC
             this == "/api/v1/invitations/accept" -> RouteScope.PUBLIC
             this == "/api/v1/staff/sessions" ||
                     this == "/api/v1/staff/credentials/activate" ||

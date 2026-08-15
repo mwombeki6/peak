@@ -50,6 +50,8 @@ class Phase3OpenApiIntegrationTests @Autowired constructor(
                     "{issueId}/override" to "post",
             "/api/v1/properties/{propertyId}/night-audit/{runId}/complete" to "post",
             "/api/v1/payments/webhooks/clickpesa/{providerAccountId}" to "post",
+            "/api/v1/communication/webhooks/beem/whatsapp/{transactionId}/{signature}" to "post",
+            "/api/v1/properties/{propertyId}/guests/{guestId}/whatsapp-channel" to "post",
         )
         expected.forEach { (path, method) ->
             assertTrue(

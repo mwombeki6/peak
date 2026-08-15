@@ -77,7 +77,42 @@ class BeemNotificationDeliveryProviderTests {
         assertEquals("text", body.path("message_type").asString(""))
         assertEquals(outboxEventId.toString(), body.path("transaction_id").asString(""))
         assertEquals("Your staff PIN is ready", body.path("text").asString(""))
-        assertTrue(body.path("callback_url").isMissingNode)
+        assertTrue(
+            body.path("callback_url").isMissingNode,
+            "without a public callback base, Peak cannot ask Beem for a delivery receipt",
+        )
+    }
+
+    @Test
+    fun whatsappIncludesTheDocumentedCallbackUrlWhenAPublicBaseIsConfigured() {
+        val transport = StubTransport(whatsappResponse)
+        val outboxEventId = UUID.fromString("4f6eec48-4140-4ce8-80c5-cef0e189578c")
+        provider(
+            transport,
+            properties().copy(whatsappCallbackUrl = "https://api.peak.example"),
+        ).send(command(channel = "whatsapp", recipient = "+255701000001", outboxEventId = outboxEventId))
+
+        val body = objectMapper.readTree(requireNotNull(transport.calls.single().payload))
+        val callbackUrl = body.path("callback_url").asString("")
+        assertTrue(
+            callbackUrl.startsWith(
+                "https://api.peak.example/api/v1/communication/webhooks/beem/whatsapp/",
+            ),
+            callbackUrl,
+        )
+        assertTrue(
+            callbackUrl.contains(outboxEventId.toString()),
+            "Beem correlates the receipt with transaction_id; the callback path must carry it: $callbackUrl",
+        )
+        val signature = callbackUrl.substringAfterLast('/')
+        assertTrue(
+            BeemWhatsAppCallback.matches(
+                secretKey = "secret-key",
+                transactionId = outboxEventId,
+                provided = signature,
+            ),
+            "the path signature is Peak's proof the URL was issued; Beem's docs give callback_url, not an HMAC header",
+        )
     }
 
     @Test
