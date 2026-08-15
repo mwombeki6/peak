@@ -139,6 +139,8 @@ class WebSocketConfig(
                                 identity,
                                 target,
                                 context.sessionClass,
+                                boundPropertyId = context.boundPropertyId,
+                                boundOutletId = context.boundOutletId,
                             )
                         ) {
                             recordDeniedSubscription(

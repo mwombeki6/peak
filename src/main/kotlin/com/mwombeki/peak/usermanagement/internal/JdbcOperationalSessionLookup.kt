@@ -19,7 +19,7 @@ class JdbcOperationalSessionLookup(
         }
         return jdbcTemplate.query(
             """
-            SELECT id, tenant_id, user_id, device_id, property_id
+            SELECT id, tenant_id, user_id, device_id, property_id, outlet_id
             FROM lookup_operational_session(?)
             """.trimIndent(),
             { rs, _ ->
@@ -29,6 +29,7 @@ class JdbcOperationalSessionLookup(
                     tenantUserId = rs.getObject("user_id", UUID::class.java),
                     deviceId = rs.getObject("device_id", UUID::class.java),
                     propertyId = rs.getObject("property_id", UUID::class.java),
+                    outletId = rs.getObject("outlet_id", UUID::class.java),
                 )
             },
             sha256Hex(bearerToken),

@@ -22,6 +22,7 @@ class OperationalSessionAuthentication(
     val tenantUserId: UUID,
     val deviceId: UUID,
     val propertyId: UUID,
+    val outletId: UUID? = null,
 ) : Authentication {
 
     private val grantedAuthorities: MutableCollection<GrantedAuthority> =
@@ -47,6 +48,7 @@ data class OperationalSessionPrincipal(
     val tenantUserId: UUID,
     val deviceId: UUID,
     val propertyId: UUID,
+    val outletId: UUID? = null,
 )
 
 @NamedInterface("context")

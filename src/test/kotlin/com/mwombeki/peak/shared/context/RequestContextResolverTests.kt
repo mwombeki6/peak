@@ -346,6 +346,59 @@ class RequestContextResolverTests {
     }
 
     @Test
+    fun rejectsIdentityHeadersCombinedWithOperationalSession() {
+        val tenantId = UUID.randomUUID()
+        val tenantUserId = UUID.randomUUID()
+        val request = MockHttpServletRequest("GET", "/api/v1/properties/${UUID.randomUUID()}/pos-orders")
+        request.addHeader(PeakRequestHeaders.TENANT_ID, tenantId.toString())
+        request.addHeader(PeakRequestHeaders.TENANT_USER_ID, tenantUserId.toString())
+
+        val error = assertFailsWith<RequestContextException> {
+            resolver(allowHeaderIdentity = true).resolve(
+                request,
+                OperationalSessionAuthentication(
+                    sessionId = UUID.randomUUID(),
+                    tenantId = tenantId,
+                    tenantUserId = tenantUserId,
+                    deviceId = UUID.randomUUID(),
+                    propertyId = UUID.randomUUID(),
+                ),
+            )
+        }
+
+        assertEquals(
+            "Identity headers cannot be combined with authenticated identity",
+            error.message,
+        )
+    }
+
+    @Test
+    fun bindsOperationalSessionPropertyAndOutlet() {
+        val tenantId = UUID.randomUUID()
+        val tenantUserId = UUID.randomUUID()
+        val propertyId = UUID.randomUUID()
+        val outletId = UUID.randomUUID()
+        val request = MockHttpServletRequest("GET", "/api/v1/properties/$propertyId/pos-orders")
+        request.addHeader(PeakRequestHeaders.CORRELATION_ID, "corr-ops-bound")
+
+        val context = resolver().resolve(
+            request,
+            OperationalSessionAuthentication(
+                sessionId = UUID.randomUUID(),
+                tenantId = tenantId,
+                tenantUserId = tenantUserId,
+                deviceId = UUID.randomUUID(),
+                propertyId = propertyId,
+                outletId = outletId,
+            ),
+        )
+
+        assertEquals(SessionClass.OPERATIONAL, context.sessionClass)
+        assertEquals(propertyId, context.boundPropertyId)
+        assertEquals(outletId, context.boundOutletId)
+    }
+
+    @Test
     fun rejectsIdentityHeadersCombinedWithJwt() {
         val tenantId = UUID.randomUUID()
         val tenantUserId = UUID.randomUUID()

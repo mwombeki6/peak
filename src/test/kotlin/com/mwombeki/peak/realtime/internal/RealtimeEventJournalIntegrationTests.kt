@@ -194,6 +194,77 @@ class RealtimeEventJournalIntegrationTests {
         )
     }
 
+    @Test
+    fun `property replay uses the scoped sequence index`() {
+        val fixture = insertFixture()
+        val indexName = jdbcTemplate.queryForObject(
+            """
+            SELECT indexname
+            FROM pg_indexes
+            WHERE tablename = 'realtime_event_journal'
+              AND indexname = 'idx_realtime_event_journal_scope_sequence'
+            """.trimIndent(),
+            String::class.java,
+        )
+        assertEquals("idx_realtime_event_journal_scope_sequence", indexName)
+
+        val other = insertProperty(fixture.tenantId)
+        jdbcTemplate.update(
+            """
+            INSERT INTO realtime_event_journal (
+                tenant_id, property_id, event_type, payload, expires_at
+            )
+            SELECT ?, ?, 'property.room.updated', '{}'::jsonb, now() + interval '1 day'
+            FROM generate_series(1, 20000) AS g
+            """.trimIndent(),
+            fixture.tenantId,
+            other,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO realtime_event_journal (
+                tenant_id, property_id, event_type, payload, expires_at
+            )
+            SELECT ?, ?, 'property.room.updated', '{}'::jsonb, now() + interval '1 day'
+            FROM generate_series(1, 500) AS g
+            """.trimIndent(),
+            fixture.tenantId,
+            fixture.propertyId,
+        )
+        jdbcTemplate.execute("ANALYZE realtime_event_journal")
+
+        val plan = requireNotNull(
+            jdbcTemplate.queryForObject(
+                """
+                EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+                SELECT sequence_id
+                FROM realtime_event_journal
+                WHERE tenant_id = ?
+                  AND property_id = ?
+                  AND sequence_id > 0
+                  AND expires_at > now()
+                ORDER BY sequence_id
+                LIMIT 200
+                """.trimIndent(),
+                String::class.java,
+                fixture.tenantId,
+                fixture.propertyId,
+            ),
+        )
+
+        assertTrue(
+            plan.contains("idx_realtime_event_journal_scope_sequence"),
+            "Replay must use idx_realtime_event_journal_scope_sequence, plan=$plan",
+        )
+        assertTrue(
+            !Regex(
+                "\\\"Node Type\\\"\\s*:\\s*\\\"Seq Scan\\\"[^}]*" +
+                    "\\\"Relation Name\\\"\\s*:\\s*\\\"realtime_event_journal\\\"",
+            ).containsMatchIn(plan),
+            "Replay must not seq-scan realtime_event_journal, plan=$plan",
+        )
+    }
+
     private fun insertFixture(): RealtimeFixture {
         val planId = UUID.randomUUID()
         val tenantId = UUID.randomUUID()

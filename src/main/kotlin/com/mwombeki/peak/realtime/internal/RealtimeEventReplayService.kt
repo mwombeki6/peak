@@ -35,6 +35,8 @@ class RealtimeEventReplayService(
                 identity,
                 RealtimeSubscriptionTarget.PropertyOperations(propertyId),
                 requestContextHolder.current().sessionClass,
+                boundPropertyId = requestContextHolder.current().boundPropertyId,
+                boundOutletId = requestContextHolder.current().boundOutletId,
             )
         ) {
             throw AccessDeniedException("Realtime stream access is not granted for this property")

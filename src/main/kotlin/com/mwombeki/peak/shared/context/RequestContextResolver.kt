@@ -24,6 +24,7 @@ class RequestContextResolver(
         val correlationId = resolveCorrelationId(request)
         val idempotencyKey = resolveIdempotencyKey(request)
         val identity = resolveIdentity(request, authentication, correlationId)
+        val operational = authentication as? OperationalSessionAuthentication
 
         return RequestContext(
             identity = identity,
@@ -44,6 +45,8 @@ class RequestContextResolver(
                 is OperationalSessionAuthentication -> SessionClass.OPERATIONAL
                 else -> SessionClass.STRONG
             },
+            boundPropertyId = operational?.propertyId,
+            boundOutletId = operational?.outletId,
         )
     }
 

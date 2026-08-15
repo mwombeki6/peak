@@ -37,6 +37,7 @@ class OperationalSessionAuthenticationFilter(
                         tenantUserId = session.tenantUserId,
                         deviceId = session.deviceId,
                         propertyId = session.propertyId,
+                        outletId = session.outletId,
                     )
             }
         }

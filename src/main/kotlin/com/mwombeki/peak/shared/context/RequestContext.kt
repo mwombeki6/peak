@@ -1,5 +1,6 @@
 package com.mwombeki.peak.shared.context
 
+import java.util.UUID
 import org.springframework.modulith.NamedInterface
 
 @NamedInterface("context")
@@ -28,4 +29,14 @@ data class RequestContext(
      * be able to declare itself strong.
      */
     val sessionClass: SessionClass = SessionClass.STRONG,
+    /**
+     * Property the operational device was paired into. Null for Keycloak sessions.
+     * A PIN till must not call another property's routes with the same token.
+     */
+    val boundPropertyId: UUID? = null,
+    /**
+     * Outlet the operational device was paired into, when the manager chose one.
+     * Null means the till is property-scoped. Never taken from a request body.
+     */
+    val boundOutletId: UUID? = null,
 )

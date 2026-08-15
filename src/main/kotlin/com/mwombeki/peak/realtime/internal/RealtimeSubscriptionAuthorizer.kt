@@ -64,6 +64,8 @@ class RealtimeSubscriptionAuthorizer(
         identity: RequestIdentity,
         target: RealtimeSubscriptionTarget,
         sessionClass: SessionClass = SessionClass.STRONG,
+        boundPropertyId: UUID? = null,
+        boundOutletId: UUID? = null,
     ): Boolean {
         if (identity !is RequestIdentity.Tenant) {
             return false
@@ -71,6 +73,12 @@ class RealtimeSubscriptionAuthorizer(
 
         val scope = resolveScope(identity, target) ?: return false
         if (identity.tenantId != scope.tenantId) {
+            return false
+        }
+        if (boundPropertyId != null && scope.propertyId != boundPropertyId) {
+            return false
+        }
+        if (boundOutletId != null && scope.outletId != null && scope.outletId != boundOutletId) {
             return false
         }
         return canSubscribe(identity, scope.tenantId, scope.propertyId, sessionClass)
@@ -87,16 +95,16 @@ class RealtimeSubscriptionAuthorizer(
                 if (target.tenantId != identity.tenantId) {
                     return@execute null
                 }
-                TenantPropertyScope(target.tenantId, target.propertyId)
+                TenantPropertyScope(target.tenantId, target.propertyId, outletId = null)
             }
             is RealtimeSubscriptionTarget.PropertyOperations -> {
-                val propertyId = jdbcTemplate.queryForObject(
+                val propertyId = jdbcTemplate.query(
                     "SELECT id FROM properties WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL",
-                    UUID::class.java,
+                    { rs, _ -> rs.getObject("id", UUID::class.java) },
                     identity.tenantId,
                     target.propertyId,
-                ) ?: return@execute null
-                TenantPropertyScope(identity.tenantId, propertyId)
+                ).firstOrNull() ?: return@execute null
+                TenantPropertyScope(identity.tenantId, propertyId, outletId = null)
             }
             is RealtimeSubscriptionTarget.Outlet -> {
                 val row = jdbcTemplate.query(
@@ -108,6 +116,7 @@ class RealtimeSubscriptionAuthorizer(
                         TenantPropertyScope(
                             rs.getObject("tenant_id", UUID::class.java),
                             rs.getObject("property_id", UUID::class.java),
+                            outletId = target.outletId,
                         )
                     },
                     identity.tenantId,
@@ -118,13 +127,14 @@ class RealtimeSubscriptionAuthorizer(
             is RealtimeSubscriptionTarget.Order -> {
                 val row = jdbcTemplate.query(
                     """
-                    SELECT tenant_id, property_id FROM pos_orders
+                    SELECT tenant_id, property_id, outlet_id FROM pos_orders
                     WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL
                     """.trimIndent(),
                     { rs, _ ->
                         TenantPropertyScope(
                             rs.getObject("tenant_id", UUID::class.java),
                             rs.getObject("property_id", UUID::class.java),
+                            outletId = rs.getObject("outlet_id", UUID::class.java),
                         )
                     },
                     identity.tenantId,
@@ -142,6 +152,7 @@ class RealtimeSubscriptionAuthorizer(
                         TenantPropertyScope(
                             rs.getObject("tenant_id", UUID::class.java),
                             rs.getObject("property_id", UUID::class.java),
+                            outletId = null,
                         )
                     },
                     identity.tenantId,
@@ -155,6 +166,7 @@ class RealtimeSubscriptionAuthorizer(
     private data class TenantPropertyScope(
         val tenantId: UUID,
         val propertyId: UUID,
+        val outletId: UUID?,
     )
 
     private companion object {

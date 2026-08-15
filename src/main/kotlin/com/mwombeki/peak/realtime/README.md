@@ -25,7 +25,9 @@ We support two ways for clients to receive data:
     -   Read-only server broadcasts over STOMP.
     -   Endpoint: `/ws-connect`
     -   The HTTP upgrade authenticates the same way REST does: a Keycloak JWT, an
-        `ops_` operational session from PIN login, or identity headers in dev/test.
+        `ops_` operational session from PIN login, or identity headers in
+        dev/test. An `ops_` bearer and identity headers are exclusive; presenting
+        both is refused. Destination paths are unchanged.
     -   Subscription Path: `/topic/tenants/{tenantId}/properties/{propertyId}/stream`
     -   Includes heartbeats every 10 seconds to keep the connection alive.
 
@@ -38,7 +40,7 @@ We support two ways for clients to receive data:
 
 ## Security & Isolation
 -   **Tenant and Property Authorization**: SSE routes are covered by `module_access_matrix`; WebSocket subscriptions call `can_access_module` directly. A user needs the `realtime.stream` permission and enabled `realtime` module for the target property.
--   **Session-bound identity**: The authenticated, DB-resolved request identity is copied into the WebSocket session during the HTTP handshake. STOMP headers and trusted identity headers cannot replace it.
+-   **Session-bound identity**: The authenticated, DB-resolved request identity is copied into the WebSocket session during the HTTP handshake. STOMP headers and trusted identity headers cannot replace it. A PIN session is bound to the paired property (and outlet, when set) and cannot subscribe across that boundary. `realtime.stream` is operational; a PIN session cannot reach a destination whose permission is still strong.
 -   **Audited denials**: Cross-tenant/property subscription attempts are denied first, then audited in a tenant-scoped transaction using the handshake correlation ID.
 -   **Origin Control**: WebSocket origins are configured with `peak.realtime.websocket.allowed-origins`. Wildcard origins are rejected.
 -   **No Platform Bypass**: Platform users do not bypass tenant/property realtime permissions.

@@ -67,6 +67,20 @@ class JdbcAuthorizationPort(
             return AuthorizationDecision.denied("Invalid route scope for staff permission guard")
         }
 
+        val sessionClass = requestContextHolder.current().sessionClass
+        if (sessionClass == SessionClass.OPERATIONAL) {
+            val boundPropertyId = requestContextHolder.current().boundPropertyId
+            if (
+                boundPropertyId != null &&
+                request.propertyId != null &&
+                request.propertyId != boundPropertyId
+            ) {
+                return AuthorizationDecision.denied(
+                    "Operational session is bound to a different property",
+                )
+            }
+        }
+
         val allowed = jdbcTemplate.queryForObject(
             "SELECT can_access_module(?, ?, ?, ?, ?)",
             Boolean::class.java,
@@ -89,7 +103,6 @@ class JdbcAuthorizationPort(
             ?.let(SessionClass::fromPolicy)
             ?: SessionClass.STRONG
 
-        val sessionClass = requestContextHolder.current().sessionClass
         return if (sessionClass.satisfies(requiredClass)) {
             AuthorizationDecision.allowed()
         } else {

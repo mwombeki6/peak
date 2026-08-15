@@ -149,6 +149,42 @@ class JdbcAuthorizationPortIntegrationTests {
     }
 
     @Test
+    fun deniesAnOperationalSessionOnADifferentProperty() {
+        val fixture = propertyPermissionFixture("pos.view")
+        val otherPropertyId = UUID.randomUUID()
+
+        val decision = requireNotNull(
+            transactionTemplate.execute {
+                insertPropertyPermissionFixture(fixture, moduleId = "pos")
+                requestContextHolder.set(
+                    requestContext(
+                        identity = RequestIdentity.Tenant(
+                            tenantId = fixture.tenantId,
+                            tenantUserId = fixture.userId,
+                            correlationId = "corr-auth-ops-property",
+                        ),
+                        sessionClass = SessionClass.OPERATIONAL,
+                    ).copy(boundPropertyId = fixture.propertyId),
+                )
+
+                authorizationPort.authorize(
+                    RouteAuthorizationRequest(
+                        moduleId = "pos",
+                        guardMode = GuardMode.STAFF_PERMISSION,
+                        routeScope = RouteScope.PROPERTY,
+                        permissionCode = "pos.view",
+                        tenantId = fixture.tenantId,
+                        propertyId = otherPropertyId,
+                    ),
+                )
+            },
+        )
+
+        assertFalse(decision.allowed)
+        assertEquals("Operational session is bound to a different property", decision.reason)
+    }
+
+    @Test
     fun aStrongSessionStillSatisfiesAnOperationalPermission() {
         val fixture = propertyPermissionFixture("pos.view")
 

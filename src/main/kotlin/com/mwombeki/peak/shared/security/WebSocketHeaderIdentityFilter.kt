@@ -1,14 +1,14 @@
 package com.mwombeki.peak.shared.security
 
 import com.mwombeki.peak.shared.context.HeaderIdentityAuthentication
+import com.mwombeki.peak.shared.context.OperationalSessionAuthentication
 import com.mwombeki.peak.shared.context.PeakRequestHeaders
 import com.mwombeki.peak.shared.context.RequestContextProperties
 import jakarta.servlet.FilterChain
-import jakarta.servlet.ServletException
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
-import java.io.IOException
 import java.util.UUID
+import org.springframework.http.HttpHeaders
 import org.springframework.security.core.Authentication
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.web.filter.OncePerRequestFilter
@@ -16,12 +16,9 @@ import org.springframework.web.filter.OncePerRequestFilter
 /**
  * Authenticates WebSocket handshakes from identity headers when header
  * identity is allowed for the runtime (dev/test only, same switch that
- * authorizes header identity for REST). The platform's own POS client and
- * the developer bridge authenticate this way; the handshake interceptor
- * still validates tenant identity on the way in, so this filter only bridges
- * the gap between the servlet security chain and the STOMP session context.
- * Registered in front of the authorization decision by
- * [HttpSecurityConfiguration].
+ * authorizes header identity for REST). An `ops_` bearer and identity
+ * headers are exclusive: presenting both clears the security context so the
+ * handshake fails rather than preferring one credential over the other.
  */
 class WebSocketHeaderIdentityFilter(
     private val properties: RequestContextProperties,
@@ -43,13 +40,40 @@ class WebSocketHeaderIdentityFilter(
         response: HttpServletResponse,
         filterChain: FilterChain,
     ) {
-        if (properties.allowHeaderIdentity) {
+        val existing = SecurityContextHolder.getContext().authentication
+        val hasIdentityHeaders = hasTenantIdentityHeaders(request)
+        val bearerAuthenticated =
+            bearerIsOperational(request) ||
+                (
+                    existing != null &&
+                        existing.isAuthenticated &&
+                        existing !is HeaderIdentityAuthentication
+                    )
+
+        if (bearerAuthenticated && hasIdentityHeaders) {
+            SecurityContextHolder.clearContext()
+            filterChain.doFilter(request, response)
+            return
+        }
+
+        if (properties.allowHeaderIdentity && !bearerAuthenticated) {
             val authentication = authenticationFromHeaders(request)
             if (authentication != null) {
                 SecurityContextHolder.getContext().authentication = authentication
             }
         }
         filterChain.doFilter(request, response)
+    }
+
+    private fun hasTenantIdentityHeaders(request: HttpServletRequest): Boolean {
+        return !request.getHeader(PeakRequestHeaders.TENANT_ID).isNullOrBlank() ||
+            !request.getHeader(PeakRequestHeaders.TENANT_USER_ID).isNullOrBlank()
+    }
+
+    private fun bearerIsOperational(request: HttpServletRequest): Boolean {
+        val header = request.getHeader(HttpHeaders.AUTHORIZATION)?.trim()
+            ?: return false
+        return header.startsWith("Bearer ${OperationalSessionAuthentication.TOKEN_PREFIX}", ignoreCase = true)
     }
 
     private fun authenticationFromHeaders(request: HttpServletRequest): Authentication? {
