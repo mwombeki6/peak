@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "snippe-integration": {
+      "source": "Neurotech-HQ/skills",
+      "sourceType": "github",
+      "skillPath": "snippe-integration/SKILL.md",
+      "computedHash": "bd6069c62c3c47670d2f100ae85eeed3ab7a4fe668734ae862ba245e8ae7b027"
+    }
+  }
+}
