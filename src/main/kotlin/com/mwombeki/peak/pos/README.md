@@ -29,7 +29,9 @@ Owns property outlet cashier sessions and POS orders.
 |---|---|---|
 | `POST` | `/api/v1/properties/{propertyId}/pos-config/outlets` | `pos.configure` |
 | `POST` | `/api/v1/properties/{propertyId}/pos-config/menu-categories` | `pos.configure` |
+| `GET` | `/api/v1/properties/{propertyId}/pos-config/menu-categories?outletId=` | `pos.view` |
 | `POST` | `/api/v1/properties/{propertyId}/pos-config/menu-items` | `pos.configure` |
+| `GET` | `/api/v1/properties/{propertyId}/pos-config/menu-items?outletId=` | `pos.view` |
 | `POST` | `/api/v1/properties/{propertyId}/pos-sessions/open` | `pos.session.manage` |
 | `GET` | `/api/v1/properties/{propertyId}/pos-sessions/{sessionId}` | `pos.view` |
 | `POST` | `/api/v1/properties/{propertyId}/pos-sessions/{sessionId}/close` | `pos.session.manage` |

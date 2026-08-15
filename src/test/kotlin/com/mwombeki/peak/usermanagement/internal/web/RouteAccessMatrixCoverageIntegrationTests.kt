@@ -189,6 +189,16 @@ class RouteAccessMatrixCoverageIntegrationTests {
                 permissionCode = "procurement.view",
             ),
             RouteExpectation(
+                method = "GET",
+                path = "/api/v1/properties/$propertyId/pos-config/menu-items",
+                permissionCode = "pos.view",
+            ),
+            RouteExpectation(
+                method = "GET",
+                path = "/api/v1/properties/$propertyId/pos-config/menu-categories",
+                permissionCode = "pos.view",
+            ),
+            RouteExpectation(
                 method = "PUT",
                 path = "/api/v1/properties/$propertyId/purchase-orders/$purchaseOrderId",
                 permissionCode = "procurement.manage",
