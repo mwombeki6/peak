@@ -53,6 +53,27 @@ interface PaymentPort {
         request: ConfigurePaymentProviderRequest,
     ): PaymentProviderAccountResponse
 
+    fun verifyProvider(
+        propertyId: UUID,
+        providerAccountId: UUID,
+    ): PaymentProviderAccountResponse
+
+    fun certifyProvider(
+        propertyId: UUID,
+        providerAccountId: UUID,
+        request: CertifyPaymentProviderRequest,
+    ): PaymentProviderAccountResponse
+
+    fun enableProvider(
+        propertyId: UUID,
+        providerAccountId: UUID,
+    ): PaymentProviderAccountResponse
+
+    fun disableProvider(
+        propertyId: UUID,
+        providerAccountId: UUID,
+    ): PaymentProviderAccountResponse
+
     fun listProviderAccounts(propertyId: UUID): List<PaymentProviderAccountResponse>
     fun createReconciliation(
         propertyId: UUID,

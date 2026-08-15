@@ -216,6 +216,7 @@ class PaymentOutboxHandler(
               ON ppa.tenant_id = pt.tenant_id
              AND ppa.id = pt.provider_account_id
              AND ppa.is_active = true
+             AND ppa.lifecycle_status = 'enabled'
             JOIN payment_providers pp
               ON pp.tenant_id = ppa.tenant_id
              AND pp.id = ppa.provider_id

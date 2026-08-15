@@ -343,10 +343,11 @@ class GuestCollectionLaunchPathIntegrationTests {
             INSERT INTO payment_provider_accounts (
                 id, tenant_id, property_id, provider_id, account_name, client_id,
                 secret_ref, api_key_secret_ref, checksum_key_secret_ref, endpoint_url,
-                is_default, is_active, environment
+                is_default, is_active, environment, lifecycle_status
             ) VALUES (?, ?, ?, ?, 'Hotel Account', 'MERCHANT-001',
                       'literal:api-secret', 'literal:api-secret', 'literal:checksum-secret',
-                      'https://api.clickpesa.com/third-parties', true, true, 'sandbox')
+                      'https://api.clickpesa.com/third-parties', true, true, 'sandbox',
+                      'enabled')
             """.trimIndent(),
             providerAccountId, tenantId, propertyId, providerId,
         )

@@ -289,7 +289,7 @@ class RealtimePosJourneyIntegrationTests {
         jdbcTemplate.update(
             """
             INSERT INTO payment_providers (id, tenant_id, provider_code, name, provider_type, is_active)
-            VALUES (?, ?, 'snippe', 'Snippe', 'mobile_money', true)
+            VALUES (?, ?, 'clickpesa', 'ClickPesa', 'mobile_money', true)
             """.trimIndent(),
             providerId,
             fixture.tenantId,
@@ -299,10 +299,10 @@ class RealtimePosJourneyIntegrationTests {
             INSERT INTO payment_provider_accounts (
                 id, tenant_id, property_id, provider_id, account_name, client_id,
                 secret_ref, api_key_secret_ref, checksum_key_secret_ref, endpoint_url,
-                is_default, is_active, environment
+                is_default, is_active, environment, lifecycle_status
             ) VALUES (?, ?, ?, ?, 'Hotel Account', 'MERCHANT-001',
                       'literal:api-secret', 'literal:api-secret', 'literal:checksum-secret',
-                      'https://example.test', true, true, 'sandbox')
+                      'https://example.test', true, true, 'sandbox', 'enabled')
             """.trimIndent(),
             providerAccountId,
             fixture.tenantId,

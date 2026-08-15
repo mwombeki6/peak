@@ -6,6 +6,9 @@ accounts, checksum callbacks, refunds, reversals, and reconciliation.
 ## Invariants
 
 - Cash collection/refund requires the current cashier's open property session.
+- Mobile-money initiation requires the property account to be **enabled**.
+  Configuring credentials is `configured`; it is not collection. Cash and
+  post-to-room do not need a PSP. A sibling property's merchant is never inferred.
 - Mobile-money initiation creates `CREATED`; provider acceptance advances it to
   `INITIATED` or `PENDING`.
 - Only a verified ClickPesa webhook or status result can produce `POSTED`.
