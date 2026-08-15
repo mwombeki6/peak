@@ -1296,6 +1296,18 @@ class PaymentService(
                     "Sandbox payment accounts are forbidden in production"
                 }
             }
+            val certificationEvidence = if (
+                providerEnvironment == "production" ||
+                !request.sandboxEvidenceRef.isNullOrBlank()
+            ) {
+                SandboxCollectionEvidence.requireValid(
+                    request.sandboxEvidenceRef,
+                    providerCode,
+                    objectMapper,
+                )
+            } else {
+                null
+            }
             if (providerEnvironment == "production") {
                 require(
                     providerCode in environment.approvedProviderCodes(
@@ -1304,10 +1316,7 @@ class PaymentService(
                 ) {
                     "Payment provider is not approved for production"
                 }
-                require(
-                    request.sandboxCertifiedAt != null &&
-                            !request.sandboxEvidenceRef.isNullOrBlank(),
-                ) {
+                require(request.sandboxCertifiedAt != null && certificationEvidence != null) {
                     "Production provider accounts require sandbox certification evidence"
                 }
             }
@@ -1368,9 +1377,9 @@ class PaymentService(
                     checksumKeySecretRef,
                     providerEnvironment,
                     request.sandboxCertifiedAt?.let(Timestamp::from),
-                    request.sandboxEvidenceRef.trimmedOrNull(),
+                    certificationEvidence,
                     request.isDefault,
-                    initialLifecycleStatus(request),
+                    initialLifecycleStatus(request.sandboxCertifiedAt, certificationEvidence),
                 )
             } catch (ex: DuplicateKeyException) {
                 throw PaymentConflictException("Payment provider account name is already in use")
@@ -1459,9 +1468,14 @@ class PaymentService(
             resourceType = PAYMENT_PROVIDER_ACCOUNTS,
             replayType = PaymentProviderAccountResponse::class.java,
         ) { actor, idempotencyKeyId ->
-            requireProviderAccount(actor.tenantId, propertyId, providerAccountId, lock = true)
-            val evidence = request.sandboxEvidenceRef.trim()
-            require(evidence.isNotEmpty()) { "sandboxEvidenceRef is required" }
+            val account = requireProviderAccount(
+                actor.tenantId, propertyId, providerAccountId, lock = true,
+            )
+            val evidence = SandboxCollectionEvidence.requireValid(
+                request.sandboxEvidenceRef,
+                account.providerCode,
+                objectMapper,
+            )
             val updated = jdbcTemplate.update(
                 """
                 UPDATE payment_provider_accounts
@@ -1516,6 +1530,11 @@ class PaymentService(
                 require(account.lifecycleStatus == "certified") {
                     "Production collection can be enabled only from certified"
                 }
+                SandboxCollectionEvidence.requireValid(
+                    account.sandboxEvidenceRef,
+                    account.providerCode,
+                    objectMapper,
+                )
             } else {
                 require(account.lifecycleStatus in setOf("verified", "certified")) {
                     "Sandbox collection can be enabled only after verify or certify"
@@ -2341,10 +2360,11 @@ class PaymentService(
         return rails.firstOrNull { it.enabled && it.supportsStatusQuery } ?: rails.firstOrNull()
     }
 
-    private fun initialLifecycleStatus(request: ConfigurePaymentProviderRequest): String {
-        return if (request.sandboxCertifiedAt != null &&
-            !request.sandboxEvidenceRef.isNullOrBlank()
-        ) {
+    private fun initialLifecycleStatus(
+        sandboxCertifiedAt: java.time.Instant?,
+        certificationEvidence: String?,
+    ): String {
+        return if (sandboxCertifiedAt != null && !certificationEvidence.isNullOrBlank()) {
             "certified"
         } else {
             "configured"
@@ -2505,6 +2525,7 @@ class PaymentService(
             environment = rs.getString("environment"),
             sandboxCertifiedAt = rs.getTimestamp("sandbox_certified_at")
                 ?.toInstant(),
+            sandboxEvidenceRef = rs.getString("sandbox_evidence_ref"),
             lifecycleStatus = rs.getString("lifecycle_status"),
             eligibleForCollection = rs.getBoolean("eligible_for_collection"),
         )
@@ -2673,7 +2694,7 @@ class PaymentService(
                    pp.name AS provider_name, ppa.account_name, ppa.merchant_id,
                    ppa.client_id, ppa.wallet_number, ppa.is_default,
                    ppa.is_active, ppa.environment, ppa.sandbox_certified_at,
-                   ppa.lifecycle_status,
+                   ppa.sandbox_evidence_ref, ppa.lifecycle_status,
                    (
                        ppa.is_active
                        AND ppa.lifecycle_status = 'enabled'

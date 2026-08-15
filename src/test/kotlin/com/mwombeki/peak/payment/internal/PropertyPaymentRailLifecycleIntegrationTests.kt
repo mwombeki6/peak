@@ -1,6 +1,7 @@
 package com.mwombeki.peak.payment.internal
 
 import com.mwombeki.peak.TestcontainersConfiguration
+import com.mwombeki.peak.payment.api.CertifyPaymentProviderRequest
 import com.mwombeki.peak.payment.api.CollectCashPaymentRequest
 import com.mwombeki.peak.payment.api.InitiateMobileMoneyRequest
 import com.mwombeki.peak.payment.api.OpenCashSessionRequest
@@ -10,6 +11,7 @@ import com.mwombeki.peak.shared.context.RequestContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
 import java.math.BigDecimal
+import java.time.Instant
 import java.util.UUID
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -193,6 +195,111 @@ class PropertyPaymentRailLifecycleIntegrationTests {
             paymentPort.enableProvider(hotel.propertyId, hotel.providerAccountId)
         }
     }
+
+    @Test
+    fun emptyOrUnshapedEvidenceCannotCertifyASnippeAccount() {
+        val hotel = hotelWithConfiguredAccount()
+        requestContextHolder.set(hotel.context("idem-certify-blank"))
+        val blank = assertFailsWith<PaymentRejectedException> {
+            paymentPort.certifyProvider(
+                hotel.propertyId,
+                hotel.providerAccountId,
+                CertifyPaymentProviderRequest(
+                    sandboxCertifiedAt = Instant.parse("2026-08-15T12:00:00Z"),
+                    sandboxEvidenceRef = "   ",
+                ),
+            )
+        }
+        assertTrue(blank.message.contains("sandboxEvidenceRef"), blank.message)
+
+        requestContextHolder.set(hotel.context("idem-certify-label"))
+        val label = assertFailsWith<PaymentRejectedException> {
+            paymentPort.certifyProvider(
+                hotel.propertyId,
+                hotel.providerAccountId,
+                CertifyPaymentProviderRequest(
+                    sandboxCertifiedAt = Instant.parse("2026-08-15T12:00:00Z"),
+                    sandboxEvidenceRef = "sandbox-run",
+                ),
+            )
+        }
+        assertTrue(
+            label.message.contains("JSON"),
+            "a label must not certify the rail: ${label.message}",
+        )
+        assertEquals(
+            "configured",
+            paymentPort.listProviderAccounts(hotel.propertyId).single().lifecycleStatus,
+        )
+    }
+
+    @Test
+    fun sandboxMayCollectAfterCertifyAndEnable() {
+        val hotel = hotelWithConfiguredAccount()
+        requestContextHolder.set(hotel.context("idem-certify"))
+        val certified = paymentPort.certifyProvider(
+            hotel.propertyId,
+            hotel.providerAccountId,
+            CertifyPaymentProviderRequest(
+                sandboxCertifiedAt = Instant.parse("2026-08-15T12:00:00Z"),
+                sandboxEvidenceRef = snippeSandboxEvidence(),
+            ),
+        )
+        assertEquals("certified", certified.lifecycleStatus)
+
+        requestContextHolder.set(hotel.context("idem-enable-after-certify"))
+        val enabled = paymentPort.enableProvider(hotel.propertyId, hotel.providerAccountId)
+        assertEquals("enabled", enabled.lifecycleStatus)
+        assertTrue(enabled.eligibleForCollection)
+
+        requestContextHolder.set(hotel.context("idem-collect-after-certify"))
+        val transaction = paymentPort.initiateMobileMoney(
+            hotel.propertyId,
+            InitiateMobileMoneyRequest(
+                folioId = hotel.folioId,
+                providerAccountId = hotel.providerAccountId,
+                phoneNumber = "0754123456",
+                amount = BigDecimal("180000.00"),
+                mobileNetwork = "Mpesa",
+            ),
+        )
+        assertEquals("created", transaction.status.databaseValue)
+    }
+
+    @Test
+    fun productionEnableStillNeedsTheRecoveryEvidenceOnTheRow() {
+        val hotel = hotelWithConfiguredAccount(environment = "production")
+        requestContextHolder.set(hotel.context("idem-prod-certify"))
+        paymentPort.certifyProvider(
+            hotel.propertyId,
+            hotel.providerAccountId,
+            CertifyPaymentProviderRequest(
+                sandboxCertifiedAt = Instant.parse("2026-08-15T12:00:00Z"),
+                sandboxEvidenceRef = snippeSandboxEvidence(),
+            ),
+        )
+        requestContextHolder.set(hotel.context("idem-prod-enable-after-certify"))
+        val enabled = paymentPort.enableProvider(hotel.propertyId, hotel.providerAccountId)
+        assertEquals("enabled", enabled.lifecycleStatus)
+        assertTrue(enabled.eligibleForCollection)
+        assertEquals(
+            snippeSandboxEvidence(),
+            jdbcTemplate.queryForObject(
+                """
+                SELECT sandbox_evidence_ref
+                FROM payment_provider_accounts
+                WHERE id = ?
+                """.trimIndent(),
+                String::class.java,
+                hotel.providerAccountId,
+            ),
+        )
+    }
+
+    private fun snippeSandboxEvidence() =
+        """{"provider":"snippe","collection_flow":"direct_push",""" +
+            """"initiated_reference":"9015c155-9e29-4e8e-8fe6-d5d81553c8e6",""" +
+            """"confirmed_status":"completed","recovered_by_status_query":true}"""
 
     private fun hotelWithConfiguredAccount(
         enabled: Boolean = false,

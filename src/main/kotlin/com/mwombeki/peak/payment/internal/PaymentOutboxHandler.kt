@@ -98,8 +98,9 @@ class PaymentOutboxHandler(
                         work.checksumKeySecretRef,
                     ),
                     collectionFlow = adapter.guestCollectionFlow,
-                    // The folio guest is the payer. Placeholders and staff identity
-                    // are not sent; missing identity fails in the adapter.
+                    // The folio guest is the payer, including a POS order that is already
+                    // on a folio. Placeholders and staff identity are not sent; missing
+                    // identity fails in the adapter.
                     payerName = work.payerName,
                     payerEmail = work.payerEmail,
                 ),
@@ -231,9 +232,12 @@ class PaymentOutboxHandler(
               ON pp.tenant_id = ppa.tenant_id
              AND pp.id = ppa.provider_id
              AND pp.is_active = true
+            LEFT JOIN pos_orders po
+              ON po.tenant_id = pt.tenant_id
+             AND po.id = pt.pos_order_id
             LEFT JOIN folios f
               ON f.tenant_id = pt.tenant_id
-             AND f.id = pt.folio_id
+             AND f.id = COALESCE(pt.folio_id, po.folio_id)
             LEFT JOIN reservations r
               ON r.tenant_id = f.tenant_id
              AND r.id = f.reservation_id

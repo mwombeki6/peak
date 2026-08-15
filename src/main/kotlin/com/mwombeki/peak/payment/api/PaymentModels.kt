@@ -178,6 +178,7 @@ data class PaymentProviderAccountResponse(
     val isActive: Boolean,
     val environment: String = "sandbox",
     val sandboxCertifiedAt: Instant? = null,
+    val sandboxEvidenceRef: String? = null,
     val lifecycleStatus: String = "configured",
     val eligibleForCollection: Boolean = false,
     val replayed: Boolean = false,
