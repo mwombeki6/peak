@@ -2,6 +2,7 @@ package com.mwombeki.peak.realtime.internal
 
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.shared.context.SessionClass
 import java.util.UUID
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication
 import org.springframework.jdbc.core.JdbcTemplate
@@ -28,6 +29,7 @@ class RealtimeSubscriptionAuthorizer(
         identity: RequestIdentity,
         tenantId: UUID,
         propertyId: UUID,
+        sessionClass: SessionClass = SessionClass.STRONG,
     ): Boolean {
         if (identity !is RequestIdentity.Tenant || identity.tenantId != tenantId) {
             return false
@@ -35,7 +37,7 @@ class RealtimeSubscriptionAuthorizer(
 
         return transactionTemplate.execute {
             databaseSessionContext.bind(identity)
-            jdbcTemplate.queryForObject(
+            val allowed = jdbcTemplate.queryForObject(
                 "SELECT can_access_module(?, ?, ?, ?, ?)",
                 Boolean::class.java,
                 identity.tenantUserId,
@@ -44,12 +46,24 @@ class RealtimeSubscriptionAuthorizer(
                 REALTIME_MODULE_ID,
                 REALTIME_STREAM_PERMISSION,
             ) == true
-        }
+            if (!allowed) {
+                return@execute false
+            }
+            val required = jdbcTemplate.query(
+                "SELECT minimum_session_class FROM permission_catalog WHERE code = ?",
+                { rs, _ -> rs.getString("minimum_session_class") },
+                REALTIME_STREAM_PERMISSION,
+            ).firstOrNull()
+                ?.let(SessionClass::fromPolicy)
+                ?: SessionClass.STRONG
+            sessionClass.satisfies(required)
+        } == true
     }
 
     fun canSubscribeDestination(
         identity: RequestIdentity,
         target: RealtimeSubscriptionTarget,
+        sessionClass: SessionClass = SessionClass.STRONG,
     ): Boolean {
         if (identity !is RequestIdentity.Tenant) {
             return false
@@ -59,7 +73,7 @@ class RealtimeSubscriptionAuthorizer(
         if (identity.tenantId != scope.tenantId) {
             return false
         }
-        return canSubscribe(identity, scope.tenantId, scope.propertyId)
+        return canSubscribe(identity, scope.tenantId, scope.propertyId, sessionClass)
     }
 
     /** Resolves a scoped destination to its owning tenant/property, RLS-bound. */

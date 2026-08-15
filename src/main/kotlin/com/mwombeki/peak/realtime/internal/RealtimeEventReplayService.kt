@@ -34,6 +34,7 @@ class RealtimeEventReplayService(
         if (!authorizer.canSubscribeDestination(
                 identity,
                 RealtimeSubscriptionTarget.PropertyOperations(propertyId),
+                requestContextHolder.current().sessionClass,
             )
         ) {
             throw AccessDeniedException("Realtime stream access is not granted for this property")

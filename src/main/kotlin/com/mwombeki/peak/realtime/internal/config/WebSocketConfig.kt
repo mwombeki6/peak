@@ -135,7 +135,11 @@ class WebSocketConfig(
                         val target = RealtimeDestinationParser.parse(destination)
                         if (
                             target == null ||
-                            !subscriptionAuthorizer.canSubscribeDestination(identity, target)
+                            !subscriptionAuthorizer.canSubscribeDestination(
+                                identity,
+                                target,
+                                context.sessionClass,
+                            )
                         ) {
                             recordDeniedSubscription(
                                 context = context,

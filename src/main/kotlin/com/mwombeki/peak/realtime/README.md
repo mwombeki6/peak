@@ -24,7 +24,8 @@ We support two ways for clients to receive data:
 1.  **WebSockets (STOMP)**: 
     -   Read-only server broadcasts over STOMP.
     -   Endpoint: `/ws-connect`
-    -   The HTTP upgrade request must include `Authorization: Bearer <JWT>`.
+    -   The HTTP upgrade authenticates the same way REST does: a Keycloak JWT, an
+        `ops_` operational session from PIN login, or identity headers in dev/test.
     -   Subscription Path: `/topic/tenants/{tenantId}/properties/{propertyId}/stream`
     -   Includes heartbeats every 10 seconds to keep the connection alive.
 
