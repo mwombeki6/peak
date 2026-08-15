@@ -186,7 +186,9 @@ class DeviceIdentityIntegrationTests {
         assertTrue(session.token.startsWith("ops_"))
         assertEquals(paired.deviceId, session.deviceId)
         assertEquals(hotel.propertyId, session.propertyId)
+        assertEquals(hotel.tenantId, session.tenantId)
         assertEquals(hotel.staffUserId, session.userId)
+        assertNull(session.outletId)
         val stored = jdbcTemplate.queryForObject(
             "SELECT token_hash FROM operational_sessions WHERE device_id = ?",
             String::class.java,
@@ -195,6 +197,49 @@ class DeviceIdentityIntegrationTests {
         assertNotNull(stored)
         assertFalse(stored.contains(session.token))
         assertEquals(64, stored.length)
+    }
+
+    @Test
+    fun pinLoginOnAnOutletBoundDeviceReturnsThatOutlet() {
+        val hotel = seedHotel()
+        val keys = ed25519()
+        val pin = "418205"
+        activateStaff(hotel, pin)
+        val outletId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO outlets (id, tenant_id, property_id, name, type, is_active)
+            VALUES (?, ?, ?, 'Restaurant', 'RESTAURANT', true)
+            """.trimIndent(),
+            outletId,
+            hotel.tenantId,
+            hotel.propertyId,
+        )
+        val paired = pair(
+            hotel,
+            keys,
+            DevicePairingService.Approval(
+                propertyId = hotel.propertyId,
+                outletId = outletId,
+                terminalName = "Till 1",
+                mode = "POS",
+            ),
+        )
+
+        val challenge = requireNotNull(sessions.issueChallenge(paired.deviceCode))
+        val session = requireNotNull(
+            sessions.login(
+                deviceCode = paired.deviceCode,
+                challengeId = challenge.challengeId,
+                signature = sign(keys, challenge.nonce),
+                staffNumber = hotel.staffNumber,
+                pin = pin,
+            ),
+        )
+
+        assertEquals(hotel.tenantId, session.tenantId)
+        assertEquals(hotel.staffUserId, session.userId)
+        assertEquals(outletId, session.outletId)
     }
 
     @Test
@@ -234,12 +279,16 @@ class DeviceIdentityIntegrationTests {
         assertEquals(attemptsBefore, attemptsAfter)
     }
 
-    private fun pair(hotel: Hotel, keys: KeyPair): DevicePairingService.PairedDevice {
+    private fun pair(
+        hotel: Hotel,
+        keys: KeyPair,
+        approval: DevicePairingService.Approval = approval(hotel),
+    ): DevicePairingService.PairedDevice {
         val requested = pairing.requestPairing(publicKey(keys))
         return pairing.approve(
             tenantId = hotel.tenantId,
             pairingCode = requested.code,
-            approval = approval(hotel),
+            approval = approval,
             actorId = hotel.managerId,
         )
     }

@@ -9,7 +9,9 @@ import jakarta.validation.constraints.NotNull
 import java.time.Instant
 import java.util.UUID
 import org.springframework.http.HttpStatus
+import org.springframework.http.ProblemDetail
 import org.springframework.http.ResponseEntity
+import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
@@ -24,49 +26,51 @@ class StaffSessionController(
     @PostMapping("/devices/challenges")
     fun issueChallenge(
         @Valid @RequestBody request: DeviceChallengeHttpRequest,
-    ): ResponseEntity<*> {
+    ): DeviceChallengeHttpResponse {
         val challenge = sessions.issueChallenge(request.deviceCode)
-            ?: return apiProblemFactory.response(
-                HttpStatus.UNAUTHORIZED,
-                "Unauthorized",
-                "Device or credentials were not accepted",
-            )
-        return ResponseEntity.ok(
-            DeviceChallengeHttpResponse(
-                challengeId = challenge.challengeId,
-                nonce = challenge.nonce,
-                expiresAt = challenge.expiresAt,
-            ),
+            ?: throw DeviceCredentialsRejectedException()
+        return DeviceChallengeHttpResponse(
+            challengeId = challenge.challengeId,
+            nonce = challenge.nonce,
+            expiresAt = challenge.expiresAt,
         )
     }
 
     @PostMapping("/staff/sessions")
     fun login(
         @Valid @RequestBody request: StaffSessionHttpRequest,
-    ): ResponseEntity<*> {
+    ): StaffSessionHttpResponse {
         val session = sessions.login(
             deviceCode = request.deviceCode,
             challengeId = request.challengeId,
             signature = request.signature,
             staffNumber = request.staffNumber,
             pin = request.pin,
-        ) ?: return apiProblemFactory.response(
+        ) ?: throw DeviceCredentialsRejectedException()
+
+        return StaffSessionHttpResponse(
+            token = session.token,
+            expiresAt = session.expiresAt,
+            sessionClass = SessionClass.OPERATIONAL.name.lowercase(),
+            deviceId = session.deviceId,
+            propertyId = session.propertyId,
+            tenantId = session.tenantId,
+            userId = session.userId,
+            outletId = session.outletId,
+        )
+    }
+
+    @ExceptionHandler(DeviceCredentialsRejectedException::class)
+    fun handleRejected(): ResponseEntity<ProblemDetail> {
+        return apiProblemFactory.response(
             HttpStatus.UNAUTHORIZED,
             "Unauthorized",
             "Device or credentials were not accepted",
         )
-
-        return ResponseEntity.ok(
-            StaffSessionHttpResponse(
-                token = session.token,
-                expiresAt = session.expiresAt,
-                sessionClass = SessionClass.OPERATIONAL.name.lowercase(),
-                deviceId = session.deviceId,
-                propertyId = session.propertyId,
-            ),
-        )
     }
 }
+
+internal class DeviceCredentialsRejectedException : RuntimeException()
 
 data class DeviceChallengeHttpRequest(
     @field:NotBlank val deviceCode: String,
@@ -92,4 +96,7 @@ data class StaffSessionHttpResponse(
     val sessionClass: String,
     val deviceId: UUID,
     val propertyId: UUID,
+    val tenantId: UUID,
+    val userId: UUID,
+    val outletId: UUID?,
 )

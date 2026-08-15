@@ -60,7 +60,9 @@ class DeviceSessionService(
         val expiresAt: Instant,
         val deviceId: UUID,
         val propertyId: UUID,
+        val tenantId: UUID,
         val userId: UUID,
+        val outletId: UUID?,
     )
 
     fun issueChallenge(deviceCode: String): Challenge? =
@@ -173,7 +175,9 @@ class DeviceSessionService(
                 expiresAt = expiresAt,
                 deviceId = device.id,
                 propertyId = device.propertyId,
+                tenantId = device.tenantId,
                 userId = userId,
+                outletId = device.outletId,
             )
         }
 
@@ -188,6 +192,7 @@ class DeviceSessionService(
                     id = rs.getObject("id", UUID::class.java),
                     tenantId = rs.getObject("tenant_id", UUID::class.java),
                     propertyId = rs.getObject("property_id", UUID::class.java),
+                    outletId = rs.getObject("outlet_id", UUID::class.java),
                     publicKey = rs.getString("public_key"),
                     status = rs.getString("status"),
                 )
@@ -219,6 +224,7 @@ class DeviceSessionService(
         val id: UUID,
         val tenantId: UUID,
         val propertyId: UUID,
+        val outletId: UUID?,
         val publicKey: String,
         val status: String,
     )
