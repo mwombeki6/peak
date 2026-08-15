@@ -81,12 +81,13 @@ class JdkSnippeHttpTransport(
 }
 
 /**
- * Collects through Snippe's hosted checkout.
+ * Collects through Snippe: direct USSD push for guest/POS, hosted checkout when
+ * a page is the right experience.
  *
- * Chosen over AzamPay's USSD push for the cases where a push cannot go: an amount above the
- * mobile money ceiling, or a payer who would rather use a card or a bank. `initiate` returns a
- * `redirectUrl` rather than pushing a prompt, which is why
- * [ProviderCollectionResult.redirectUrl] exists.
+ * Guest collection is `POST /v1/payments` with `payment_type=mobile`. Hosted
+ * checkout is `POST /api/v1/sessions`. Both are documented in
+ * docs.snippe.sh/docs/2026-01-25; catalog enable is adapter recoverability,
+ * not a live hotel.
  *
  * ## Why this contract could be implemented and AzamPay's callback could not
  *
@@ -97,13 +98,9 @@ class JdkSnippeHttpTransport(
  *
  * ## Amounts
  *
- * Snippe describes amounts as "Integer (smallest unit)". For TZS the smallest circulating unit
- * *is* the shilling, and the magnitudes agree — a documented minimum of 500 is a sensible floor
- * in shillings and an absurd one in hundredths. So this treats the value as whole shillings.
- *
- * If that is wrong, the failure is safe rather than silent: settlement already refuses a
- * callback whose amount disagrees with the attempt, so a unit mismatch rejects every payment
- * loudly instead of settling each at a hundredth of its value.
+ * Snippe documents amounts as integers in the smallest unit. For TZS that unit
+ * is the shilling (skill / 2026-01-25): `500` is 500 TZS. Settlement still
+ * refuses a callback whose amount disagrees with the attempt.
  */
 @Component
 class SnippePaymentProvider(

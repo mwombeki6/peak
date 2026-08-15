@@ -252,6 +252,48 @@ class SnippePaymentProviderTests {
         )
     }
 
+    /**
+     * The V97/V98 invariant, against the 2026-01-25 Payments contract.
+     *
+     * A live sandbox payment is what an operator records on certify. This test does not
+     * fake that run: it proves the adapter can recover when the callback never arrives,
+     * using the skill's request/response shapes.
+     */
+    @Test
+    fun aDroppedDirectPushCallbackIsRecoveredByStatusQuery() {
+        val transport = StubTransport()
+        val initiated = provider(transport).initiate(
+            command(flow = "direct_push", name = "Asha Mwinyi", email = "asha@hotel.example"),
+        )
+        assertEquals("9015c155-9e29-4e8e-8fe6-d5d81553c8e6", initiated.providerReference)
+        assertEquals(ProviderPaymentStatus.PENDING, initiated.status)
+        assertEquals(1, transport.calls.size, "initiation must not also poll")
+
+        // The webhook never arrives. Recovery is GET /v1/payments/{snippe-reference}.
+        val recovered = provider(transport).queryStatus(
+            statusQuery(
+                flow = "direct_push",
+                providerRef = initiated.providerReference,
+            ),
+        )
+
+        assertEquals("/v1/payments", transport.calls[0].endpoint.path)
+        assertEquals(
+            "/v1/payments/9015c155-9e29-4e8e-8fe6-d5d81553c8e6",
+            transport.calls[1].endpoint.path,
+        )
+        assertEquals(ProviderPaymentStatus.SUCCEEDED, recovered.status)
+        assertEquals(
+            "PEAK-REF-1",
+            recovered.internalReference,
+            "Peak's handle lives in metadata.external_reference; " +
+                "data.external_reference is Selcom's",
+        )
+        assertEquals("9015c155-9e29-4e8e-8fe6-d5d81553c8e6", recovered.providerReference)
+        assertEquals(0, BigDecimal("30000").compareTo(recovered.amount))
+        assertEquals("TZS", recovered.currency)
+    }
+
     @Test
     fun anUnknownCollectionFlowIsRefusedRatherThanDefaulted() {
         assertFailsWith<IllegalArgumentException> {
@@ -570,10 +612,21 @@ class SnippePaymentProviderTests {
                    "reference":"9015c155-9e29-4e8e-8fe6-d5d81553c8e6","status":"pending"}}"""
             }
             return if (method == "GET") {
-                getResponse ?: """{"reference":"sess_abc123def456",
-                   "status":"completed","amount":{"value":30000,"currency":"TZS"},
-                   "metadata":{"external_reference":"PEAK-REF-1"},
-                   "completed_at":"2026-08-13T09:00:00Z"}"""
+                getResponse ?: if (endpoint.path.startsWith("/v1/payments")) {
+                    val reference = endpoint.path.removePrefix("/v1/payments/").trim('/')
+                    """{"status":"success","code":200,"data":{
+                       "reference":"$reference","status":"completed",
+                       "payment_type":"mobile",
+                       "amount":{"currency":"TZS","value":30000},
+                       "external_reference":"SEL123456789",
+                       "metadata":{"external_reference":"PEAK-REF-1"},
+                       "completed_at":"2026-08-13T09:00:00Z"}}"""
+                } else {
+                    """{"reference":"sess_abc123def456",
+                       "status":"completed","amount":{"value":30000,"currency":"TZS"},
+                       "metadata":{"external_reference":"PEAK-REF-1"},
+                       "completed_at":"2026-08-13T09:00:00Z"}"""
+                }
             } else {
                 sessionResponse
             }
