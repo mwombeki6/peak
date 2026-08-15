@@ -68,11 +68,12 @@ class AnyProviderCallbackConfirmsIntegrationTests {
                 {"id":"evt_snippe_1","type":"payment.completed",
                  "api_version":"2026-01-25","created_at":$now,
                  "data":{"reference":"sess_abc123def456",
-                   "external_reference":"${hotel.internalReference}","status":"completed",
+                   "external_reference":"SEL123456789","status":"completed",
                    "amount":{"value":30000,"currency":"TZS"},
                    "settlement":{"fees":{"value":1000,"currency":"TZS"}},
                    "channel":{"type":"mobile_money","provider":"mpesa"},
                    "customer":{"phone":"+255700000001"},
+                   "metadata":{"external_reference":"${hotel.internalReference}"},
                    "completed_at":$now}}
             """.trimIndent(),
         )
@@ -138,10 +139,11 @@ class AnyProviderCallbackConfirmsIntegrationTests {
                 {"id":"evt_snippe_2","type":"payment.processing",
                  "api_version":"2026-01-25","created_at":$now,
                  "data":{"reference":"sess_abc123def456",
-                   "external_reference":"${hotel.internalReference}","status":"processing",
+                   "external_reference":"SEL123456789","status":"processing",
                    "amount":{"value":30000,"currency":"TZS"},
                    "channel":{"type":"mobile_money","provider":"mpesa"},
                    "customer":{"phone":"+255700000001"},
+                   "metadata":{"external_reference":"${hotel.internalReference}"},
                    "completed_at":$now}}
             """.trimIndent(),
         )

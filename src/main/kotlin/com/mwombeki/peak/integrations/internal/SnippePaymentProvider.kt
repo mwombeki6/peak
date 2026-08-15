@@ -115,6 +115,8 @@ class SnippePaymentProvider(
 
     override val providerCode = "snippe"
 
+    override val guestCollectionFlow = DIRECT_PUSH
+
     override fun initiate(command: ProviderCollectionCommand): ProviderCollectionResult =
         when (command.collectionFlow?.trim()?.lowercase()) {
             DIRECT_PUSH -> pushToHandset(command)
@@ -141,17 +143,15 @@ class SnippePaymentProvider(
                 "amount" to command.amount.toWholeUnits(),
                 "currency" to command.currency.uppercase(),
             ),
-            "phone_number" to command.payerIdentifier,
+            "phone_number" to internationalMsisdn(command.payerIdentifier),
             "customer" to mapOf(
                 "firstname" to payer.firstName,
                 "lastname" to payer.lastName,
                 "email" to payer.email,
             ),
-            // Snippe's documented create-payment body has no external_reference field, only
-            // metadata — and the webhook example echoes metadata back. So our reference goes
-            // here, and the callback parser looks for it in both places. Correlating on
-            // Snippe's own reference alone would work until a callback arrived before the
-            // initiation response had been stored.
+            // snippe-integration skill: create has no external_reference field.
+            // Peak's handle rides in metadata, which webhooks and GET echo back.
+            // data.external_reference on the webhook is Selcom's, not ours.
             "metadata" to mapOf("external_reference" to command.internalReference),
         )
 
@@ -160,7 +160,7 @@ class SnippePaymentProvider(
             endpoint = endpoint,
             headers = mapOf(
                 "Authorization" to "Bearer ${command.apiKey}",
-                "Idempotency-Key" to command.internalReference,
+                "Idempotency-Key" to idempotencyKey(command.internalReference),
             ),
             payload = objectMapper.writeValueAsString(body),
         )
@@ -186,12 +186,12 @@ class SnippePaymentProvider(
         val body = buildMap<String, Any> {
             put("amount", command.amount.toWholeUnits())
             put("currency", command.currency.uppercase())
-            put("external_reference", command.internalReference)
-            command.providerChannel?.trim()?.takeIf { it.isNotEmpty() }?.let {
-                put("allowed_methods", listOf(it))
-            }
+            // Sessions 2026-01-25 has no external_reference field. Peak's reference
+            // rides in metadata, which the docs say is echoed on the webhook.
+            put("metadata", mapOf("external_reference" to command.internalReference))
+            put("allowed_methods", listOf("mobile_money"))
             if (command.payerIdentifier.isNotBlank()) {
-                put("customer", mapOf("phone" to command.payerIdentifier))
+                put("customer", mapOf("phone" to command.payerIdentifier.trim()))
             }
         }
 
@@ -201,8 +201,8 @@ class SnippePaymentProvider(
             headers = mapOf(
                 "Authorization" to "Bearer ${command.apiKey}",
                 // Snippe honours this, so a retried initiation cannot create a second session
-                // for one purchase.
-                "Idempotency-Key" to command.internalReference,
+                // for one purchase. Keys longer than 30 characters return PAY_001.
+                "Idempotency-Key" to idempotencyKey(command.internalReference),
             ),
             payload = objectMapper.writeValueAsString(body),
         )
@@ -249,14 +249,19 @@ class SnippePaymentProvider(
         )
         val node = objectMapper.readTree(response).unwrapData()
         val providerStatus = node.path("status").asString("")
+        val peakReference = node.path("metadata").path("external_reference").asString("").trim()
+            .ifEmpty { command.internalReference.trim() }
 
         return ProviderStatusResult(
-            internalReference = node.path("external_reference").asString(reference),
+            internalReference = peakReference,
             providerReference = node.path("reference").asString(reference),
             status = providerStatus.normalizedStatus(),
             providerStatus = providerStatus,
-            amount = node.path("amount").path("value").asString(null)?.toWholeAmount(),
-            currency = node.path("amount").path("currency").asString("TZS").uppercase(),
+            amount = node.path("amount").path("value").asString(null)?.toWholeAmount()
+                ?: node.path("amount").asString(null)?.toWholeAmount(),
+            currency = node.path("amount").path("currency").asString("TZS")
+                .ifBlank { node.path("currency").asString("TZS") }
+                .uppercase(),
             clientId = null,
             providerTimestamp = node.path("completed_at").asString(null)?.let(::parseInstantOrNull),
         )
@@ -303,14 +308,12 @@ class SnippePaymentProvider(
 
     private fun toNotification(root: JsonNode, verified: Boolean): ProviderWebhookNotification {
         val data = root.path("data")
-        // A session carries external_reference directly; a direct payment has no such field
-        // on creation, so ours comes back through metadata. Both are checked rather than
-        // assuming which flow produced the callback.
-        val externalReference = data.path("external_reference").asString("").trim()
-            .ifEmpty { data.path("metadata").path("external_reference").asString("").trim() }
-        require(externalReference.isNotEmpty()) {
-            "Snippe callback carried neither an external reference nor one in metadata, so " +
-                "it cannot be matched to a payment Peak started"
+        // snippe-integration skill: data.external_reference is the upstream processor
+        // (Selcom) reference. Peak's own handle is whatever we put in metadata on create.
+        val peakReference = data.path("metadata").path("external_reference").asString("").trim()
+        require(peakReference.isNotEmpty()) {
+            "Snippe callback carried no Peak reference in metadata, so it cannot be " +
+                "matched to a payment Peak started"
         }
 
         val amount = data.path("amount")
@@ -319,16 +322,14 @@ class SnippePaymentProvider(
         return ProviderWebhookNotification(
             // A real event id, unlike AzamPay. The unique index on
             // (provider, provider_event_id) turns a redelivery into a no-op.
-            eventKey = root.path("id").asString(externalReference),
+            eventKey = root.path("id").asString(peakReference),
             eventType = root.path("type").asString("payment.updated"),
-            internalReference = externalReference,
-            providerReference = data.path("reference").asString(externalReference),
+            internalReference = peakReference,
+            providerReference = data.path("reference").asString(peakReference),
             status = root.path("type").asString("").eventStatus(),
             amount = amount.path("value").asString("0").toWholeAmount(),
             feeAmount = settlement.path("fees").path("value").asString("0").toWholeAmount(),
             currency = amount.path("currency").asString("TZS").uppercase(),
-            // Snippe's callback names the payer, not the merchant; the merchant is already
-            // established by the account the callback was routed to.
             merchantIdentity = null,
             payerIdentity = data.path("customer").path("phone").asString(null),
             providerTimestamp = data.path("completed_at").asString(null)
@@ -404,6 +405,20 @@ class SnippePaymentProvider(
     private fun String?.orElse(fallback: String): String =
         this?.trim()?.takeIf { it.isNotEmpty() } ?: fallback
 
+    /**
+     * Mobile-money create wants `255XXXXXXXXX` with no leading `+`.
+     * `docs.snippe.sh/docs/2026-01-25/payments/mobile-money`.
+     */
+    private fun internationalMsisdn(value: String): String =
+        value.trim().removePrefix("+").filter(Char::isDigit)
+
+    /**
+     * `POST /v1/payments` rejects Idempotency-Key values longer than 30 characters
+     * with `500 PAY_001`. Peak's own reference is already shorter; this keeps a
+     * longer caller from blowing up every retry.
+     */
+    private fun idempotencyKey(value: String): String = value.trim().take(MAX_IDEMPOTENCY_KEY_LENGTH)
+
     /** Snippe wraps some responses in `data` and returns others bare. Both are accepted. */
     private fun JsonNode.unwrapData(): JsonNode =
         if (path("data").isObject) path("data") else this
@@ -453,6 +468,7 @@ class SnippePaymentProvider(
         const val SIGNATURE_HEADER = "x-webhook-signature"
         const val TIMESTAMP_HEADER = "x-webhook-timestamp"
         const val HMAC_ALGORITHM = "HmacSHA256"
+        const val MAX_IDEMPOTENCY_KEY_LENGTH = 30
     }
 }
 

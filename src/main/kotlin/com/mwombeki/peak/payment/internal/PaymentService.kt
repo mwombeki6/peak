@@ -2310,12 +2310,22 @@ class PaymentService(
         }
     }
 
+    /**
+     * Snippe (and any provider that offers both a USSD push and a hosted page) has
+     * two catalog rows for one rail. [singleOrNull] would throw the moment that
+     * provider became eligible, which is the opposite of enabling it.
+     *
+     * Guest collection is a phone push, so a recoverable `direct_push` row wins
+     * when both exist. Amount limits then come from the row that would actually
+     * carry the money.
+     */
     private fun catalogRail(providerCode: String, currency: String): CatalogRail? {
-        return jdbcTemplate.query(
+        val rails = jdbcTemplate.query(
             """
             SELECT is_enabled, supports_status_query, min_amount, max_amount
             FROM peak_payment_method_capabilities
             WHERE provider = ? AND payment_method = 'mobile_money' AND currency = ?
+            ORDER BY CASE collection_flow WHEN 'direct_push' THEN 0 ELSE 1 END
             """.trimIndent(),
             { rs, _ ->
                 CatalogRail(
@@ -2327,7 +2337,8 @@ class PaymentService(
             },
             providerCode,
             currency,
-        ).singleOrNull()
+        )
+        return rails.firstOrNull { it.enabled && it.supportsStatusQuery } ?: rails.firstOrNull()
     }
 
     private fun initialLifecycleStatus(request: ConfigurePaymentProviderRequest): String {

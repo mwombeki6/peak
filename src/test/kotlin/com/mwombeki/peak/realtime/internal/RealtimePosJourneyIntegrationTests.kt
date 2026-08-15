@@ -289,7 +289,7 @@ class RealtimePosJourneyIntegrationTests {
         jdbcTemplate.update(
             """
             INSERT INTO payment_providers (id, tenant_id, provider_code, name, provider_type, is_active)
-            VALUES (?, ?, 'clickpesa', 'ClickPesa', 'mobile_money', true)
+            VALUES (?, ?, 'snippe', 'Snippe', 'mobile_money', true)
             """.trimIndent(),
             providerId,
             fixture.tenantId,
@@ -360,11 +360,12 @@ class RealtimePosJourneyIntegrationTests {
                 {"id":"evt_journey_payment","type":"payment.completed",
                  "api_version":"2026-01-25","created_at":$now,
                  "data":{"reference":"sess_journey_payment",
-                   "external_reference":"${payment.internalReference}","status":"completed",
+                   "external_reference":"SEL123456789","status":"completed",
                    "amount":{"value":5900,"currency":"TZS"},
                    "settlement":{"fees":{"value":100,"currency":"TZS"}},
                    "channel":{"type":"mobile_money","provider":"mpesa"},
                    "customer":{"phone":"+255754123456"},
+                   "metadata":{"external_reference":"${payment.internalReference}"},
                    "completed_at":$now}}
             """.trimIndent(),
         )

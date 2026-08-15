@@ -23,6 +23,17 @@ interface PaymentProvider {
      */
     val requiresMobileNetwork: Boolean get() = false
 
+    /**
+     * Which collection experience this adapter uses for a guest USSD push, if it
+     * offers more than one against different endpoints.
+     *
+     * Null by default: most providers have a single collection call, and some
+     * (AzamPay) already use [ProviderCollectionCommand.collectionFlow] for a
+     * different query parameter. An adapter that must name the rail declares it
+     * here so the worker does not have to know which provider it is talking to.
+     */
+    val guestCollectionFlow: String? get() = null
+
     fun initiate(command: ProviderCollectionCommand): ProviderCollectionResult
 
     fun statement(command: ProviderStatementQuery): ProviderStatementResult {

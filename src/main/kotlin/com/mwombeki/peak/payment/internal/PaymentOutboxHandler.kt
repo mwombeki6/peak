@@ -97,6 +97,11 @@ class PaymentOutboxHandler(
                     checksumKey = secretResolver.resolve(
                         work.checksumKeySecretRef,
                     ),
+                    collectionFlow = adapter.guestCollectionFlow,
+                    // The folio guest is the payer. Placeholders and staff identity
+                    // are not sent; missing identity fails in the adapter.
+                    payerName = work.payerName,
+                    payerEmail = work.payerEmail,
                 ),
             ).also {
                 meterRegistry.counter(
@@ -210,7 +215,12 @@ class PaymentOutboxHandler(
                    pt.currency, pt.status, pp.provider_code, ppa.client_id,
                    ppa.endpoint_url, ppa.api_key_secret_ref,
                    ppa.checksum_key_secret_ref,
-                   ppa.provider_app_name
+                   ppa.provider_app_name,
+                   NULLIF(btrim(COALESCE(
+                       NULLIF(btrim(g.full_name), ''),
+                       NULLIF(btrim(concat_ws(' ', g.first_name, g.last_name)), '')
+                   )), '') AS guest_name,
+                   NULLIF(btrim(g.email), '') AS guest_email
             FROM payment_transactions pt
             JOIN payment_provider_accounts ppa
               ON ppa.tenant_id = pt.tenant_id
@@ -221,6 +231,17 @@ class PaymentOutboxHandler(
               ON pp.tenant_id = ppa.tenant_id
              AND pp.id = ppa.provider_id
              AND pp.is_active = true
+            LEFT JOIN folios f
+              ON f.tenant_id = pt.tenant_id
+             AND f.id = pt.folio_id
+            LEFT JOIN reservations r
+              ON r.tenant_id = f.tenant_id
+             AND r.id = f.reservation_id
+             AND r.deleted_at IS NULL
+            LEFT JOIN guests g
+              ON g.tenant_id = r.tenant_id
+             AND g.id = r.primary_guest_id
+             AND g.deleted_at IS NULL
             WHERE pt.tenant_id = ?
               AND pt.id = ?
             FOR UPDATE OF pt
@@ -242,6 +263,8 @@ class PaymentOutboxHandler(
                         "checksum_key_secret_ref",
                     ),
                     providerAppName = rs.getString("provider_app_name"),
+                    payerName = rs.getString("guest_name"),
+                    payerEmail = rs.getString("guest_email"),
                 )
             },
             tenantId,
@@ -263,6 +286,8 @@ class PaymentOutboxHandler(
         val apiKeySecretRef: String,
         val checksumKeySecretRef: String,
         val providerAppName: String?,
+        val payerName: String?,
+        val payerEmail: String?,
     )
 
     private companion object {

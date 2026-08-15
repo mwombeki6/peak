@@ -62,7 +62,7 @@ class PropertyPaymentRailLifecycleIntegrationTests {
                 ),
             )
         }
-        assertTrue(ex.message!!.contains("not enabled"))
+        assertTrue(requireNotNull(ex.message).contains("not enabled"))
     }
 
     @Test
@@ -205,7 +205,7 @@ class PropertyPaymentRailLifecycleIntegrationTests {
             """
             INSERT INTO payment_providers (
                 id, tenant_id, provider_code, name, provider_type, is_active
-            ) VALUES (?, ?, 'clickpesa', 'ClickPesa', 'mobile_money', true)
+            ) VALUES (?, ?, 'snippe', 'Snippe', 'mobile_money', true)
             """.trimIndent(),
             providerId, hotel.tenantId,
         )
@@ -214,16 +214,23 @@ class PropertyPaymentRailLifecycleIntegrationTests {
             INSERT INTO payment_provider_accounts (
                 id, tenant_id, property_id, provider_id, account_name, client_id,
                 secret_ref, api_key_secret_ref, checksum_key_secret_ref, endpoint_url,
-                is_default, is_active, environment, lifecycle_status, verified_at, enabled_at
+                is_default, is_active, environment, lifecycle_status, verified_at, enabled_at,
+                sandbox_certified_at, sandbox_evidence_ref
             ) VALUES (?, ?, ?, ?, 'Hotel Account', 'MERCHANT-001',
                       'literal:api-secret', 'literal:api-secret', 'literal:checksum-secret',
-                      'https://api.clickpesa.com/third-parties', true, true, ?, ?, ?, ?)
+                      'https://api.snippe.sh', true, true, ?, ?, ?, ?, ?, ?)
             """.trimIndent(),
             providerAccountId, hotel.tenantId, hotel.propertyId, providerId,
             environment,
             if (enabled) "enabled" else "configured",
             if (enabled) java.sql.Timestamp.from(java.time.Instant.now()) else null,
             if (enabled) java.sql.Timestamp.from(java.time.Instant.now()) else null,
+            if (environment == "production") {
+                java.sql.Timestamp.from(java.time.Instant.now())
+            } else {
+                null
+            },
+            if (environment == "production") "sandbox-run" else null,
         )
         return hotel.copy(providerAccountId = providerAccountId)
     }

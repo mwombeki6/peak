@@ -97,6 +97,10 @@ class PaymentStatusOutboxHandler(
                 clientId = work.clientId,
                 apiKey = secretResolver.resolve(work.apiKeySecretRef),
                 checksumKey = secretResolver.resolve(work.checksumKeySecretRef),
+                // Status endpoints are keyed on the reference the provider issued
+                // at create. Peak's own handle is not something they look up.
+                providerReference = work.providerReference,
+                collectionFlow = queryable.guestCollectionFlow,
                 providerAppName = work.providerAppName,
             ),
         )

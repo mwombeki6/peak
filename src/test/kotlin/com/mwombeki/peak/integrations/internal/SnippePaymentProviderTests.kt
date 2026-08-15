@@ -35,6 +35,15 @@ class SnippePaymentProviderTests {
     private val secret = "whsec_0123456789abcdef"
 
     @Test
+    fun guestCollectionUsesThePaymentsApiNotAHostedSession() {
+        assertEquals(
+            "direct_push",
+            provider(StubTransport()).guestCollectionFlow,
+            "headless POS and folio collection is POST /v1/payments, not a checkout session",
+        )
+    }
+
+    @Test
     fun initiateOpensAHostedCheckoutAndReturnsSomewhereToSendThePayer() {
         val transport = StubTransport()
         val result = provider(transport).initiate(command())
@@ -58,8 +67,19 @@ class SnippePaymentProviderTests {
         )
 
         val body = objectMapper.readTree(requireNotNull(call.payload))
-        assertEquals("PEAK-REF-1", body.path("external_reference").asString(""))
+        assertTrue(
+            body.path("external_reference").isMissingNode,
+            "sessions 2026-01-25 has no external_reference field",
+        )
+        assertEquals(
+            "PEAK-REF-1",
+            body.path("metadata").path("external_reference").asString(""),
+        )
         assertEquals("TZS", body.path("currency").asString(""))
+        assertEquals(
+            "mobile_money",
+            body.path("allowed_methods").path(0).asString(""),
+        )
         assertEquals(
             30000L,
             body.path("amount").asLong(0),
@@ -139,6 +159,24 @@ class SnippePaymentProviderTests {
     }
 
     @Test
+    fun aDirectPushStripsThePlusFromTheMsisdn() {
+        val transport = StubTransport()
+        provider(transport).initiate(
+            command(
+                flow = "direct_push",
+                name = "Asha Mwinyi",
+                email = "asha@hotel.example",
+            ).copy(payerIdentifier = "+255781000000"),
+        )
+        val body = objectMapper.readTree(requireNotNull(transport.calls.single().payload))
+        assertEquals(
+            "255781000000",
+            body.path("phone_number").asString(""),
+            "Snippe mobile-money create documents 255XXXXXXXXX with no leading +",
+        )
+    }
+
+    @Test
     fun aDirectPushWithoutThePayersNameOrEmailIsRefused() {
         listOf(
             command(flow = "direct_push", name = null, email = "a@b.example"),
@@ -182,6 +220,25 @@ class SnippePaymentProviderTests {
     }
 
     @Test
+    fun aSessionStatusAmountMayBeAScalar() {
+        val transport = StubTransport(
+            getResponse = """{"reference":"sess_abc123def456","status":"completed",
+               "amount":30000,"currency":"TZS",
+               "metadata":{"external_reference":"PEAK-REF-1"}}""",
+        )
+        val result = provider(transport).queryStatus(
+            statusQuery(flow = "hosted_checkout", providerRef = "sess_abc123def456"),
+        )
+        assertEquals(
+            0,
+            BigDecimal("30000").compareTo(result.amount),
+            "sessions 2026-01-25 return amount as a scalar, not {value, currency}",
+        )
+        assertEquals("TZS", result.currency)
+        assertEquals("PEAK-REF-1", result.internalReference)
+    }
+
+    @Test
     fun statusIsAskedByTheReferenceSnippeIssuedNotPeaksOwn() {
         val transport = StubTransport()
         provider(transport).queryStatus(
@@ -204,17 +261,29 @@ class SnippePaymentProviderTests {
 
     @Test
     fun aDirectPaymentCallbackIsMatchedThroughMetadata() {
-        // A session carries external_reference directly; a direct payment does not, so ours
-        // comes back the only way it was sent.
         val payload = """{"id":"evt_direct","type":"payment.completed",
-           "data":{"reference":"9015c155-uuid","status":"completed",
+           "data":{"reference":"9015c155-uuid","external_reference":"SEL123456789",
+           "status":"completed",
            "amount":{"value":30000,"currency":"TZS"},
            "metadata":{"external_reference":"PEAK-REF-1"}}}"""
 
         val notification = provider(StubTransport()).parseWebhook(payload)
 
         assertEquals("PEAK-REF-1", notification.internalReference)
+        assertEquals("9015c155-uuid", notification.providerReference)
         assertEquals(ProviderPaymentStatus.SUCCEEDED, notification.status)
+    }
+
+    @Test
+    fun anUpstreamProcessorReferenceIsNotTreatedAsPeaks() {
+        val payload = """{"id":"evt_sel","type":"payment.completed",
+           "data":{"reference":"pi_abc","external_reference":"SEL123456789",
+           "status":"completed","amount":{"value":500,"currency":"TZS"}}}"""
+
+        val failure = assertFailsWith<IllegalArgumentException> {
+            provider(StubTransport()).parseWebhook(payload)
+        }
+        assertTrue(failure.message.orEmpty().contains("metadata"), failure.message.orEmpty())
     }
 
     @Test
@@ -462,12 +531,14 @@ class SnippePaymentProviderTests {
     /** Deliberately irregular whitespace, so re-serialising it demonstrably differs. */
     private fun callbackJson(type: String = "payment.completed"): String =
         """{"id":"evt_abc123",  "type":"$type","api_version":"2026-01-25",
-           "created_at":"2026-08-13T09:00:00Z","data":{"reference":"sess_abc123def456",
-           "external_reference":"PEAK-REF-1","status":"completed",
+           "created_at":"2026-08-13T09:00:00Z","data":{"reference":"9015c155-9e29-4e8e-8fe6-d5d81553c8e6",
+           "external_reference":"SEL123456789","status":"completed",
            "amount":{"value":30000,"currency":"TZS"},
            "settlement":{"fees":{"value":1000,"currency":"TZS"}},
            "channel":{"type":"mobile_money","provider":"mpesa"},
-           "customer":{"phone":"+255700000001"},"completed_at":"2026-08-13T09:00:00Z"}}"""
+           "customer":{"phone":"+255700000001"},
+           "metadata":{"external_reference":"PEAK-REF-1"},
+           "completed_at":"2026-08-13T09:00:00Z"}}"""
 
     private data class RecordedCall(
         val method: String,
@@ -480,6 +551,7 @@ class SnippePaymentProviderTests {
         private val sessionResponse: String =
             """{"reference":"sess_abc123def456","status":"pending",
                "checkout_url":"https://pay.snippe.sh/c/tok_xyz"}""",
+        private val getResponse: String? = null,
     ) : SnippeHttpTransport {
         val calls = mutableListOf<RecordedCall>()
 
@@ -498,8 +570,9 @@ class SnippePaymentProviderTests {
                    "reference":"9015c155-9e29-4e8e-8fe6-d5d81553c8e6","status":"pending"}}"""
             }
             return if (method == "GET") {
-                """{"reference":"sess_abc123def456","external_reference":"PEAK-REF-1",
+                getResponse ?: """{"reference":"sess_abc123def456",
                    "status":"completed","amount":{"value":30000,"currency":"TZS"},
+                   "metadata":{"external_reference":"PEAK-REF-1"},
                    "completed_at":"2026-08-13T09:00:00Z"}"""
             } else {
                 sessionResponse
