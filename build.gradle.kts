@@ -216,6 +216,9 @@ tasks.withType<Test>().configureEach {
         "spring.profiles.active",
         System.getProperty("spring.profiles.active") ?: "test",
     )
+    // The WebSocket handshake client in the E2E realtime journey test must be
+    // able to send the Upgrade/Connection hop-by-hop headers.
+    systemProperty("jdk.httpclient.allowRestrictedHeaders", "connection,upgrade")
     System.getProperty("peak.openapi.write-baseline")?.let { value ->
         systemProperty("peak.openapi.write-baseline", value)
     }
