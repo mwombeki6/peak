@@ -61,6 +61,36 @@ data class PropertyReadinessResponse(
     val propertyId: UUID,
     val isReady: Boolean,
     val missingRequirements: List<String>,
+    val workflowStatus: String = "running",
+    val currentStep: String? = null,
+    val steps: List<PropertyOnboardingStepView> = emptyList(),
+    val blockers: List<PropertyGoLiveBlockerView> = emptyList(),
+    val collectionEnabled: Boolean = false,
+)
+
+data class PropertyOnboardingResponse(
+    val propertyId: UUID,
+    val tenantId: UUID,
+    val workflowStatus: String,
+    val currentStep: String?,
+    val isReady: Boolean,
+    val collectionEnabled: Boolean,
+    val steps: List<PropertyOnboardingStepView>,
+    val blockers: List<PropertyGoLiveBlockerView>,
+)
+
+data class PropertyOnboardingStepView(
+    val key: String,
+    val sequence: Int,
+    val status: String,
+    val required: Boolean,
+    val detail: String,
+)
+
+data class PropertyGoLiveBlockerView(
+    val code: String,
+    val stepKey: String,
+    val detail: String,
 )
 
 data class BuildingResponse(

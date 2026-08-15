@@ -20,6 +20,7 @@ import com.mwombeki.peak.property.api.PropertyManagementInProgressException
 import com.mwombeki.peak.property.api.PropertyManagementNotFoundException
 import com.mwombeki.peak.property.api.PropertyModuleMutationReceipt
 import com.mwombeki.peak.property.api.PropertyMutationReceipt
+import com.mwombeki.peak.property.api.PropertyOnboardingResponse
 import com.mwombeki.peak.property.api.PropertyPort
 import com.mwombeki.peak.property.api.PropertyReadinessResponse
 import com.mwombeki.peak.property.api.PropertyResponse
@@ -119,6 +120,13 @@ class PropertyManagementController(
         @PathVariable propertyId: UUID,
     ): PropertyReadinessResponse {
         return propertyPort.checkReadiness(propertyId)
+    }
+
+    @GetMapping("/{propertyId}/onboarding")
+    fun getOnboarding(
+        @PathVariable propertyId: UUID,
+    ): PropertyOnboardingResponse {
+        return propertyPort.getOnboarding(propertyId)
     }
 
     @PostMapping("/{propertyId}/buildings")

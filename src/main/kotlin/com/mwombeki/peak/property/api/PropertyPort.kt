@@ -14,6 +14,7 @@ interface PropertyPort {
     fun suspendProperty(propertyId: UUID): PropertyMutationReceipt
     fun archiveProperty(propertyId: UUID): PropertyMutationReceipt
     fun checkReadiness(propertyId: UUID): PropertyReadinessResponse
+    fun getOnboarding(propertyId: UUID): PropertyOnboardingResponse
     fun activateProperty(propertyId: UUID): PropertyReadinessResponse
 
     fun createBuilding(propertyId: UUID, request: CreateBuildingRequest): PropertyChildMutationReceipt

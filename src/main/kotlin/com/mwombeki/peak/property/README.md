@@ -37,6 +37,7 @@ Supported states are `draft`, `active`, `suspended`, `frozen`, `archived`, and `
 | `POST` | `/api/v1/properties/{propertyId}/suspend` | `property.lifecycle` | property |
 | `POST` | `/api/v1/properties/{propertyId}/archive` | `property.lifecycle` | property |
 | `GET` | `/api/v1/properties/{propertyId}/readiness` | `property.view` | property |
+| `GET` | `/api/v1/properties/{propertyId}/onboarding` | `property.view` | property |
 
 ## Setup Resources
 
@@ -57,18 +58,16 @@ All setup resources support create, list, get, update, and delete unless noted.
 
 ## Readiness
 
-Activation is denied until all readiness checks pass:
+Activation is denied until the property step machine has no required blockers:
 
-- Tenant is `trial` or `active`.
-- Property profile exists and is not archived or terminated.
-- At least one active building and floor exist.
-- At least one active room type exists.
-- At least one active room exists.
-- At least one active revenue center exists.
-- At least one active tax rate exists.
-- Every active room type has a positive base rate.
-- The required tenant and property `property` module is enabled.
-- At least one active verified business contact channel exists.
+- Property exists and is distinct from the tenant.
+- At least one STRONG (Keycloak) Property Administrator is assigned.
+- Hotel inventory is in place: building, floor, room type, room, revenue center, tax, positive base rates, `property` module, verified business contact.
+- If POS, front desk, or reservations is enabled: a frontline path exists (phone-first staff or an equivalent operational property role). Frontline staff do not need email.
+- A guest rail is at least CONFIGURED (Snippe or another catalog-enabled recoverable rail). ENABLE is the collection gate and is not flipped by activation.
+- If frontline is in scope: SMS is routable for staff activation. WhatsApp is optional. Inbound WhatsApp is out of scope.
+
+`GET /api/v1/properties/{propertyId}/onboarding` returns persisted steps and remaining blockers. Evidence is recomputed on every read.
 
 ## Operational Notes
 
