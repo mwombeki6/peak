@@ -2,7 +2,12 @@ package com.mwombeki.peak.realtime.internal
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.mwombeki.peak.TestcontainersConfiguration
+import com.mwombeki.peak.payment.api.InitiatePosMobileMoneyRequest
+import com.mwombeki.peak.payment.api.PaymentWebhookPort
+import com.mwombeki.peak.payment.internal.PaymentService
 import com.mwombeki.peak.pos.api.AddPosOrderItemRequest
+import com.mwombeki.peak.reliability.api.IdempotencyCommand
+import com.mwombeki.peak.reliability.api.IdempotencyPort
 import com.mwombeki.peak.pos.api.CreatePosOrderRequest
 import com.mwombeki.peak.pos.api.OpenPosSessionRequest
 import com.mwombeki.peak.pos.api.SendPosOrderRequest
@@ -18,6 +23,8 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.WebSocket
 import java.time.Duration
+import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
@@ -68,6 +75,18 @@ class RealtimePosJourneyIntegrationTests {
 
     @Autowired
     private lateinit var requestContextHolder: RequestContextHolder
+
+    @Autowired
+    private lateinit var paymentService: PaymentService
+
+    @Autowired
+    private lateinit var webhookPort: PaymentWebhookPort
+
+    @Autowired
+    private lateinit var transactionTemplate: org.springframework.transaction.support.TransactionTemplate
+
+    @Autowired
+    private lateinit var idempotencyPort: IdempotencyPort
 
     @LocalServerPort
     private var port: Int = 0
@@ -177,6 +196,150 @@ class RealtimePosJourneyIntegrationTests {
     }
 
     @Test
+    fun `STOMP client receives the canonical payment envelopes end to end`() {
+        val fixture = insertFixture()
+        val socket = connect(fixture.tenantId, fixture.userId)
+        socket.subscribe("operations", "/topic/properties/${fixture.propertyId}/operations")
+
+        bind(fixture, "pay-open")
+        val session = posSessionService.openSession(
+            fixture.propertyId,
+            OpenPosSessionRequest(
+                outletId = fixture.outletId,
+                openingFloat = BigDecimal("100.00"),
+            ),
+        )
+        bind(fixture, "pay-order")
+        val order = posOrderService.createOrder(
+            fixture.propertyId,
+            CreatePosOrderRequest(
+                sessionId = session.id,
+                orderType = "dine_in",
+                tableNumber = "T12",
+                clientOperationId = "pay-order",
+            ),
+        )
+        bind(fixture, "pay-item")
+        posOrderService.addItem(
+            fixture.propertyId,
+            order.id,
+            AddPosOrderItemRequest(
+                menuItemId = fixture.menuItemId,
+                quantity = BigDecimal("2"),
+                clientOperationId = "pay-item",
+            ),
+        )
+
+        val providerId = UUID.randomUUID()
+        val providerAccountId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO payment_providers (id, tenant_id, provider_code, name, provider_type, is_active)
+            VALUES (?, ?, 'snippe', 'Snippe', 'mobile_money', true)
+            """.trimIndent(),
+            providerId,
+            fixture.tenantId,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO payment_provider_accounts (
+                id, tenant_id, property_id, provider_id, account_name, client_id,
+                secret_ref, api_key_secret_ref, checksum_key_secret_ref, endpoint_url,
+                is_default, is_active, environment
+            ) VALUES (?, ?, ?, ?, 'Hotel Account', 'MERCHANT-001',
+                      'literal:api-secret', 'literal:api-secret', 'literal:checksum-secret',
+                      'https://example.test', true, true, 'sandbox')
+            """.trimIndent(),
+            providerAccountId,
+            fixture.tenantId,
+            fixture.propertyId,
+            providerId,
+        )
+
+        bind(fixture, "pay-initiate")
+        val payment = transactionTemplate.execute {
+            val reservation = idempotencyPort.reserve(
+                IdempotencyCommand(
+                    operationType = "payments.pos.mobile_money.initiated",
+                    requestPayload = mapOf("posOrderId" to order.id, "amount" to 5900),
+                ),
+            )
+            paymentService.initiatePosMobileMoney(
+                tenantId = fixture.tenantId,
+                propertyId = fixture.propertyId,
+                request = InitiatePosMobileMoneyRequest(
+                    posOrderId = order.id,
+                    providerAccountId = providerAccountId,
+                    phoneNumber = "255754123456",
+                    amount = BigDecimal("5900.00"),
+                    mobileNetwork = "Mpesa",
+                ),
+                idempotencyKeyId = reservation.recordId,
+            )
+        }
+
+        val created = socket.awaitEvent("payment.created")
+        assertEquals("PAYMENT_TRANSACTION", created["aggregateType"])
+        assertEquals(payment.id.toString(), created["aggregateId"])
+        assertEquals(fixture.tenantId.toString(), created["tenantId"])
+        assertEquals(fixture.propertyId.toString(), created["propertyId"])
+        assertEquals(1, created["schemaVersion"])
+
+        // The provider confirms the collection; the per-payment destination gets its own
+        // canonical envelope, and the operations stream gets it too.
+        socket.subscribe("payment", "/topic/payments/${payment.id}")
+        // In production the outbox worker performs this transition when it pushes the
+        // collection prompt to the provider; the lifecycle guard refuses created -> posted.
+        jdbcTemplate.update(
+            """
+            UPDATE payment_transactions
+            SET status = 'initiated', initiated_at = now(), updated_at = now()
+            WHERE tenant_id = ? AND id = ? AND status = 'created'
+            """.trimIndent(),
+            fixture.tenantId,
+            payment.id,
+        )
+        val now = "\"" + Instant.now().truncatedTo(ChronoUnit.SECONDS) + "\""
+        webhookPort.receive(
+            providerAccountId = providerAccountId,
+            payload = """
+                {"id":"evt_journey_payment","type":"payment.completed",
+                 "api_version":"2026-01-25","created_at":$now,
+                 "data":{"reference":"sess_journey_payment",
+                   "external_reference":"${payment.internalReference}","status":"completed",
+                   "amount":{"value":5900,"currency":"TZS"},
+                   "settlement":{"fees":{"value":100,"currency":"TZS"}},
+                   "channel":{"type":"mobile_money","provider":"mpesa"},
+                   "customer":{"phone":"+255754123456"},
+                   "completed_at":$now}}
+            """.trimIndent(),
+        )
+
+        val onPaymentDestination = socket.awaitFrameOn(
+            "/topic/payments/${payment.id}",
+            "payment.succeeded",
+        )
+        assertNotNull(onPaymentDestination, "payment.succeeded must arrive on its own destination")
+        val succeeded = onPaymentDestination.bodyMap()
+        assertEquals("PAYMENT_TRANSACTION", succeeded["aggregateType"])
+        assertEquals(payment.id.toString(), succeeded["aggregateId"])
+        assertEquals(fixture.tenantId.toString(), succeeded["tenantId"])
+        @Suppress("UNCHECKED_CAST")
+        val succeededPayload = succeeded["payload"] as Map<String, Any?>
+        assertEquals("snippe", succeededPayload["provider"])
+        assertEquals(5900.0, (succeededPayload["amount"] as Number).toDouble())
+
+        val onOperations = socket.awaitFrameOn(
+            "/topic/properties/${fixture.propertyId}/operations",
+            "payment.succeeded",
+        )
+        assertNotNull(onOperations, "payment.succeeded must also arrive on the property stream")
+        assertEquals(payment.id.toString(), onOperations.bodyMap()["aggregateId"])
+
+        socket.closeQuietly()
+    }
+
+    @Test
     fun `subscription to another tenant outlet is denied with an ERROR frame`() {
         val fixture = insertFixture()
         val otherFixture = insertFixture()
@@ -216,7 +379,6 @@ class RealtimePosJourneyIntegrationTests {
     private inner class StompSocket(private val mapper: ObjectMapper) {
         var delegate: WebSocket? = null
         val frames = ConcurrentLinkedQueue<StompFrame>()
-        private val awaited = ConcurrentLinkedQueue<String>()
         var closed = false
             private set
 
@@ -236,12 +398,11 @@ class RealtimePosJourneyIntegrationTests {
                         val frame = parseFrame(raw)
                         if (frame != null) {
                             frames.add(frame)
-                            awaited.firstOrNull { it == frame.command }?.let {
-                                awaited.remove(it)
-                                when (it) {
-                                    "MESSAGE" -> messageLatches.remove(awaitingType(frame))?.countDown()
-                                    else -> commandLatches.remove(it)?.countDown()
-                                }
+                            // Fire any waiting latch unconditionally: an await may have been
+                            // registered before or after this frame arrived.
+                            when (frame.command) {
+                                "MESSAGE" -> messageLatches[awaitingType(frame)]?.countDown()
+                                else -> commandLatches[frame.command]?.countDown()
                             }
                         }
                     }
@@ -276,8 +437,8 @@ class RealtimePosJourneyIntegrationTests {
         }
 
         fun awaitCommand(command: String, timeoutSeconds: Long = 10): StompFrame? {
+            frames.firstOrNull { it.command == command }?.let { return it }
             val latch = commandLatches.getOrPut(command) { CountDownLatch(1) }
-            awaited.add(command)
             frames.firstOrNull { it.command == command }?.let { return it }
             return if (latch.await(timeoutSeconds, TimeUnit.SECONDS)) {
                 frames.firstOrNull { it.command == command }
@@ -285,14 +446,31 @@ class RealtimePosJourneyIntegrationTests {
         }
 
         fun awaitEvent(type: String, timeoutSeconds: Long = 10): Map<String, Any?> {
+            frames.firstOrNull { awaitingType(it) == type }?.let { return it.bodyMap() }
             val latch = messageLatches.getOrPut(type) { CountDownLatch(1) }
-            awaited.add("MESSAGE")
             frames.firstOrNull { awaitingType(it) == type }?.let { return it.bodyMap() }
             check(latch.await(timeoutSeconds, TimeUnit.SECONDS)) {
                 "Timed out waiting for realtime event '$type'; frames seen: " +
                     frames.map { "${it.command} hdrs=${it.headers} body=${it.body.take(300)}" }
             }
             return frames.first { awaitingType(it) == type }.bodyMap()
+        }
+
+        fun awaitFrameOn(
+            destination: String,
+            type: String,
+            timeoutSeconds: Long = 10,
+        ): StompFrame? {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds)
+            while (System.nanoTime() < deadline) {
+                frames.firstOrNull {
+                    it.command == "MESSAGE" &&
+                        it.headers["destination"] == destination &&
+                        awaitingType(it) == type
+                }?.let { return it }
+                Thread.sleep(20)
+            }
+            return null
         }
 
         fun closeQuietly() {
