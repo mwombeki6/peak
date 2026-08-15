@@ -483,6 +483,8 @@ class RouteAccessMatrixCoverageIntegrationTests {
                     startsWith("/api/v1/devices/") -> RouteScope.PUBLIC
             startsWith("/api/v1/tenants/") -> RouteScope.TENANT
             this == "/api/v1/properties" -> RouteScope.TENANT
+            // First hotel is a tenant act: no propertyId exists yet.
+            this == "/api/v1/properties/bootstrap" -> RouteScope.TENANT
             startsWith("/api/v1/properties/taxes") -> RouteScope.TENANT
             isTenantWideCatalogWrite(method) -> RouteScope.TENANT
             startsWith("/api/v1/properties/") -> RouteScope.PROPERTY
