@@ -51,7 +51,13 @@ EVIDENCE_DIR="${EVIDENCE_DIR:-$ROOT_DIR/build/evidence/db-restore}"
 
 # The supported matrix. Keep this in step with the migration-matrix workflow:
 # a version Peak claims to support and never restores on is an assumption.
-PG_VERSIONS="${PG_VERSIONS:-16.14 18.4}"
+#
+# 18.4 is what ops/production/compose.yaml pins by digest, so it is the only
+# version Peak actually claims. 16.14 was dropped from both here and the
+# workflow together, because the two drifting apart is the failure this comment
+# exists to prevent. Restoring into an older managed cluster is still one
+# argument away: PG_VERSIONS="16.14 18.4" ops/testing/verify-db-backup-restore.sh
+PG_VERSIONS="${PG_VERSIONS:-18.4}"
 PG_IMAGE_REPO="${PG_IMAGE_REPO:-docker.io/library/postgres}"
 FLYWAY_IMAGE="${FLYWAY_IMAGE:-docker.io/flyway/flyway:latest}"
 

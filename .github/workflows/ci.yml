@@ -117,7 +117,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        postgres: ["16.14", "18.4"]
+        # Production is pinned to postgres:18.4 by digest in
+        # ops/production/compose.yaml, so that is the version the gate proves. A
+        # second leg ran 16.14, which tested a version nothing deploys and spent a
+        # whole job on every push. verify-db-backup-restore.sh still honours
+        # PG_VERSIONS, so an operator restoring into an older managed cluster can
+        # still ask for it by name.
+        postgres: ["18.4"]
     env:
       PEAK_TEST_POSTGRES_IMAGE: postgres:${{ matrix.postgres }}
     steps:
