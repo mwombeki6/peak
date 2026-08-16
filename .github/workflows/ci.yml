@@ -302,7 +302,19 @@ jobs:
     # The only job here that brings up a full stack, and so the only one that can hang
     # rather than fail. It did, on the first run that ever reached it, for 65 minutes.
     # The other long-running workflows already bound themselves this way.
-    timeout-minutes: 45
+    #
+    # Raised from 45 once the stack actually started. The bound was chosen to catch a
+    # hang, not measured against the work: the first healthy run reached
+    # tenant-property-foundation, stay-finance-foundation and core-hospitality inside
+    # six minutes and then spent the rest of its budget in the load, penetration and
+    # chaos stages, which now drive 939 probes across 416 operations at 800 requests
+    # and 24 concurrent. It was cancelled at 45m41s with nothing wrong.
+    #
+    # A hang is still caught — 90 minutes is a ceiling, not a target, and the stack
+    # startup inside the script carries its own tighter bound with diagnostics.
+    # Shrinking the load profile to fit the old number would trade real coverage for
+    # a figure nobody measured.
+    timeout-minutes: 90
     needs: [unit-integration, operations, container-security]
     steps:
       - uses: actions/checkout@v6
