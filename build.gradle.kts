@@ -209,6 +209,9 @@ tasks.withType<Test>().configureEach {
         fileTree("src/main/resources/db/migration"),
         file("ops/production/role-bootstrap.sql"),
         file("docs/architecture/database-ownership.csv"),
+        file("ops/production/.env.example"),
+        file(".github/workflows/ci.yml"),
+        file(".github/workflows/resilience-soak.yml"),
     )
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("peakSourceOfTruthFiles")
