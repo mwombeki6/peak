@@ -59,8 +59,28 @@ source_clients="$(source_keycloak_db "SELECT count(*) FROM client")"
 source_users="$(source_keycloak_db "SELECT count(*) FROM user_entity")"
 
 export COMPOSE_PROJECT_NAME="$RESTORE_PROJECT"
-podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
-  up -d postgres keycloak-db
+# Bounded, and --no-deps, because this is where the job went silent.
+#
+# The acceptance job was cancelled twice at its ceiling. The last line it ever printed came
+# from this project — containers created, then nothing for 82 minutes until the runner killed
+# it. The readiness poll below is already bounded at 120s, so the wait was never the problem:
+# the compose call itself never returned. depends_on: condition: service_healthy needs the
+# runtime to execute healthchecks, and podman on the CI runner does not, so anything that
+# evaluates the dependency graph can block on a condition nothing will satisfy.
+#
+# --no-deps stops compose evaluating that graph; the poll below establishes readiness itself.
+# The timeout turns a silent consumer of the whole budget into a diagnosis — the same trade
+# 970dd6d made for the foundation stack.
+if ! timeout 600 podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" \
+    -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
+    up -d --no-deps postgres keycloak-db; then
+  echo "Restore drill could not bring up postgres and keycloak-db." >&2
+  podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" \
+    -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" ps >&2 || true
+  podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" \
+    -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" logs --tail 100 postgres keycloak-db >&2 || true
+  exit 1
+fi
 for _ in $(seq 1 60); do
   if podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
       exec -T postgres pg_isready -U "$POSTGRES_MIGRATOR_USER" -d "$POSTGRES_DB" >/dev/null 2>&1 &&
