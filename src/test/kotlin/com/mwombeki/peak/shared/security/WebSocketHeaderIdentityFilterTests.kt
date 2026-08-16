@@ -13,6 +13,8 @@ import org.springframework.http.HttpHeaders
 import org.springframework.mock.web.MockFilterChain
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
+import org.springframework.security.authentication.AnonymousAuthenticationToken
+import org.springframework.security.core.authority.AuthorityUtils
 import org.springframework.security.core.context.SecurityContextHolder
 
 class WebSocketHeaderIdentityFilterTests {
@@ -67,6 +69,38 @@ class WebSocketHeaderIdentityFilterTests {
         val filter = WebSocketHeaderIdentityFilter(RequestContextProperties(allowHeaderIdentity = true))
         val tenantId = UUID.randomUUID()
         val userId = UUID.randomUUID()
+        val request = MockHttpServletRequest("GET", "/ws-connect").apply {
+            addHeader(PeakRequestHeaders.TENANT_ID, tenantId.toString())
+            addHeader(PeakRequestHeaders.TENANT_USER_ID, userId.toString())
+        }
+
+        filter.doFilter(request, MockHttpServletResponse(), MockFilterChain())
+
+        val applied = SecurityContextHolder.getContext().authentication as HeaderIdentityAuthentication
+        assertTrue(applied.tenantId == tenantId)
+        assertTrue(applied.tenantUserId == userId)
+    }
+
+    /**
+     * The filter is registered before AuthorizationFilter, which places it after
+     * AnonymousAuthenticationFilter — so in a running application the context always
+     * already holds an anonymous token. An anonymous token reports isAuthenticated,
+     * so counting it as a bearer made the XOR rule fire against a request carrying
+     * exactly one credential, and every handshake answered 401.
+     *
+     * The other tests here start from an empty context, which is why none of them
+     * saw it and all three realtime journey tests were red.
+     */
+    @Test
+    fun appliesHeaderIdentityOverAnAnonymousContext() {
+        val filter = WebSocketHeaderIdentityFilter(RequestContextProperties(allowHeaderIdentity = true))
+        val tenantId = UUID.randomUUID()
+        val userId = UUID.randomUUID()
+        SecurityContextHolder.getContext().authentication = AnonymousAuthenticationToken(
+            "key",
+            "anonymousUser",
+            AuthorityUtils.createAuthorityList("ROLE_ANONYMOUS"),
+        )
         val request = MockHttpServletRequest("GET", "/ws-connect").apply {
             addHeader(PeakRequestHeaders.TENANT_ID, tenantId.toString())
             addHeader(PeakRequestHeaders.TENANT_USER_ID, userId.toString())

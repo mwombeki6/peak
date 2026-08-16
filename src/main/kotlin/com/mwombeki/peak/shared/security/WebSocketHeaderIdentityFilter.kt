@@ -9,6 +9,7 @@ import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import java.util.UUID
 import org.springframework.http.HttpHeaders
+import org.springframework.security.authentication.AnonymousAuthenticationToken
 import org.springframework.security.core.Authentication
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.web.filter.OncePerRequestFilter
@@ -47,7 +48,14 @@ class WebSocketHeaderIdentityFilter(
                 (
                     existing != null &&
                         existing.isAuthenticated &&
-                        existing !is HeaderIdentityAuthentication
+                        existing !is HeaderIdentityAuthentication &&
+                        // An anonymous token reports isAuthenticated == true and is not a
+                        // credential. This filter is registered before AuthorizationFilter,
+                        // which puts it after AnonymousAuthenticationFilter, so by the time
+                        // it runs the context is never empty. Counting anonymous as a bearer
+                        // made the XOR rule fire against a request that presented exactly one
+                        // credential: the context was cleared and every handshake answered 401.
+                        existing !is AnonymousAuthenticationToken
                     )
 
         if (bearerAuthenticated && hasIdentityHeaders) {
