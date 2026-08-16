@@ -312,9 +312,36 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
       - uses: gradle/actions/setup-gradle@v6
       - name: Install Podman acceptance tools
+        # ubuntu-latest ships podman 4.9.3, which did not run container healthchecks on
+        # this runner: postgres sat at "(starting)" for nine minutes while its own log
+        # said "ready to accept connections". A healthcheck that had executed and failed
+        # would have flipped to unhealthy after interval*retries — about 100s — so it
+        # never ran at all. depends_on: condition: service_healthy therefore never
+        # satisfied, keycloak stayed Created, and compose up blocked until the bound.
+        #
+        # Only this job needs a newer podman: every other job drives containers through
+        # Testcontainers, which polls readiness itself rather than relying on podman
+        # healthchecks. Scoped here to keep the extra apt source off the other six.
+        env:
+          # Pinned, not floating. An unpinned third-party source would drift the container
+          # runtime under the release gate without anyone choosing it; if this exact
+          # version is ever withdrawn the step fails loudly, which is the intended
+          # failure mode. Raise it deliberately, the same way the Trivy image is pinned.
+          PODMAN_VERSION: "100:6.1.0-1"
         run: |
+          set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y podman python3-venv python3-websocket jq
+          sudo apt-get install -y python3-venv python3-websocket jq curl gnupg
+          . /etc/os-release
+          repo="https://download.opensuse.org/repositories/home:/alvistack/xUbuntu_${VERSION_ID}"
+          sudo install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL "$repo/Release.key" \
+            | gpg --dearmor | sudo tee /etc/apt/keyrings/alvistack.gpg >/dev/null
+          echo "deb [signed-by=/etc/apt/keyrings/alvistack.gpg] $repo/ /" \
+            | sudo tee /etc/apt/sources.list.d/alvistack.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y "podman=$PODMAN_VERSION"
+          podman --version
           python3 -m venv "$RUNNER_TEMP/podman-compose"
           "$RUNNER_TEMP/podman-compose/bin/pip" install --disable-pip-version-check podman-compose==1.5.0
           echo "PODMAN_COMPOSE_PROVIDER=$RUNNER_TEMP/podman-compose/bin/podman-compose" >> "$GITHUB_ENV"
