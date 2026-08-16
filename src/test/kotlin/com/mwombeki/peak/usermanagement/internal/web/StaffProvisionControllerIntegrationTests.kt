@@ -354,21 +354,23 @@ class StaffProvisionControllerIntegrationTests {
             "INSERT INTO roles (id, tenant_id, name, is_system, is_active) VALUES (?, ?, 'Too strong', false, true)",
             fixture.strongRoleId, fixture.tenantId,
         )
-        val strongPermissionId = if (grantManageUsers) {
-            fixture.managePermissionId
-        } else {
-            jdbcTemplate.update(
-                """
-                INSERT INTO permissions (id, tenant_id, code, description)
-                VALUES (?, ?, 'tenant.users.manage', 'Strong on a property role')
-                """.trimIndent(),
-                fixture.strongPermissionId, fixture.tenantId,
-            )
-            fixture.strongPermissionId
-        }
+        // Property-scoped on purpose, and independent of grantManageUsers — that flag
+        // decides what the manager holds on their *tenant* role, not what may sit on a
+        // property role. Reusing tenant.users.manage here made V67 refuse the insert
+        // ("Dynamic property roles may contain only property-scoped permissions"), so
+        // the fixture died before any test reached the behaviour it was written for.
+        // checkout.fiscal_override is property-scoped and STRONG, which is the shape a
+        // PIN hire must not be given.
+        jdbcTemplate.update(
+            """
+            INSERT INTO permissions (id, tenant_id, code, description)
+            VALUES (?, ?, 'checkout.fiscal_override', 'Strong on a property role')
+            """.trimIndent(),
+            fixture.strongPermissionId, fixture.tenantId,
+        )
         jdbcTemplate.update(
             "INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)",
-            fixture.strongRoleId, strongPermissionId,
+            fixture.strongRoleId, fixture.strongPermissionId,
         )
         return fixture
     }
