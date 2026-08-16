@@ -10719,7 +10719,8 @@
               }
             }
           }
-        }
+        },
+        "security" : [ ]
       }
     },
     "/api/v1/staff/credentials/activate" : {
@@ -10792,7 +10793,8 @@
               }
             }
           }
-        }
+        },
+        "security" : [ ]
       }
     },
     "/api/v1/properties" : {
@@ -27551,7 +27553,8 @@
               }
             }
           }
-        }
+        },
+        "security" : [ ]
       }
     },
     "/api/v1/devices/pairing-requests" : {
@@ -27631,7 +27634,8 @@
               }
             }
           }
-        }
+        },
+        "security" : [ ]
       }
     },
     "/api/v1/devices/challenges" : {
@@ -27711,7 +27715,8 @@
               }
             }
           }
-        }
+        },
+        "security" : [ ]
       }
     },
     "/api/v1/communication/webhooks/beem/whatsapp/{transactionId}/{signature}" : {
@@ -34267,7 +34272,8 @@
               }
             }
           }
-        }
+        },
+        "security" : [ ]
       }
     },
     "/api/v1/communication/delivery-requests" : {

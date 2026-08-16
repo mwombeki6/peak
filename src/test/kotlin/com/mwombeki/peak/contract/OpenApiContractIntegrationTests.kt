@@ -207,10 +207,24 @@ class OpenApiContractIntegrationTests @Autowired constructor(
         val BUILD_CONTRACT: Path = Path.of("build/contracts/openapi-v1.json")
         val HTTP_METHODS = setOf("get", "post", "put", "patch", "delete", "head", "options")
 
+        /**
+         * Mirrors `OpenApiConfiguration.isAnonymousPath`, and both mirror the
+         * `public_token` rows in `module_access_matrix`.
+         *
+         * Webhooks were the whole list while they were the whole truth. Device pairing
+         * added five operations that answer an unauthenticated caller by design — a till
+         * has no credential until a manager approves it — and this guard kept asserting
+         * they publish bearer security, which is the opposite of what they do.
+         */
         fun isPublicWebhookPath(path: String): Boolean {
             return path.startsWith("/api/v1/payments/webhooks/") ||
                 path.startsWith("/api/v1/platform-billing/webhooks/") ||
-                path.startsWith("/api/v1/communication/webhooks/")
+                path.startsWith("/api/v1/communication/webhooks/") ||
+                path.startsWith("/api/v1/devices/pairing-requests") ||
+                path == "/api/v1/devices/challenges" ||
+                path == "/api/v1/staff/sessions" ||
+                path == "/api/v1/staff/credentials/activate" ||
+                path == "/api/v1/invitations/accept"
         }
     }
 }
