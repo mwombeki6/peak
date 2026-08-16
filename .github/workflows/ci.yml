@@ -299,6 +299,10 @@ jobs:
   acceptance:
     name: Adversarial real-hotel acceptance and load
     runs-on: ubuntu-latest
+    # The only job here that brings up a full stack, and so the only one that can hang
+    # rather than fail. It did, on the first run that ever reached it, for 65 minutes.
+    # The other long-running workflows already bound themselves this way.
+    timeout-minutes: 45
     needs: [unit-integration, operations, container-security]
     steps:
       - uses: actions/checkout@v6

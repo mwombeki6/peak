@@ -217,7 +217,24 @@ if [[ "$RESET" == "true" ]]; then
 fi
 
 "$ROOT_DIR/ops/scripts/validate-production-env.sh" "$ENV_FILE"
-"${compose[@]}" up -d postgres keycloak-db keycloak
+
+# keycloak declares `depends_on: keycloak-db: condition: service_healthy`, and
+# podman-compose waits on that with no deadline of its own. When the database never
+# reports healthy this command blocks forever rather than failing: on the first CI run
+# that reached it, it printed the postgres and keycloak-db container ids and then sat
+# silent for 65 minutes until the whole job was cancelled. A cancelled job is worse than
+# a failed one — it reports no error, uploads no evidence, and reads as an infrastructure
+# blip rather than a defect.
+#
+# The bound is generous because the images may still be pulling. The logs are what turns
+# the next occurrence into a diagnosis instead of a repeat of the same silence; the wait
+# below already reports its own timeout, so this only covers the compose call itself.
+if ! timeout 600 "${compose[@]}" up -d postgres keycloak-db keycloak; then
+  echo "Bringing up postgres, keycloak-db and keycloak failed or timed out." >&2
+  "${compose[@]}" ps >&2 || true
+  "${compose[@]}" logs --tail 100 postgres keycloak-db keycloak >&2 || true
+  exit 1
+fi
 wait_http "$KEYCLOAK_URL/realms/$PLATFORM_REALM/.well-known/openid-configuration"
 wait_http "$KEYCLOAK_URL/realms/$HOSPITALITY_REALM/.well-known/openid-configuration"
 
