@@ -1,6 +1,25 @@
 spring:
   application:
     name: peak
+  autoconfigure:
+    # Spring Modulith 2.1.0 observability wraps module beans and renders the invoked
+    # method for its trace span. That rendering throws NullPointerException
+    # (FormattableType.of on an unresolvable generic, DefaultObservedModule.render),
+    # and when it happens inside an @ExceptionHandler invocation Spring logs
+    # "Failure in @ExceptionHandler", abandons resolution, and rethrows the original
+    # exception. Every designed 4xx then left the container as a 500 carrying the raw
+    # message — including authorization refusals such as "Platform roles cannot include
+    # permissions the actor does not hold".
+    #
+    # It is not specific to controller-local handlers: a dedicated
+    # @RestControllerAdvice bean in the same module fails identically. Twenty-four
+    # integration tests across five controllers were red on this alone, unnoticed
+    # because CI has executed no steps since the account billing block.
+    #
+    # Actuator, Micrometer and the operational metrics below are unaffected; only
+    # per-module tracing spans are lost. Revisit when Modulith ships a fix.
+    exclude:
+      - org.springframework.modulith.observability.autoconfigure.ModuleObservabilityAutoConfiguration
   docker:
     compose:
       enabled: ${PEAK_DOCKER_COMPOSE_ENABLED:false}

@@ -10,6 +10,8 @@ import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
 import java.time.Instant
 import java.util.UUID
+import org.springframework.core.Ordered
+import org.springframework.core.annotation.Order
 import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
 import org.springframework.http.ResponseEntity
@@ -20,13 +22,13 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.bind.annotation.RestControllerAdvice
 
 @RestController
 @RequestMapping("/api/v1")
 class DevicePairingController(
     private val pairing: DevicePairingService,
     private val requestContextHolder: RequestContextHolder,
-    private val apiProblemFactory: ApiProblemFactory,
 ) {
     @PostMapping("/devices/pairing-requests")
     fun requestPairing(
@@ -88,42 +90,55 @@ class DevicePairingController(
         val actor = requestContextHolder.current().identity as RequestIdentity.Tenant
         pairing.revoke(tenantId, deviceId, actor.tenantUserId)
     }
+}
 
+/**
+ * Held outside the controller, like every other module's advice.
+ *
+ * Controller-local `@ExceptionHandler` methods on this bean were never reached: the Spring
+ * Modulith observability interceptor wraps the controller and renders the invoked method for
+ * its trace span, which threw NullPointerException before the handler ran. Spring logs the
+ * handler failure and rethrows the original exception, so a mistyped pairing code — the most
+ * ordinary error a manager can make — left the servlet container as a 500.
+ */
+// A controller-specific advice must outrank GlobalExceptionHandler, whose
+// @ExceptionHandler(Exception) catch-all otherwise turns every domain exception
+// it does not name explicitly into a 500. Both default to LOWEST_PRECEDENCE, and
+// the tie is broken arbitrarily.
+@Order(Ordered.HIGHEST_PRECEDENCE)
+@RestControllerAdvice(assignableTypes = [DevicePairingController::class])
+class DevicePairingExceptionAdvice(private val problems: ApiProblemFactory) {
     @ExceptionHandler(IllegalArgumentException::class)
-    fun handleInvalid(ex: IllegalArgumentException): ResponseEntity<ProblemDetail> {
-        return apiProblemFactory.response(
+    fun handleInvalid(ex: IllegalArgumentException): ResponseEntity<ProblemDetail> =
+        problems.response(
             HttpStatus.BAD_REQUEST,
             "Invalid pairing request",
             ex.message ?: "Pairing request is invalid",
         )
-    }
 
     @ExceptionHandler(IllegalStateException::class)
-    fun handleLocked(ex: IllegalStateException): ResponseEntity<ProblemDetail> {
-        return apiProblemFactory.response(
+    fun handleLocked(ex: IllegalStateException): ResponseEntity<ProblemDetail> =
+        problems.response(
             HttpStatus.CONFLICT,
             "Pairing locked",
             ex.message ?: "This pairing can no longer be approved",
         )
-    }
 
     @ExceptionHandler(PairingCreateThrottledException::class)
-    fun handleThrottled(ex: PairingCreateThrottledException): ResponseEntity<ProblemDetail> {
-        return apiProblemFactory.response(
+    fun handleThrottled(ex: PairingCreateThrottledException): ResponseEntity<ProblemDetail> =
+        problems.response(
             HttpStatus.TOO_MANY_REQUESTS,
             "Too many pairing requests",
             ex.message,
         )
-    }
 
     @ExceptionHandler(PairingStatusNotFoundException::class)
-    fun handleMissing(): ResponseEntity<ProblemDetail> {
-        return apiProblemFactory.response(
+    fun handleMissing(): ResponseEntity<ProblemDetail> =
+        problems.response(
             HttpStatus.NOT_FOUND,
             "Pairing request not found",
             "That pairing request is not waiting",
         )
-    }
 }
 
 internal class PairingStatusNotFoundException : RuntimeException()

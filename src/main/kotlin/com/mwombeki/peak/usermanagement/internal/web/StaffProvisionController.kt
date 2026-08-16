@@ -10,6 +10,8 @@ import jakarta.validation.constraints.NotNull
 import java.net.URI
 import java.time.Instant
 import java.util.UUID
+import org.springframework.core.Ordered
+import org.springframework.core.annotation.Order
 import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
 import org.springframework.http.ResponseEntity
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.bind.annotation.RestControllerAdvice
 
 @RestController
 @RequestMapping("/api/v1")
@@ -76,6 +79,26 @@ class StaffProvisionController(
         return ResponseEntity.ok().build()
     }
 
+}
+
+/**
+ * Held outside the controller.
+ *
+ * Controller-local `@ExceptionHandler` methods on a module bean are never reached: the
+ * Spring Modulith observability interceptor renders the invoked method for its trace
+ * span and throws NullPointerException first. Spring logs the handler failure and
+ * rethrows the original exception, so every designed 4xx left the container as a 500
+ * carrying the raw message.
+ */
+// A controller-specific advice must outrank GlobalExceptionHandler, whose
+// @ExceptionHandler(Exception) catch-all otherwise turns every domain exception
+// it does not name explicitly into a 500. Both default to LOWEST_PRECEDENCE, and
+// the tie is broken arbitrarily.
+@Order(Ordered.HIGHEST_PRECEDENCE)
+@RestControllerAdvice(assignableTypes = [StaffProvisionController::class])
+class StaffProvisionExceptionAdvice(
+    private val apiProblemFactory: ApiProblemFactory,
+) {
     @ExceptionHandler(StaffProvisionConflictException::class)
     fun handleConflict(ex: StaffProvisionConflictException): ResponseEntity<ProblemDetail> {
         return apiProblemFactory.response(HttpStatus.CONFLICT, "Staff provision conflict", ex.safeDetail())

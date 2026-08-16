@@ -14,6 +14,8 @@ import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.Size
 import java.util.UUID
+import org.springframework.core.Ordered
+import org.springframework.core.annotation.Order
 import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
 import org.springframework.http.ResponseEntity
@@ -65,6 +67,11 @@ class BreakGlassAccessController(private val access: BreakGlassAccessPort) {
     ) = access.revokeAccess(accessId, request.reason)
 }
 
+// A controller-specific advice must outrank GlobalExceptionHandler, whose
+// @ExceptionHandler(Exception) catch-all otherwise turns every domain exception
+// it does not name explicitly into a 500. Both default to LOWEST_PRECEDENCE, and
+// the tie is broken arbitrarily.
+@Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(assignableTypes = [BreakGlassAccessController::class])
 class BreakGlassExceptionAdvice(private val problems: ApiProblemFactory) {
     @ExceptionHandler(BreakGlassNotFoundException::class)
