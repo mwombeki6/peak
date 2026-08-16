@@ -47,6 +47,7 @@ currency_rates,deferred,dormant,no-runtime-writes
 departments,property,active,property::api-or-internal-owner
 device_key_history,usermanagement,active,usermanagement::api-or-internal-owner
 device_login_challenges,usermanagement,active,usermanagement::api-or-internal-owner
+device_pairing_approval_misses,usermanagement,active,usermanagement::api-or-internal-owner
 device_pairing_requests,usermanagement,active,usermanagement::api-or-internal-owner
 document_sequences,billing,active,billing::api-or-internal-owner
 edge_sync_events,deferred,dormant,no-runtime-writes
