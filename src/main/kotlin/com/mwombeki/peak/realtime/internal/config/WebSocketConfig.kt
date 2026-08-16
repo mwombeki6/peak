@@ -145,7 +145,9 @@ class WebSocketConfig(
                         ) {
                             recordDeniedSubscription(
                                 context = context,
-                                targetTenantId = identity.tenantIdOrUnknown(),
+                                targetTenantId = target.targetTenantIdOr(
+                                    identity.tenantIdOrUnknown(),
+                                ),
                                 targetPropertyId = target.propertyIdOrUnknown(),
                                 destination = destination,
                             )
@@ -208,6 +210,25 @@ class WebSocketConfig(
                 is RealtimeSubscriptionTarget.Payment,
                 null,
                 -> INVALID_PROPERTY_ID
+            }
+
+        /**
+         * The tenant the subscription was aimed at, which is the whole point of auditing
+         * a denial: the actor is already recorded as the row's tenant, so recording the
+         * actor again as the target makes a cross-tenant attempt indistinguishable from a
+         * same-tenant one. Only PropertyStream names a tenant in the destination; the
+         * others carry a property, outlet, order or payment, so there the caller's tenant
+         * is still the most truthful answer available without a lookup.
+         */
+        fun RealtimeSubscriptionTarget?.targetTenantIdOr(fallback: UUID): UUID =
+            when (this) {
+                is RealtimeSubscriptionTarget.PropertyStream -> tenantId
+                is RealtimeSubscriptionTarget.PropertyOperations,
+                is RealtimeSubscriptionTarget.Outlet,
+                is RealtimeSubscriptionTarget.Order,
+                is RealtimeSubscriptionTarget.Payment,
+                null,
+                -> fallback
             }
     }
 }
