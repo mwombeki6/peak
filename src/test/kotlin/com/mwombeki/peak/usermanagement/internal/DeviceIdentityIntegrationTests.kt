@@ -103,8 +103,14 @@ class DeviceIdentityIntegrationTests {
         )
     }
 
+    /**
+     * Guessing costs the hotel doing the guessing its own approval budget, so a correct
+     * code offered afterwards is still refused. V137 moved this budget off the waiting
+     * request — where it was global — and onto the approving tenant; see
+     * [DevicePairingControllerIntegrationTests] for the cross-tenant half.
+     */
     @Test
-    fun tooManyWrongPairingCodesLockTheWaitingTerminal() {
+    fun tooManyWrongPairingCodesLockTheApprovingHotel() {
         val hotel = seedHotel()
         val requested = pairing.requestPairing(publicKey(ed25519()))
 
@@ -127,7 +133,7 @@ class DeviceIdentityIntegrationTests {
                 actorId = hotel.managerId,
             )
         }
-        assertTrue(locked.message!!.contains("too many wrong codes"))
+        assertTrue(locked.message!!.contains("Too many wrong pairing codes"))
     }
 
     @Test

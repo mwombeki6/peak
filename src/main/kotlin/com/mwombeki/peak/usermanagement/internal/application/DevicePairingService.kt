@@ -24,6 +24,12 @@ data class DevicePairingProperties(
      * pairing their own terminal into someone's restaurant by working through the space.
      */
     val maxAttempts: Int = 5,
+    /**
+     * How long a rejected approval counts against the tenant that submitted it. A wrong
+     * code cannot be attributed to the pairing it was aimed at, so the budget is charged
+     * to the approving tenant rather than to every waiting terminal on the platform.
+     */
+    val approvalMissWindow: Duration = Duration.ofMinutes(5),
     /** Caps unauthenticated pairing creates per public key. No Redis; process-local. */
     val maxCreatesPerKey: Int = 5,
     val createWindow: Duration = Duration.ofMinutes(5),
@@ -133,7 +139,7 @@ class DevicePairingService(
         val row = transactionTemplate.execute {
             jdbcTemplate.query(
                 """
-                SELECT status, device_code, expires_at, attempts, terminal_name, mode
+                SELECT status, device_code, expires_at, terminal_name, mode
                 FROM lookup_device_pairing_status(?)
                 """.trimIndent(),
                 { rs, _ ->
@@ -141,7 +147,6 @@ class DevicePairingService(
                         status = rs.getString("status"),
                         deviceCode = rs.getString("device_code"),
                         expiresAt = rs.getTimestamp("expires_at").toInstant(),
-                        attempts = rs.getInt("attempts"),
                         terminalName = rs.getString("terminal_name"),
                         mode = rs.getString("mode"),
                     )
@@ -162,12 +167,13 @@ class DevicePairingService(
             return PairingStatus(status = "expired")
         }
 
-        val apiStatus = when {
-            row.status == "approved" -> "approved"
-            row.status == "abandoned" -> "denied"
-            row.status == "expired" -> "expired"
-            row.status == "pending" && row.attempts >= properties.maxAttempts -> "denied"
-            row.status == "pending" -> "pending"
+        // Nothing another tenant does can move a waiting request off "pending" now that
+        // wrong codes are charged to the tenant that submitted them (V137). Only this
+        // terminal's own expiry, or its own manager, changes what it is told here.
+        val apiStatus = when (row.status) {
+            "approved" -> "approved"
+            "expired" -> "expired"
+            "pending" -> "pending"
             else -> "denied"
         }
 
@@ -199,9 +205,21 @@ class DevicePairingService(
         val result = requireNotNull(
             transactionTemplate.execute {
                 databaseSessionContext.bind(RequestIdentity.Tenant(tenantId, actorId))
+
+                // Checked before the lookup so a tenant that has burned its budget cannot
+                // keep sampling the code space, and so the check costs nothing on the
+                // ordinary path where the manager types the code correctly.
+                if (recentMisses(tenantId) >= properties.maxAttempts) {
+                    return@execute ApprovalResult.Failure(
+                        IllegalStateException(
+                            "Too many wrong pairing codes from this hotel. Wait and try again.",
+                        ),
+                    )
+                }
+
                 val request = jdbcTemplate.query(
                     """
-                    SELECT id, device_code, public_key, key_fingerprint, attempts, expires_at
+                    SELECT id, device_code, public_key, key_fingerprint, expires_at
                     FROM lock_pending_device_pairing(?)
                     """.trimIndent(),
                     { rs, _ ->
@@ -210,7 +228,6 @@ class DevicePairingService(
                             deviceCode = rs.getString("device_code"),
                             publicKey = rs.getString("public_key"),
                             fingerprint = rs.getString("key_fingerprint"),
-                            attempts = rs.getInt("attempts"),
                             expiresAt = rs.getTimestamp("expires_at").toInstant(),
                         )
                     },
@@ -219,21 +236,17 @@ class DevicePairingService(
 
                 if (request == null) {
                     jdbcTemplate.queryForObject(
-                        "SELECT record_device_pairing_miss()",
+                        "SELECT record_device_pairing_miss(?, ?, make_interval(secs => ?))",
                         Int::class.java,
+                        tenantId,
+                        actorId,
+                        properties.approvalMissWindow.toSeconds().toDouble(),
                     )
                     return@execute ApprovalResult.Failure(
                         IllegalArgumentException("That pairing code is not waiting for approval"),
                     )
                 }
 
-                if (request.attempts >= properties.maxAttempts) {
-                    return@execute ApprovalResult.Failure(
-                        IllegalStateException(
-                            "This pairing has seen too many wrong codes. Restart pairing on the terminal.",
-                        ),
-                    )
-                }
                 if (!request.expiresAt.isAfter(clock.instant())) {
                     jdbcTemplate.queryForObject(
                         "SELECT mark_device_pairing_expired(?)",
@@ -335,6 +348,15 @@ class DevicePairingService(
         }
     }
 
+    /** Rejected approvals charged to [tenantId] inside the throttling window. */
+    private fun recentMisses(tenantId: UUID): Int =
+        jdbcTemplate.queryForObject(
+            "SELECT count_recent_device_pairing_misses(?, make_interval(secs => ?))",
+            Int::class.java,
+            tenantId,
+            properties.approvalMissWindow.toSeconds().toDouble(),
+        ) ?: 0
+
     private fun randomToken(bytes: Int): String {
         val buffer = ByteArray(bytes)
         random.nextBytes(buffer)
@@ -380,7 +402,6 @@ class DevicePairingService(
         val deviceCode: String,
         val publicKey: String,
         val fingerprint: String,
-        val attempts: Int,
         val expiresAt: Instant,
     )
 
@@ -388,7 +409,6 @@ class DevicePairingService(
         val status: String,
         val deviceCode: String,
         val expiresAt: Instant,
-        val attempts: Int,
         val terminalName: String?,
         val mode: String?,
     )

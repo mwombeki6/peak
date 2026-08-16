@@ -164,6 +164,82 @@ class DevicePairingControllerIntegrationTests {
             .andExpect(jsonPath("$.status").value("expired"))
     }
 
+    /**
+     * A wrong code carries no tenant, so the miss it records must not be charged to hotels
+     * that were never involved. Before V137 the counter had no tenant predicate, so one
+     * manager mistyping — or brute-forcing on purpose — locked every other hotel's waiting
+     * terminal. The budget now belongs to the tenant that submitted the wrong code.
+     */
+    @Test
+    fun wrongCodesInOneTenantDoNotLockAnotherTenantsWaitingTerminal() {
+        val victim = seedManager()
+        val other = seedManager()
+
+        val requested = requestPairing(newPublicKey())
+        val victimPairingId = readString(requested, "$.pairingRequestId")
+        val victimCode = readString(requested, "$.pairingCode")
+
+        repeat(MAX_PAIRING_ATTEMPTS) { attempt ->
+            submitPairingCode(other, wrongCodeOtherThan(victimCode, attempt))
+                .andExpect(status().isBadRequest)
+        }
+
+        // The sixth spends a budget that is now this tenant's own, not the platform's.
+        submitPairingCode(other, wrongCodeOtherThan(victimCode, MAX_PAIRING_ATTEMPTS))
+            .andExpect(status().isConflict)
+
+        mockMvc.perform(
+            get("/api/v1/devices/pairing-requests/$victimPairingId")
+                .secure(true)
+                .header(PeakRequestHeaders.CORRELATION_ID, "corr-pairing-poll-cross-tenant"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.status").value("pending"))
+
+        approve(victim, victimCode)
+    }
+
+    /** A mistyped pairing code is a client error, not a server fault. */
+    @Test
+    fun aWrongPairingCodeIsRejectedAsABadRequest() {
+        val fixture = seedManager()
+
+        submitPairingCode(fixture, "000000")
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.title").isString)
+    }
+
+    private fun submitPairingCode(
+        fixture: Fixture,
+        pairingCode: String,
+    ) = mockMvc.perform(
+        post("/api/v1/tenants/${fixture.tenantId}/devices/pairing-approvals")
+            .secure(true)
+            .contentType(MediaType.APPLICATION_JSON)
+            .header(PeakRequestHeaders.TENANT_ID, fixture.tenantId.toString())
+            .header(PeakRequestHeaders.TENANT_USER_ID, fixture.userId.toString())
+            .content(
+                """
+                {
+                  "pairingCode": "$pairingCode",
+                  "propertyId": "${fixture.propertyId}",
+                  "terminalName": "Till 1",
+                  "mode": "POS"
+                }
+                """.trimIndent(),
+            ),
+    )
+
+    /** Six digits that are guaranteed not to be [avoid], so the miss is a genuine miss. */
+    private fun wrongCodeOtherThan(avoid: String, seed: Int): String {
+        val candidate = (seed % 1_000_000).toString().padStart(6, '0')
+        return if (candidate == avoid) {
+            ((seed + 1) % 1_000_000).toString().padStart(6, '0')
+        } else {
+            candidate
+        }
+    }
+
     private fun requestPairing(publicKey: String): MvcResult {
         return mockMvc.perform(
             post("/api/v1/devices/pairing-requests")
@@ -278,4 +354,9 @@ class DevicePairingControllerIntegrationTests {
         val roleId: UUID,
         val permissionId: UUID,
     )
+
+    private companion object {
+        /** Mirrors `peak.security.device-pairing.max-attempts`. */
+        const val MAX_PAIRING_ATTEMPTS = 5
+    }
 }
