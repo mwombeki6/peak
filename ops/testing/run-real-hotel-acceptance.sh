@@ -142,7 +142,14 @@ compose=(
   -f "$COMPOSE_FILE"
   -f "$OVERLAY_FILE"
 )
-database_counts="$("${compose[@]}" exec -T postgres \
+# Two bounds, because this call hung the whole job and reported nothing.
+#
+# statement_timeout covers the likelier cause: these counts run immediately after chaos
+# recovery and a restore drill, and a transaction either left open would block them forever,
+# since PostgreSQL waits on a lock indefinitely by default. The outer timeout covers the rest,
+# because a wedged exec channel is not something the database can time out on our behalf.
+database_counts="$(timeout 120 "${compose[@]}" exec -T \
+  -e PGOPTIONS='-c statement_timeout=60000' postgres \
   psql -U "$POSTGRES_MIGRATOR_USER" -d "$POSTGRES_DB" -At -F '|' -c "
     SELECT
       (SELECT count(*) FROM audit_logs WHERE tenant_id = '$tenant_id'),

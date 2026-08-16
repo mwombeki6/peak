@@ -368,6 +368,13 @@ jobs:
             -e 's|^PEAK_REPORT_STORAGE_SECRET_KEY=.*|PEAK_REPORT_STORAGE_SECRET_KEY=acceptance-report-secret-key|' \
             "$RUNNER_TEMP/peak-acceptance.env"
       - name: Run multi-role adversarial hotel journey
+        # Bounded well under the job ceiling so a hang becomes a diagnosis instead of a
+        # cancellation. Three separate hangs have now been found in this stage, each in a
+        # different unguarded podman exec, and every one cost the full ninety minutes and
+        # printed nothing: the job could only ever report "cancelled", which says where it
+        # stopped and nothing about why. Failing at 45 leaves the evidence upload and the
+        # teardown below room to run and report what was actually stuck.
+        timeout-minutes: 45
         env:
           COMPOSE_PROJECT_NAME: peak-acceptance-ci
           ENV_FILE: ${{ runner.temp }}/peak-acceptance.env
