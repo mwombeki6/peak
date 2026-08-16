@@ -876,6 +876,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tenants/{tenantId}/staff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Provision
+         * @description Provision
+         */
+        post: operations["provision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tenants/{tenantId}/roles": {
         parameters: {
             query?: never;
@@ -1360,6 +1380,150 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tenants/{tenantId}/devices/{deviceId}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke
+         * @description Revoke
+         */
+        post: operations["revoke"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{tenantId}/devices/pairing-approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve
+         * @description Approve
+         */
+        post: operations["approve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{tenantId}/billing/renewal-offers/{offerId}/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decline Renewal Offer
+         * @description Decline Renewal Offer
+         */
+        post: operations["declineRenewalOffer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{tenantId}/billing/renewal-offers/{offerId}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept Renewal Offer
+         * @description Accept Renewal Offer
+         */
+        post: operations["acceptRenewalOffer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{tenantId}/billing/quotes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Quote
+         * @description Quote
+         */
+        post: operations["quote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{tenantId}/billing/purchases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Purchases
+         * @description Purchases
+         */
+        get: operations["purchases"];
+        put?: never;
+        /**
+         * Create Purchase
+         * @description Create Purchase
+         */
+        post: operations["createPurchase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{tenantId}/billing/purchases/{purchaseId}/payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pay
+         * @description Pay
+         */
+        post: operations["pay"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tenants/{tenantId}/administrators/{userId}/revoke": {
         parameters: {
             query?: never;
@@ -1394,6 +1558,46 @@ export interface paths {
          * @description Assign Tenant Administrator
          */
         post: operations["assignTenantAdministrator"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/staff/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Login
+         * @description Login
+         */
+        post: operations["login"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/staff/credentials/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Activate
+         * @description Activate
+         */
+        post: operations["activate"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1885,7 +2089,7 @@ export interface paths {
          * Approve
          * @description Approve
          */
-        post: operations["approve"];
+        post: operations["approve_1"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2103,7 +2307,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Menu Items
+         * @description List Menu Items
+         */
+        get: operations["listMenuItems"];
         put?: never;
         /**
          * Create Menu Item
@@ -2123,7 +2331,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Menu Categories
+         * @description List Menu Categories
+         */
+        get: operations["listMenuCategories"];
         put?: never;
         /**
          * Create Category
@@ -2258,6 +2470,86 @@ export interface paths {
          * @description Configure Provider
          */
         post: operations["configureProvider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/properties/{propertyId}/payments/provider-accounts/{providerAccountId}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify Provider
+         * @description Verify Provider
+         */
+        post: operations["verifyProvider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/properties/{propertyId}/payments/provider-accounts/{providerAccountId}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enable Provider
+         * @description Enable Provider
+         */
+        post: operations["enableProvider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/properties/{propertyId}/payments/provider-accounts/{providerAccountId}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Disable Provider
+         * @description Disable Provider
+         */
+        post: operations["disableProvider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/properties/{propertyId}/payments/provider-accounts/{providerAccountId}/certify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Certify Provider
+         * @description Certify Provider
+         */
+        post: operations["certifyProvider"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3176,6 +3468,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/properties/{propertyId}/guests/{guestId}/whatsapp-channel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register
+         * @description Register
+         */
+        post: operations["register"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/properties/{propertyId}/guests/{guestId}/identity-documents/{documentId}/revoke": {
         parameters: {
             query?: never;
@@ -3596,7 +3908,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/payments/webhooks/clickpesa/{providerAccountId}": {
+    "/api/v1/properties/bootstrap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bootstrap First Property
+         * @description Bootstrap First Property
+         */
+        post: operations["bootstrapFirstProperty"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform-billing/webhooks/{providerCode}": {
         parameters: {
             query?: never;
             header?: never;
@@ -3610,6 +3942,46 @@ export interface paths {
          * @description Receive
          */
         post: operations["receive_1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/webhooks/{providerCode}/accounts/{providerAccountId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Receive For Provider
+         * @description Receive For Provider
+         */
+        post: operations["receiveForProvider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/webhooks/clickpesa/{providerAccountId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Receive Click Pesa
+         * @description Receive Click Pesa
+         */
+        post: operations["receiveClickPesa"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3630,6 +4002,66 @@ export interface paths {
          * @description Accept Tenant User Invitation
          */
         post: operations["acceptTenantUserInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/devices/pairing-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Pairing
+         * @description Request Pairing
+         */
+        post: operations["requestPairing"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/devices/challenges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue Challenge
+         * @description Issue Challenge
+         */
+        post: operations["issueChallenge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/communication/webhooks/beem/whatsapp/{transactionId}/{signature}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Receive
+         * @description Receive
+         */
+        post: operations["receive_2"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4114,6 +4546,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tenants/{tenantId}/onboarding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Tenant Onboarding
+         * @description Get Tenant Onboarding
+         */
+        get: operations["getTenantOnboarding"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tenants/{tenantId}/commercial": {
         parameters: {
             query?: never;
@@ -4126,6 +4578,86 @@ export interface paths {
          * @description Overview
          */
         get: operations["overview_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{tenantId}/billing/renewal-offers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Renewal Offers
+         * @description Renewal Offers
+         */
+        get: operations["renewalOffers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{tenantId}/billing/receipts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Receipts
+         * @description Receipts
+         */
+        get: operations["receipts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{tenantId}/billing/purchases/{purchaseId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Purchase
+         * @description Purchase
+         */
+        get: operations["purchase"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{tenantId}/billing/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Catalog
+         * @description Catalog
+         */
+        get: operations["catalog_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4254,6 +4786,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/properties/{propertyId}/realtime/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Replay
+         * @description Replay
+         */
+        get: operations["replay"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/properties/{propertyId}/readiness": {
         parameters: {
             query?: never;
@@ -4266,6 +4818,26 @@ export interface paths {
          * @description Get Readiness Report
          */
         get: operations["getReadinessReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/properties/{propertyId}/pos/room-charge-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Candidates
+         * @description List Candidates
+         */
+        get: operations["listCandidates"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4386,6 +4958,26 @@ export interface paths {
          * @description Current Cash Session
          */
         get: operations["currentCashSession"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/properties/{propertyId}/onboarding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Onboarding
+         * @description Get Onboarding
+         */
+        get: operations["getOnboarding"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4714,6 +5306,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/devices/pairing-requests/{pairingRequestId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Pairing Status
+         * @description Pairing Status
+         */
+        get: operations["pairingStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/communication/delivery-requests": {
         parameters: {
             query?: never;
@@ -4794,6 +5406,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/staff/sessions/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Lock Current
+         * @description Lock Current
+         */
+        delete: operations["lockCurrent"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/properties/{propertyId}/reservations/{reservationId}/guests/{guestId}": {
         parameters: {
             query?: never;
@@ -4865,7 +5497,7 @@ export interface components {
             tenantId?: string;
             code?: string;
             name?: string;
-            description?: string;
+            description?: string | null;
             permissionCodes?: string[];
             scope?: string;
             active?: boolean;
@@ -4885,9 +5517,9 @@ export interface components {
             path?: string;
         };
         UpdateTenantRoleHttpRequest: {
-            name?: string;
-            description?: string;
-            permissionCodes?: string[];
+            name?: string | null;
+            description?: string | null;
+            permissionCodes?: string[] | null;
         };
         TenantRoleMutationHttpResponse: {
             /** Format: uuid */
@@ -4902,7 +5534,7 @@ export interface components {
             /** Format: uuid */
             tenantId?: string;
             /** Format: uuid */
-            propertyId?: string;
+            propertyId?: string | null;
             /** Format: int32 */
             retentionDays?: number;
             source?: string;
@@ -4914,7 +5546,7 @@ export interface components {
         UpdateReportSubscriptionRequest: {
             subscriptionName?: string;
             frequency?: string;
-            scheduleTime?: string;
+            scheduleTime?: string | null;
             timezone?: string;
             languageCode?: string;
         };
@@ -4924,7 +5556,7 @@ export interface components {
             /** Format: uuid */
             tenantId?: string;
             /** Format: uuid */
-            propertyId?: string;
+            propertyId?: string | null;
             reportCode?: string;
             subscriptionName?: string;
             frequency?: string;
@@ -4948,8 +5580,8 @@ export interface components {
             system?: boolean;
         };
         UpdatePropertyRoleHttpRequest: {
-            name?: string;
-            permissionCodes?: string[];
+            name?: string | null;
+            permissionCodes?: string[] | null;
         };
         PropertyRoleMutationHttpResponse: {
             /** Format: uuid */
@@ -4964,9 +5596,9 @@ export interface components {
         };
         UpdateOrganizationUnitHttpRequest: {
             /** Format: uuid */
-            parentId?: string;
-            name?: string;
-            status?: string;
+            parentId?: string | null;
+            name?: string | null;
+            status?: string | null;
             /** Format: int64 */
             expectedVersion?: number;
         };
@@ -4976,7 +5608,7 @@ export interface components {
             /** Format: uuid */
             tenantId?: string;
             /** Format: uuid */
-            parentId?: string;
+            parentId?: string | null;
             unitType?: string;
             code?: string;
             name?: string;
@@ -4992,14 +5624,14 @@ export interface components {
         UpsertIdentityConnectionHttpRequest: {
             name: string;
             protocol: string;
-            issuer?: string;
-            verifiedDomain?: string;
-            discoveryUrl?: string;
-            clientId?: string;
-            clientSecretRef?: string;
+            issuer?: string | null;
+            verifiedDomain?: string | null;
+            discoveryUrl?: string | null;
+            clientId?: string | null;
+            clientSecretRef?: string | null;
             scimEnabled?: boolean;
             /** Format: int64 */
-            expectedVersion?: number;
+            expectedVersion?: number | null;
         };
         IdentityConnectionSummary: {
             /** Format: uuid */
@@ -5008,17 +5640,17 @@ export interface components {
             tenantId?: string;
             name?: string;
             protocol?: string;
-            issuer?: string;
-            verifiedDomain?: string;
-            discoveryUrl?: string;
-            clientId?: string;
+            issuer?: string | null;
+            verifiedDomain?: string | null;
+            discoveryUrl?: string | null;
+            clientId?: string | null;
             hasClientSecret?: boolean;
             scimEnabled?: boolean;
             status?: string;
             /** Format: int64 */
             version?: number;
             /** Format: date-time */
-            verifiedAt?: string;
+            verifiedAt?: string | null;
         };
         PropertyResponse: {
             /** Format: uuid */
@@ -5026,8 +5658,8 @@ export interface components {
             /** Format: uuid */
             tenantId?: string;
             name?: string;
-            location?: string;
-            code?: string;
+            location?: string | null;
+            code?: string | null;
             type?: string;
             status?: string;
             /** Format: int32 */
@@ -5038,13 +5670,13 @@ export interface components {
             active?: boolean;
         };
         UpdatePropertyRequest: {
-            name?: string;
-            location?: string;
-            code?: string;
-            type?: string;
-            timezone?: string;
+            name?: string | null;
+            location?: string | null;
+            code?: string | null;
+            type?: string | null;
+            timezone?: string | null;
             /** Format: int32 */
-            businessDateOffset?: number;
+            businessDateOffset?: number | null;
         };
         PropertyMutationReceipt: {
             /** Format: uuid */
@@ -5062,18 +5694,18 @@ export interface components {
             roomTypeId?: string;
             roomNumber?: string;
             /** Format: int32 */
-            floorNumber?: number;
+            floorNumber?: number | null;
             status?: string;
             accessible?: boolean;
             smoking?: boolean;
         };
         UpdateRoomRequest: {
             /** Format: uuid */
-            roomTypeId?: string;
-            roomNumber?: string;
+            roomTypeId?: string | null;
+            roomNumber?: string | null;
             /** Format: int32 */
-            floorNumber?: number;
-            notes?: string;
+            floorNumber?: number | null;
+            notes?: string | null;
             accessible?: boolean;
             smoking?: boolean;
         };
@@ -5104,8 +5736,8 @@ export interface components {
             /** Format: uuid */
             propertyId?: string;
             name?: string;
-            code?: string;
-            description?: string;
+            code?: string | null;
+            description?: string | null;
             /** Format: double */
             basePrice?: number;
             /** Format: int32 */
@@ -5117,17 +5749,17 @@ export interface components {
             active?: boolean;
         };
         UpdateRoomTypeRequest: {
-            name?: string;
-            code?: string;
-            description?: string;
+            name?: string | null;
+            code?: string | null;
+            description?: string | null;
             /** Format: double */
-            basePrice?: number;
+            basePrice?: number | null;
             /** Format: int32 */
-            maxAdults?: number;
+            maxAdults?: number | null;
             /** Format: int32 */
-            maxChildren?: number;
+            maxChildren?: number | null;
             /** Format: int32 */
-            maxOccupancy?: number;
+            maxOccupancy?: number | null;
             active?: boolean;
         };
         RevenueCenterResponse: {
@@ -5144,11 +5776,11 @@ export interface components {
             roomsRevenue?: boolean;
         };
         UpdateRevenueCenterRequest: {
-            name?: string;
-            code?: string;
-            centerType?: string;
+            name?: string | null;
+            code?: string | null;
+            centerType?: string | null;
             /** Format: int32 */
-            displayOrder?: number;
+            displayOrder?: number | null;
             active?: boolean;
             roomsRevenue?: boolean;
         };
@@ -5165,9 +5797,9 @@ export interface components {
             /** @enum {string} */
             status?: "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED" | "PARTIALLY_RECEIVED" | "RECEIVED" | "CANCELLED";
             /** Format: uuid */
-            createdBy?: string;
+            createdBy?: string | null;
             /** Format: uuid */
-            approvedBy?: string;
+            approvedBy?: string | null;
             lines?: components["schemas"]["PurchaseOrderLineResponse"][];
             replayed?: boolean;
         };
@@ -5175,27 +5807,27 @@ export interface components {
             /** Format: uuid */
             supplierId: string;
             /** Format: date */
-            expectedDeliveryDate?: string;
+            expectedDeliveryDate?: string | null;
             lines: components["schemas"]["PurchaseOrderLineRequest"][];
         };
         SupplierResponse: {
             /** Format: uuid */
             id?: string;
             name?: string;
-            code?: string;
-            contactName?: string;
-            contactEmail?: string;
-            contactPhone?: string;
+            code?: string | null;
+            contactName?: string | null;
+            contactEmail?: string | null;
+            contactPhone?: string | null;
             active?: boolean;
             replayed?: boolean;
         };
         UpdateSupplierRequest: {
-            name?: string;
-            code?: string;
+            name?: string | null;
+            code?: string | null;
             /** Format: email */
-            contactEmail?: string;
-            contactPhone?: string;
-            active?: boolean;
+            contactEmail?: string | null;
+            contactPhone?: string | null;
+            active?: boolean | null;
         };
         RecipeResponse: {
             /** Format: uuid */
@@ -5216,32 +5848,32 @@ export interface components {
             name?: string;
             type?: string;
             /** Format: uuid */
-            outletId?: string;
+            outletId?: string | null;
             replayed?: boolean;
         };
         UpdateInventoryLocationRequest: {
-            name?: string;
-            type?: string;
+            name?: string | null;
+            type?: string | null;
             /** Format: uuid */
-            outletId?: string;
+            outletId?: string | null;
         };
         InventoryItemResponse: {
             /** Format: uuid */
             id?: string;
             name?: string;
-            sku?: string;
-            category?: string;
+            sku?: string | null;
+            category?: string | null;
             unit?: string;
             reorderLevel?: number;
             active?: boolean;
             replayed?: boolean;
         };
         UpdateInventoryItemRequest: {
-            name?: string;
-            sku?: string;
-            category?: string;
-            reorderLevel?: number;
-            active?: boolean;
+            name?: string | null;
+            sku?: string | null;
+            category?: string | null;
+            reorderLevel?: number | null;
+            active?: boolean | null;
         };
         HousekeepingSettingsResponse: {
             /** Format: uuid */
@@ -5270,16 +5902,16 @@ export interface components {
             buildingId?: string;
             /** Format: int32 */
             floorNumber?: number;
-            name?: string;
+            name?: string | null;
             /** Format: int32 */
             capacity?: number;
         };
         UpdateFloorRequest: {
             /** Format: int32 */
-            floorNumber?: number;
-            name?: string;
+            floorNumber?: number | null;
+            name?: string | null;
             /** Format: int32 */
-            capacity?: number;
+            capacity?: number | null;
         };
         DepartmentResponse: {
             /** Format: uuid */
@@ -5287,11 +5919,11 @@ export interface components {
             /** Format: uuid */
             propertyId?: string;
             name?: string;
-            code?: string;
+            code?: string | null;
         };
         UpdateDepartmentRequest: {
-            name?: string;
-            code?: string;
+            name?: string | null;
+            code?: string | null;
         };
         BuildingResponse: {
             /** Format: uuid */
@@ -5299,11 +5931,11 @@ export interface components {
             /** Format: uuid */
             propertyId?: string;
             name?: string;
-            description?: string;
+            description?: string | null;
         };
         UpdateBuildingRequest: {
-            name?: string;
-            description?: string;
+            name?: string | null;
+            description?: string | null;
         };
         TaxRateResponse: {
             /** Format: uuid */
@@ -5318,11 +5950,11 @@ export interface components {
             inclusive?: boolean;
         };
         UpdateTaxRateRequest: {
-            name?: string;
-            code?: string;
+            name?: string | null;
+            code?: string | null;
             /** Format: double */
-            rate?: number;
-            taxType?: string;
+            rate?: number | null;
+            taxType?: string | null;
             active?: boolean;
             compound?: boolean;
             inclusive?: boolean;
@@ -5337,14 +5969,14 @@ export interface components {
             status?: string;
             riskRating?: string;
             /** Format: uuid */
-            assignedPlatformUserId?: string;
+            assignedPlatformUserId?: string | null;
             /** Format: date-time */
-            submittedAt?: string;
+            submittedAt?: string | null;
             /** Format: date-time */
-            reviewedAt?: string;
+            reviewedAt?: string | null;
             /** Format: date-time */
-            expiresAt?: string;
-            rejectionReason?: string;
+            expiresAt?: string | null;
+            rejectionReason?: string | null;
             documents?: components["schemas"]["VerificationDocumentSummary"][];
             /** Format: date-time */
             createdAt?: string;
@@ -5357,14 +5989,14 @@ export interface components {
         };
         VerificationDocumentHttpRequest: {
             documentType: string;
-            documentNumberMasked?: string;
+            documentNumberMasked?: string | null;
             storageObjectKey: string;
             contentHash: string;
             mimeType: string;
             /** Format: date */
-            issuedAt?: string;
+            issuedAt?: string | null;
             /** Format: date */
-            expiresAt?: string;
+            expiresAt?: string | null;
         };
         VerificationDocumentSummary: {
             /** Format: uuid */
@@ -5372,16 +6004,16 @@ export interface components {
             /** Format: uuid */
             caseId?: string;
             documentType?: string;
-            documentNumberMasked?: string;
+            documentNumberMasked?: string | null;
             storageObjectKey?: string;
             contentHash?: string;
             mimeType?: string;
             /** Format: date */
-            issuedAt?: string;
+            issuedAt?: string | null;
             /** Format: date */
-            expiresAt?: string;
+            expiresAt?: string | null;
             status?: string;
-            rejectionReason?: string;
+            rejectionReason?: string | null;
         };
         TenantUserLifecycleHttpResponse: {
             /** Format: uuid */
@@ -5391,7 +6023,7 @@ export interface components {
             action?: string;
             status?: string;
             /** Format: date-time */
-            lockedUntil?: string;
+            lockedUntil?: string | null;
             changed?: boolean;
             replayed?: boolean;
             active?: boolean;
@@ -5415,7 +6047,7 @@ export interface components {
             /** Format: uuid */
             identityLinkId?: string;
             /** Format: date-time */
-            revokedAt?: string;
+            revokedAt?: string | null;
             changed?: boolean;
             replayed?: boolean;
         };
@@ -5424,12 +6056,12 @@ export interface components {
             email: string;
             /** Format: uuid */
             tenantRoleId: string;
-            fullName?: string;
+            fullName?: string | null;
             /** Format: int64 */
-            expiresInHours?: number;
+            expiresInHours?: number | null;
             metadata?: {
                 [key: string]: unknown;
-            };
+            } | null;
         };
         TenantUserInvitationHttpResponse: {
             /** Format: uuid */
@@ -5441,33 +6073,33 @@ export interface components {
             tenantRoleId?: string;
             /** Format: date-time */
             expiresAt?: string;
-            invitationToken?: string;
+            invitationToken?: string | null;
             replayed?: boolean;
         };
         SupportTicketSummary: {
             /** Format: uuid */
             ticketId?: string;
             /** Format: uuid */
-            tenantId?: string;
+            tenantId?: string | null;
             /** Format: uuid */
-            propertyId?: string;
+            propertyId?: string | null;
             ticketNumber?: string;
             subject?: string;
             priority?: string;
             status?: string;
             category?: string;
             /** Format: uuid */
-            assignedPlatformUserId?: string;
+            assignedPlatformUserId?: string | null;
             /** Format: date-time */
             openedAt?: string;
             /** Format: date-time */
-            resolvedAt?: string;
+            resolvedAt?: string | null;
             /** Format: date-time */
             updatedAt?: string;
         };
         OpenSupportTicketHttpRequest: {
             /** Format: uuid */
-            propertyId?: string;
+            propertyId?: string | null;
             subject: string;
             description: string;
             priority: string;
@@ -5478,7 +6110,7 @@ export interface components {
         };
         SupportTicketDetail: {
             ticket?: components["schemas"]["SupportTicketSummary"];
-            description?: string;
+            description?: string | null;
             notes?: components["schemas"]["SupportNoteSummary"][];
             timeline?: components["schemas"]["SupportEventSummary"][];
         };
@@ -5486,19 +6118,43 @@ export interface components {
             note: string;
             visibility: string;
         };
+        ProvisionStaffHttpRequest: {
+            fullName: string;
+            phoneNumber?: string | null;
+            /** Format: uuid */
+            propertyId: string;
+            /** Format: uuid */
+            propertyRoleId: string;
+        };
+        ProvisionStaffHttpResponse: {
+            /** Format: uuid */
+            userId?: string;
+            /** Format: uuid */
+            tenantId?: string;
+            staffNumber?: string;
+            phoneNumber?: string | null;
+            /** Format: uuid */
+            propertyId?: string;
+            /** Format: uuid */
+            propertyRoleId?: string;
+            activationSecret?: string | null;
+            /** Format: date-time */
+            activationExpiresAt?: string;
+            replayed?: boolean;
+        };
         CreateTenantRoleHttpRequest: {
             code: string;
             name: string;
-            description?: string;
+            description?: string | null;
             permissionCodes: string[];
         };
         CreateReportSubscriptionRequest: {
             reportCode?: string;
             subscriptionName?: string;
             /** Format: uuid */
-            propertyId?: string;
+            propertyId?: string | null;
             frequency?: string;
-            scheduleTime?: string;
+            scheduleTime?: string | null;
             timezone?: string;
             languageCode?: string;
         };
@@ -5526,7 +6182,7 @@ export interface components {
             /** Format: int32 */
             attemptCount?: number;
             /** Format: date-time */
-            linkExpiresAt?: string;
+            linkExpiresAt?: string | null;
             attempts?: components["schemas"]["ReportDeliveryAttemptResponse"][];
         };
         PropertyUserRoleAssignmentHttpResponse: {
@@ -5555,16 +6211,16 @@ export interface components {
             subjectReference?: string;
             status?: string;
             /** Format: uuid */
-            assignedPlatformUserId?: string;
+            assignedPlatformUserId?: string | null;
             /** Format: date-time */
             dueAt?: string;
             /** Format: date-time */
-            verifiedAt?: string;
+            verifiedAt?: string | null;
             /** Format: date-time */
-            completedAt?: string;
-            rejectionReason?: string;
-            exportObjectKey?: string;
-            exportContentHash?: string;
+            completedAt?: string | null;
+            rejectionReason?: string | null;
+            exportObjectKey?: string | null;
+            exportContentHash?: string | null;
             /** Format: date-time */
             createdAt?: string;
             /** Format: date-time */
@@ -5579,7 +6235,7 @@ export interface components {
         };
         CreateOrganizationUnitHttpRequest: {
             /** Format: uuid */
-            parentId?: string;
+            parentId?: string | null;
             unitType: string;
             code: string;
             name: string;
@@ -5606,7 +6262,7 @@ export interface components {
             targets: components["schemas"]["PortfolioRolloutTargetHttpRequest"][];
             canary?: boolean;
             /** Format: date-time */
-            scheduledAt?: string;
+            scheduledAt?: string | null;
         };
         PortfolioAssignmentSummary: {
             /** Format: uuid */
@@ -5618,20 +6274,20 @@ export interface components {
             /** Format: int32 */
             revision?: number;
             /** Format: uuid */
-            organizationUnitId?: string;
+            organizationUnitId?: string | null;
             /** Format: uuid */
-            propertyId?: string;
+            propertyId?: string | null;
             status?: string;
             overrides?: {
                 [key: string]: unknown;
             };
             /** Format: int32 */
-            previousRevision?: number;
+            previousRevision?: number | null;
             /** Format: date-time */
             scheduledAt?: string;
             /** Format: date-time */
-            appliedAt?: string;
-            errorDetail?: string;
+            appliedAt?: string | null;
+            errorDetail?: string | null;
         };
         AddPortfolioRevisionHttpRequest: {
             config: {
@@ -5646,7 +6302,7 @@ export interface components {
         };
         UpdatePortfolioRolloutHttpRequest: {
             status: string;
-            errorDetail?: string;
+            errorDetail?: string | null;
         };
         TenantModuleHttpResponse: {
             /** Format: uuid */
@@ -5668,10 +6324,116 @@ export interface components {
             changed?: boolean;
             replayed?: boolean;
         };
+        PairingApprovalHttpRequest: {
+            pairingCode: string;
+            /** Format: uuid */
+            propertyId?: string;
+            /** Format: uuid */
+            outletId?: string | null;
+            terminalName: string;
+            mode: string;
+        };
+        PairedDeviceHttpResponse: {
+            /** Format: uuid */
+            deviceId?: string;
+            deviceCode?: string;
+        };
+        PurchaseResponse: {
+            /** Format: uuid */
+            id?: string;
+            /** @enum {string} */
+            status?: "QUOTED" | "AWAITING_PAYMENT" | "PAID" | "FAILED" | "EXPIRED" | "CANCELLED";
+            currency?: string;
+            /** Format: int32 */
+            termMonths?: number;
+            totalAmount?: number;
+            /** Format: date-time */
+            periodStartsAt?: string;
+            /** Format: date-time */
+            periodEndsAt?: string;
+            /** Format: date-time */
+            quoteExpiresAt?: string;
+            lines?: components["schemas"]["QuoteLine"][];
+            replayed?: boolean;
+        };
+        QuoteRequest: {
+            lines?: components["schemas"]["QuoteLineRequest"][];
+            /** Format: int32 */
+            termMonths?: number;
+        };
+        Quote: {
+            lines?: components["schemas"]["QuoteLine"][];
+            /** Format: int32 */
+            termMonths?: number;
+            currency?: string;
+            totalAmount?: number;
+            /** Format: date-time */
+            periodStartsAt?: string;
+            /** Format: date-time */
+            periodEndsAt?: string;
+            /** Format: date-time */
+            expiresAt?: string;
+            paymentMethods?: components["schemas"]["PaymentMethodOption"][];
+        };
+        PayPurchaseRequest: {
+            payerMsisdn?: string | null;
+            channel?: string | null;
+            /** @enum {string} */
+            method?: "MOBILE_MONEY" | "BANK" | "CARD";
+        };
+        PaymentAttemptResponse: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            purchaseId?: string;
+            /** Format: int32 */
+            attemptNo?: number;
+            provider?: string;
+            /** @enum {string} */
+            method?: "MOBILE_MONEY" | "BANK" | "CARD";
+            /** @enum {string} */
+            status?: "CREATED" | "INITIATED" | "PENDING" | "CONFIRMED" | "FAILED" | "CANCELLED" | "EXPIRED" | "RECONCILIATION_REQUIRED";
+            internalReference?: string;
+            redirectUrl?: string | null;
+            replayed?: boolean;
+        };
+        StaffSessionHttpRequest: {
+            deviceCode: string;
+            /** Format: uuid */
+            challengeId: string;
+            signature: string;
+            staffNumber: string;
+            pin: string;
+        };
+        StaffSessionHttpResponse: {
+            token?: string;
+            /** Format: date-time */
+            expiresAt?: string;
+            sessionClass?: string;
+            /** Format: uuid */
+            deviceId?: string;
+            /** Format: uuid */
+            propertyId?: string;
+            /** Format: uuid */
+            tenantId?: string;
+            /** Format: uuid */
+            userId?: string;
+            /** Format: uuid */
+            outletId?: string | null;
+            mode?: string;
+            terminalName?: string;
+        };
+        ActivateStaffCredentialHttpRequest: {
+            /** Format: uuid */
+            tenantId: string;
+            staffNumber: string;
+            secret: string;
+            pin: string;
+        };
         CreatePropertyRequest: {
             name?: string;
-            location?: string;
-            code?: string;
+            location?: string | null;
+            code?: string | null;
             type?: string;
             timezone?: string;
             /** Format: int32 */
@@ -5688,9 +6450,9 @@ export interface components {
             /** Format: uuid */
             reservationId?: string;
             /** Format: uuid */
-            stayId?: string;
+            stayId?: string | null;
             /** Format: uuid */
-            folioId?: string;
+            folioId?: string | null;
             status?: string;
             changed?: boolean;
             replayed?: boolean;
@@ -5703,14 +6465,14 @@ export interface components {
             roomTypeId?: string;
             /** Format: int32 */
             floorNumber?: number;
-            notes?: string;
+            notes?: string | null;
             accessible?: boolean;
             smoking?: boolean;
         };
         CreateRoomTypeRequest: {
             name?: string;
             code?: string;
-            description?: string;
+            description?: string | null;
             /** Format: double */
             basePrice?: number;
             /** Format: int32 */
@@ -5718,7 +6480,7 @@ export interface components {
             /** Format: int32 */
             maxChildren?: number;
             /** Format: int32 */
-            maxOccupancy?: number;
+            maxOccupancy?: number | null;
         };
         CreateRevenueCenterRequest: {
             name?: string;
@@ -5746,12 +6508,12 @@ export interface components {
             /** Format: uuid */
             roomTypeId?: string;
             /** Format: uuid */
-            roomId?: string;
+            roomId?: string | null;
             ratePerNight?: number;
             totalAmount?: number;
             totalPaid?: number;
             /** Format: uuid */
-            folioId?: string;
+            folioId?: string | null;
         };
         CreateReservationRequest: {
             /** Format: uuid */
@@ -5759,7 +6521,7 @@ export interface components {
             /** Format: uuid */
             roomTypeId?: string;
             /** Format: uuid */
-            roomId?: string;
+            roomId?: string | null;
             /** Format: date */
             checkInDate?: string;
             /** Format: date */
@@ -5769,8 +6531,8 @@ export interface components {
             /** Format: int32 */
             children?: number;
             ratePerNight?: number;
-            specialRequests?: string;
-            internalNotes?: string;
+            specialRequests?: string | null;
+            internalNotes?: string | null;
         };
         ReservationMutationReceipt: {
             /** Format: uuid */
@@ -5779,7 +6541,7 @@ export interface components {
             propertyId?: string;
             status?: string;
             /** Format: uuid */
-            folioId?: string;
+            folioId?: string | null;
             changed?: boolean;
             replayed?: boolean;
         };
@@ -5791,7 +6553,7 @@ export interface components {
             /** @enum {string} */
             relationship?: "ADULT" | "CHILD" | "DEPENDENT";
             /** Format: uuid */
-            guardianGuestId?: string;
+            guardianGuestId?: string | null;
         };
         AddReservationGuestRequest: {
             /** Format: uuid */
@@ -5799,7 +6561,7 @@ export interface components {
             /** @enum {string} */
             relationship?: "ADULT" | "CHILD" | "DEPENDENT";
             /** Format: uuid */
-            guardianGuestId?: string;
+            guardianGuestId?: string | null;
             guardianAttestation?: boolean;
         };
         CancelReservationRequest: {
@@ -5808,7 +6570,7 @@ export interface components {
         };
         CreateReportRunRequest: {
             /** Format: date */
-            businessDate?: string;
+            businessDate?: string | null;
         };
         ReportRunResponse: {
             /** Format: uuid */
@@ -5816,16 +6578,16 @@ export interface components {
             /** Format: uuid */
             tenantId?: string;
             /** Format: uuid */
-            propertyId?: string;
+            propertyId?: string | null;
             reportCode?: string;
             /** Format: date */
-            businessDate?: string;
+            businessDate?: string | null;
             /** @enum {string} */
             state?: "QUEUED" | "RUNNING" | "GENERATED" | "FAILED" | "CANCELLED" | "SUPERSEDED";
-            contentHash?: string;
+            contentHash?: string | null;
             /** Format: date-time */
-            generatedAt?: string;
-            failureReason?: string;
+            generatedAt?: string | null;
+            failureReason?: string | null;
             /** Format: date-time */
             createdAt?: string;
         };
@@ -5840,7 +6602,7 @@ export interface components {
             reason: string;
         };
         CreatePurchaseReceiptRequest: {
-            supplierReference?: string;
+            supplierReference?: string | null;
             lines: components["schemas"]["PurchaseReceiptLineRequest"][];
         };
         PurchaseReceiptResponse: {
@@ -5862,11 +6624,11 @@ export interface components {
         };
         CreateSupplierRequest: {
             name: string;
-            code?: string;
-            contactName?: string;
+            code?: string | null;
+            contactName?: string | null;
             /** Format: email */
-            contactEmail?: string;
-            contactPhone?: string;
+            contactEmail?: string | null;
+            contactPhone?: string | null;
         };
         ApprovePosVarianceRequest: {
             reason: string;
@@ -5883,33 +6645,33 @@ export interface components {
             status?: string;
             openingFloat?: number;
             expectedCash?: number;
-            closingCash?: number;
-            variance?: number;
+            closingCash?: number | null;
+            variance?: number | null;
             /** Format: date-time */
             openedAt?: string;
             /** Format: date-time */
-            closedAt?: string;
+            closedAt?: string | null;
             /** Format: uuid */
-            closedBy?: string;
+            closedBy?: string | null;
             /** Format: uuid */
-            varianceApprovedBy?: string;
+            varianceApprovedBy?: string | null;
             replayed?: boolean;
         };
         ClosePosSessionRequest: {
             actualCash?: number;
-            notes?: string;
+            notes?: string | null;
         };
         OpenPosSessionRequest: {
             /** Format: uuid */
             outletId: string;
             openingFloat?: number;
-            notes?: string;
+            notes?: string | null;
         };
         CreatePosOrderRequest: {
             /** Format: uuid */
             sessionId: string;
             orderType: string;
-            tableNumber?: string;
+            tableNumber?: string | null;
             clientOperationId: string;
         };
         PosOrderResponse: {
@@ -5923,31 +6685,36 @@ export interface components {
             sessionId?: string;
             orderNumber?: string;
             orderType?: string;
-            tableNumber?: string;
+            tableNumber?: string | null;
             status?: string;
             settlementStatus?: string;
-            settlementMethod?: string;
+            settlementMethod?: string | null;
             /** Format: uuid */
-            folioId?: string;
+            folioId?: string | null;
             /** Format: uuid */
-            paymentTransactionId?: string;
+            paymentTransactionId?: string | null;
             subtotal?: number;
             taxAmount?: number;
             totalAmount?: number;
             /** Format: date-time */
             createdAt?: string;
             /** Format: date-time */
-            settledAt?: string;
+            settledAt?: string | null;
+            /** Format: uuid */
+            servedBy?: string | null;
             items?: components["schemas"]["PosOrderItemResponse"][];
             replayed?: boolean;
         };
         SettlePosOrderRequest: {
             paymentMethod: string;
             /** Format: uuid */
-            folioId?: string;
+            folioId?: string | null;
             /** Format: uuid */
-            providerAccountId?: string;
-            phoneNumber?: string;
+            stayId?: string | null;
+            roomNumber?: string | null;
+            /** Format: uuid */
+            providerAccountId?: string | null;
+            phoneNumber?: string | null;
         };
         SendPosOrderRequest: {
             clientOperationId: string;
@@ -5967,9 +6734,9 @@ export interface components {
             /** Format: date-time */
             sentAt?: string;
             /** Format: date-time */
-            readyAt?: string;
+            readyAt?: string | null;
             /** Format: date-time */
-            deliveredAt?: string;
+            deliveredAt?: string | null;
             items?: components["schemas"]["KitchenTicketItemResponse"][];
             replayed?: boolean;
         };
@@ -5978,12 +6745,12 @@ export interface components {
             menuItemId: string;
             quantity?: number;
             modifiers?: string[];
-            specialRequest?: string;
+            specialRequest?: string | null;
             clientOperationId: string;
         };
         VoidPosOrderItemRequest: {
-            /** @enum {string} */
-            disposition?: "RETURN_TO_STOCK" | "WASTE";
+            /** @enum {string|null} */
+            disposition?: "RETURN_TO_STOCK" | "WASTE" | null;
             reason: string;
         };
         PosItemVoidResponse: {
@@ -5993,7 +6760,7 @@ export interface components {
             itemId?: string;
             disposition?: string;
             /** Format: uuid */
-            returnBatchId?: string;
+            returnBatchId?: string | null;
             replayed?: boolean;
         };
         CreatePosOutletRequest: {
@@ -6010,6 +6777,17 @@ export interface components {
             resourceType?: string;
             replayed?: boolean;
         };
+        PosMenuItemResponse: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            categoryId?: string;
+            name?: string;
+            price?: number;
+            /** Format: uuid */
+            taxRateId?: string | null;
+            available?: boolean;
+        };
         CreatePosMenuItemRequest: {
             /** Format: uuid */
             categoryId: string;
@@ -6018,6 +6796,13 @@ export interface components {
             name: string;
             price?: number;
         };
+        PosMenuCategoryResponse: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            outletId?: string;
+            name?: string;
+        };
         CreatePosMenuCategoryRequest: {
             /** Format: uuid */
             outletId: string;
@@ -6025,9 +6810,9 @@ export interface components {
         };
         ReversePaymentRequest: {
             reason?: string;
-            externalReference?: string;
+            externalReference?: string | null;
             /** Format: uuid */
-            cashSessionId?: string;
+            cashSessionId?: string | null;
         };
         PaymentTransactionResponse: {
             /** Format: uuid */
@@ -6035,13 +6820,13 @@ export interface components {
             /** Format: uuid */
             propertyId?: string;
             /** Format: uuid */
-            folioId?: string;
+            folioId?: string | null;
             /** Format: uuid */
-            posOrderId?: string;
+            posOrderId?: string | null;
             /** Format: uuid */
-            providerAccountId?: string;
+            providerAccountId?: string | null;
             transactionType?: string;
-            providerReference?: string;
+            providerReference?: string | null;
             internalReference?: string;
             amount?: number;
             feeAmount?: number;
@@ -6051,26 +6836,26 @@ export interface components {
             /** Format: date-time */
             initiatedAt?: string;
             /** Format: date-time */
-            postedAt?: string;
+            postedAt?: string | null;
             /** Format: date-time */
-            confirmedAt?: string;
+            confirmedAt?: string | null;
             /** Format: date-time */
-            failedAt?: string;
+            failedAt?: string | null;
             /** Format: date-time */
-            expiresAt?: string;
+            expiresAt?: string | null;
             refundedAmount?: number;
             /** Format: uuid */
-            refundOfTransactionId?: string;
+            refundOfTransactionId?: string | null;
             /** Format: uuid */
-            reversalOfTransactionId?: string;
+            reversalOfTransactionId?: string | null;
             replayed?: boolean;
         };
         RefundPaymentRequest: {
             amount?: number;
             reason?: string;
             /** Format: uuid */
-            cashSessionId?: string;
-            providerEvidence?: string;
+            cashSessionId?: string | null;
+            providerEvidence?: string | null;
         };
         PaymentReconciliationResponse: {
             /** Format: uuid */
@@ -6096,7 +6881,7 @@ export interface components {
             statementReference?: string;
             openingBalance?: number;
             items?: components["schemas"]["ReconciliationItemRequest"][];
-            notes?: string;
+            notes?: string | null;
         };
         ImportPaymentReconciliationRequest: {
             /** Format: uuid */
@@ -6123,12 +6908,15 @@ export interface components {
             providerCode?: string;
             providerName?: string;
             accountName?: string;
-            merchantId?: string;
-            clientId?: string;
-            walletNumber?: string;
+            merchantId?: string | null;
+            clientId?: string | null;
+            walletNumber?: string | null;
             environment?: string;
             /** Format: date-time */
-            sandboxCertifiedAt?: string;
+            sandboxCertifiedAt?: string | null;
+            sandboxEvidenceRef?: string | null;
+            lifecycleStatus?: string;
+            eligibleForCollection?: boolean;
             replayed?: boolean;
             default?: boolean;
             active?: boolean;
@@ -6137,19 +6925,24 @@ export interface components {
             providerCode?: string;
             providerName?: string;
             accountName?: string;
-            endpointUrl?: string;
-            merchantId?: string;
-            clientId?: string;
-            walletNumber?: string;
-            secretRef?: string;
-            webhookSecretRef?: string;
-            apiKeySecretRef?: string;
-            checksumKeySecretRef?: string;
+            endpointUrl?: string | null;
+            merchantId?: string | null;
+            clientId?: string | null;
+            walletNumber?: string | null;
+            secretRef?: string | null;
+            webhookSecretRef?: string | null;
+            apiKeySecretRef?: string | null;
+            checksumKeySecretRef?: string | null;
             environment?: string;
+            /** Format: date-time */
+            sandboxCertifiedAt?: string | null;
+            sandboxEvidenceRef?: string | null;
+            default?: boolean;
+        };
+        CertifyPaymentProviderRequest: {
             /** Format: date-time */
             sandboxCertifiedAt?: string;
             sandboxEvidenceRef?: string;
-            default?: boolean;
         };
         InitiateMobileMoneyRequest: {
             /** Format: uuid */
@@ -6158,6 +6951,7 @@ export interface components {
             providerAccountId?: string;
             phoneNumber?: string;
             amount?: number;
+            mobileNetwork?: string | null;
         };
         RecordManualMobileMoneyPaymentRequest: {
             /** Format: uuid */
@@ -6165,9 +6959,9 @@ export interface components {
             /** Format: uuid */
             providerAccountId?: string;
             referenceNumber?: string;
-            phoneNumber?: string;
+            phoneNumber?: string | null;
             amount?: number;
-            notes?: string;
+            notes?: string | null;
         };
         CollectCashPaymentRequest: {
             /** Format: uuid */
@@ -6175,11 +6969,11 @@ export interface components {
             /** Format: uuid */
             cashSessionId?: string;
             amount?: number;
-            notes?: string;
+            notes?: string | null;
         };
         OpenCashSessionRequest: {
             openingFloat?: number;
-            notes?: string;
+            notes?: string | null;
         };
         CashSessionResponse: {
             /** Format: uuid */
@@ -6191,17 +6985,17 @@ export interface components {
             status?: string;
             openingFloat?: number;
             expectedCash?: number;
-            actualCash?: number;
-            variance?: number;
+            actualCash?: number | null;
+            variance?: number | null;
             /** Format: date-time */
             openedAt?: string;
             /** Format: date-time */
-            closedAt?: string;
+            closedAt?: string | null;
             replayed?: boolean;
         };
         CloseCashSessionRequest: {
             actualCash?: number;
-            notes?: string;
+            notes?: string | null;
         };
         NightAuditRunResponse: {
             /** Format: uuid */
@@ -6216,11 +7010,11 @@ export interface components {
             attemptNo?: number;
             status?: string;
             /** Format: date-time */
-            startedAt?: string;
+            startedAt?: string | null;
             /** Format: date-time */
-            completedAt?: string;
+            completedAt?: string | null;
             /** Format: uuid */
-            runBy?: string;
+            runBy?: string | null;
             summary?: {
                 [key: string]: unknown;
             };
@@ -6229,7 +7023,7 @@ export interface components {
         };
         RunNightAuditRequest: {
             /** Format: date */
-            auditDate?: string;
+            auditDate?: string | null;
         };
         OverrideNightAuditIssueRequest: {
             reason?: string;
@@ -6251,31 +7045,31 @@ export interface components {
             /** Format: uuid */
             propertyId?: string;
             /** Format: uuid */
-            requestId?: string;
+            requestId?: string | null;
             /** Format: uuid */
-            roomId?: string;
+            roomId?: string | null;
             /** Format: uuid */
-            assignedTo?: string;
+            assignedTo?: string | null;
             title?: string;
             priority?: string;
             category?: string;
             /** @enum {string} */
             status?: "OPEN" | "ASSIGNED" | "IN_PROGRESS" | "ON_HOLD" | "AWAITING_VERIFICATION" | "VERIFIED" | "CANCELLED";
             /** Format: date-time */
-            startedAt?: string;
+            startedAt?: string | null;
             /** Format: date-time */
-            completedAt?: string;
+            completedAt?: string | null;
             /** Format: uuid */
-            verifiedBy?: string;
+            verifiedBy?: string | null;
             replayed?: boolean;
         };
         CreateWorkOrderRequest: {
             /** Format: uuid */
-            requestId?: string;
+            requestId?: string | null;
             /** Format: uuid */
-            roomId?: string;
+            roomId?: string | null;
             title: string;
-            description?: string;
+            description?: string | null;
             priority: string;
             category: string;
         };
@@ -6288,7 +7082,7 @@ export interface components {
         };
         CreateRoomBlockRequest: {
             /** Format: uuid */
-            workOrderId?: string;
+            workOrderId?: string | null;
             /** @enum {string} */
             type: "OUT_OF_SERVICE" | "OUT_OF_ORDER";
             reason: string;
@@ -6301,7 +7095,7 @@ export interface components {
             /** Format: uuid */
             roomId?: string;
             /** Format: uuid */
-            workOrderId?: string;
+            workOrderId?: string | null;
             /** @enum {string} */
             type?: "OUT_OF_SERVICE" | "OUT_OF_ORDER";
             /** @enum {string} */
@@ -6310,7 +7104,7 @@ export interface components {
             /** Format: date-time */
             blockedAt?: string;
             /** Format: date-time */
-            releasedAt?: string;
+            releasedAt?: string | null;
             replayed?: boolean;
         };
         MaintenanceRequestResponse: {
@@ -6320,7 +7114,7 @@ export interface components {
             propertyId?: string;
             /** Format: uuid */
             roomId?: string;
-            category?: string;
+            category?: string | null;
             description?: string;
             /** @enum {string} */
             priority?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
@@ -6344,26 +7138,26 @@ export interface components {
             /** Format: uuid */
             propertyId?: string;
             /** Format: uuid */
-            roomId?: string;
+            roomId?: string | null;
             description?: string;
-            storageLocation?: string;
+            storageLocation?: string | null;
             /** @enum {string} */
             status?: "HELD" | "CLAIMED" | "RETURNED" | "DISPOSED" | "DONATED";
             /** Format: date-time */
             foundAt?: string;
             /** Format: date-time */
-            claimedAt?: string;
+            claimedAt?: string | null;
             replayed?: boolean;
         };
         CreateLostAndFoundRequest: {
             /** Format: uuid */
-            roomId?: string;
+            roomId?: string | null;
             description: string;
             storageLocation: string;
         };
         LostAndFoundTransitionRequest: {
             reason: string;
-            claimantDetails?: string;
+            claimantDetails?: string | null;
         };
         KitchenTicketReasonRequest: {
             reason: string;
@@ -6377,8 +7171,8 @@ export interface components {
             /** Format: uuid */
             folioId?: string;
             /** Format: uuid */
-            propertyId?: string;
-            invoiceNumber?: string;
+            propertyId?: string | null;
+            invoiceNumber?: string | null;
             subtotal?: number;
             vatTotal?: number;
             serviceCharge?: number;
@@ -6386,7 +7180,7 @@ export interface components {
             total?: number;
             status?: string;
             /** Format: date-time */
-            issuedAt?: string;
+            issuedAt?: string | null;
         };
         CreateCreditNoteRequest: {
             reason?: string;
@@ -6407,12 +7201,12 @@ export interface components {
             status?: string;
             fiscalStatus?: string;
             /** Format: date-time */
-            issuedAt?: string;
+            issuedAt?: string | null;
             replayed?: boolean;
         };
         StockCommandRequest: {
             lines: components["schemas"]["StockCommandLine"][];
-            reason?: string;
+            reason?: string | null;
         };
         InventoryCommandResponse: {
             /** Format: uuid */
@@ -6431,12 +7225,12 @@ export interface components {
             name: string;
             type: string;
             /** Format: uuid */
-            outletId?: string;
+            outletId?: string | null;
         };
         CreateInventoryItemRequest: {
             name: string;
-            sku?: string;
-            category?: string;
+            sku?: string | null;
+            category?: string | null;
             unit: string;
             reorderLevel?: number;
         };
@@ -6453,7 +7247,7 @@ export interface components {
             scheduledDate?: string;
             /** Format: int32 */
             priority?: number;
-            notes?: string;
+            notes?: string | null;
         };
         HousekeepingTaskResponse: {
             /** Format: uuid */
@@ -6463,7 +7257,7 @@ export interface components {
             /** Format: uuid */
             roomId?: string;
             /** Format: uuid */
-            sourceStayId?: string;
+            sourceStayId?: string | null;
             /** @enum {string} */
             type?: "STAYOVER_CLEAN" | "DEPARTURE_CLEAN" | "DEEP_CLEAN" | "TURNDOWN";
             /** @enum {string} */
@@ -6473,16 +7267,16 @@ export interface components {
             /** Format: date */
             scheduledDate?: string;
             /** Format: uuid */
-            assignedTo?: string;
+            assignedTo?: string | null;
             /** Format: date-time */
-            startedAt?: string;
+            startedAt?: string | null;
             /** Format: date-time */
-            completedAt?: string;
+            completedAt?: string | null;
             /** Format: uuid */
-            completedBy?: string;
+            completedBy?: string | null;
             /** Format: uuid */
-            inspectedBy?: string;
-            notes?: string;
+            inspectedBy?: string | null;
+            notes?: string | null;
             replayed?: boolean;
         };
         HousekeepingReasonRequest: {
@@ -6490,10 +7284,10 @@ export interface components {
         };
         InspectHousekeepingTaskRequest: {
             passed?: boolean;
-            notes?: string;
+            notes?: string | null;
         };
         CompleteHousekeepingTaskRequest: {
-            notes?: string;
+            notes?: string | null;
         };
         AssignHousekeepingTaskRequest: {
             /** Format: uuid */
@@ -6505,26 +7299,40 @@ export interface components {
             /** Format: uuid */
             tenantId?: string;
             fullName?: string;
-            firstName?: string;
-            lastName?: string;
-            email?: string;
-            phonePrimary?: string;
+            firstName?: string | null;
+            lastName?: string | null;
+            email?: string | null;
+            phonePrimary?: string | null;
             /** Format: date */
-            dateOfBirth?: string;
-            nationality?: string;
+            dateOfBirth?: string | null;
+            nationality?: string | null;
             vipLevel?: string;
             blacklisted?: boolean;
         };
         CreateGuestRequest: {
-            fullName?: string;
-            firstName?: string;
-            lastName?: string;
-            email?: string;
-            phonePrimary?: string;
+            fullName?: string | null;
+            firstName?: string | null;
+            lastName?: string | null;
+            email?: string | null;
+            phonePrimary?: string | null;
             /** Format: date */
-            dateOfBirth?: string;
-            nationality?: string;
-            notes?: string;
+            dateOfBirth?: string | null;
+            nationality?: string | null;
+            notes?: string | null;
+        };
+        RegisterGuestWhatsAppRequest: {
+            whatsapp?: string;
+            policyVersion?: string;
+            purposes?: string[];
+        };
+        GuestWhatsAppChannelReceipt: {
+            /** Format: uuid */
+            guestId?: string;
+            /** Format: uuid */
+            contactId?: string;
+            /** Format: uuid */
+            channelId?: string;
+            replayed?: boolean;
         };
         RevokeGuestIdentityRequest: {
             reason?: string;
@@ -6537,39 +7345,39 @@ export interface components {
             /** @enum {string} */
             documentType?: "NIDA" | "PASSPORT" | "DRIVING_LICENCE" | "VOTER_ID" | "RESIDENCE_PERMIT" | "BIRTH_CERTIFICATE" | "OTHER_RECOGNISED";
             maskedDocumentNumber?: string;
-            issuingCountry?: string;
-            issuingAuthority?: string;
+            issuingCountry?: string | null;
+            issuingAuthority?: string | null;
             /** Format: date */
-            issuedAt?: string;
+            issuedAt?: string | null;
             /** Format: date */
-            expiresAt?: string;
+            expiresAt?: string | null;
             /** @enum {string} */
             verificationStatus?: "UNVERIFIED" | "PENDING" | "VERIFIED" | "FAILED" | "EXPIRED" | "REVOKED" | "LEGACY_UNVERIFIED";
-            verificationMethod?: string;
-            verificationProvider?: string;
+            verificationMethod?: string | null;
+            verificationProvider?: string | null;
             /** Format: date-time */
-            verifiedAt?: string;
+            verifiedAt?: string | null;
             /** Format: date-time */
-            verificationExpiresAt?: string;
+            verificationExpiresAt?: string | null;
             /** Format: date-time */
-            revokedAt?: string;
+            revokedAt?: string | null;
         };
         VerifyGuestIdentityRequest: {
             /** @enum {string} */
             documentType?: "NIDA" | "PASSPORT" | "DRIVING_LICENCE" | "VOTER_ID" | "RESIDENCE_PERMIT" | "BIRTH_CERTIFICATE" | "OTHER_RECOGNISED";
             documentNumber?: string;
-            issuingCountry?: string;
-            issuingAuthority?: string;
+            issuingCountry?: string | null;
+            issuingAuthority?: string | null;
             /** Format: date */
-            issuedAt?: string;
+            issuedAt?: string | null;
             /** Format: date */
-            expiresAt?: string;
+            expiresAt?: string | null;
         };
         GuestIdentityVerificationReceipt: {
             /** Format: uuid */
             attemptId?: string;
             document?: components["schemas"]["GuestIdentityDocumentResponse"];
-            failureCode?: string;
+            failureCode?: string | null;
             changed?: boolean;
             replayed?: boolean;
         };
@@ -6577,12 +7385,12 @@ export interface components {
             /** @enum {string} */
             documentType?: "NIDA" | "PASSPORT" | "DRIVING_LICENCE" | "VOTER_ID" | "RESIDENCE_PERMIT" | "BIRTH_CERTIFICATE" | "OTHER_RECOGNISED";
             documentNumber?: string;
-            issuingCountry?: string;
-            issuingAuthority?: string;
+            issuingCountry?: string | null;
+            issuingAuthority?: string | null;
             /** Format: date */
-            issuedAt?: string;
+            issuedAt?: string | null;
             /** Format: date */
-            expiresAt?: string;
+            expiresAt?: string | null;
             attestationReason?: string;
         };
         IssueInvoiceRequest: {
@@ -6593,13 +7401,13 @@ export interface components {
             chargeType?: string;
             description?: string;
             /** Format: uuid */
-            revenueCenterId?: string;
+            revenueCenterId?: string | null;
             quantity?: number;
             unitPrice?: number;
-            taxRate?: number;
-            sourceType?: string;
+            taxRate?: number | null;
+            sourceType?: string | null;
             /** Format: uuid */
-            sourceId?: string;
+            sourceId?: string | null;
         };
         BillingMutationReceipt: {
             /** Format: uuid */
@@ -6620,7 +7428,7 @@ export interface components {
             buildingId?: string;
             /** Format: int32 */
             floorNumber?: number;
-            name?: string;
+            name?: string | null;
             /** Format: int32 */
             capacity?: number;
         };
@@ -6633,9 +7441,9 @@ export interface components {
             invoiceId?: string;
             fiscalMode?: string;
             receiptNumber?: string;
-            fiscalCode?: string;
-            verificationCode?: string;
-            qrCodeUrl?: string;
+            fiscalCode?: string | null;
+            verificationCode?: string | null;
+            qrCodeUrl?: string | null;
             status?: string;
             /** Format: date-time */
             submittedAt?: string;
@@ -6650,11 +7458,11 @@ export interface components {
             providerName?: string;
             environment?: string;
             endpointUrl?: string;
-            deviceSerial?: string;
-            branchCode?: string;
+            deviceSerial?: string | null;
+            branchCode?: string | null;
             taxpayerIdentifier?: string;
             /** Format: date-time */
-            sandboxCertifiedAt?: string;
+            sandboxCertifiedAt?: string | null;
             replayed?: boolean;
             default?: boolean;
             active?: boolean;
@@ -6666,12 +7474,12 @@ export interface components {
             environment?: string;
             endpointUrl?: string;
             secretRef?: string;
-            deviceSerial?: string;
-            branchCode?: string;
+            deviceSerial?: string | null;
+            branchCode?: string | null;
             taxpayerIdentifier?: string;
             /** Format: date-time */
-            sandboxCertifiedAt?: string;
-            sandboxEvidenceRef?: string;
+            sandboxCertifiedAt?: string | null;
+            sandboxEvidenceRef?: string | null;
             default?: boolean;
         };
         ResolveFinancialControlCaseRequest: {
@@ -6702,23 +7510,23 @@ export interface components {
             currency?: string;
             /** Format: int32 */
             quantity?: number;
-            amountAtRisk?: number;
+            amountAtRisk?: number | null;
             /** Format: uuid */
-            assignedTo?: string;
+            assignedTo?: string | null;
             /** Format: uuid */
-            assignedBy?: string;
+            assignedBy?: string | null;
             /** Format: date-time */
-            assignedAt?: string;
+            assignedAt?: string | null;
             /** Format: date-time */
-            dueAt?: string;
-            resolutionType?: string;
-            resolutionNote?: string;
+            dueAt?: string | null;
+            resolutionType?: string | null;
+            resolutionNote?: string | null;
             valueRecovered?: number;
             valueProtected?: number;
             /** Format: uuid */
-            resolvedBy?: string;
+            resolvedBy?: string | null;
             /** Format: date-time */
-            resolvedAt?: string;
+            resolvedAt?: string | null;
             /** Format: date-time */
             firstDetectedAt?: string;
             /** Format: date-time */
@@ -6735,14 +7543,14 @@ export interface components {
             /** Format: uuid */
             assigneeId?: string;
             /** Format: date-time */
-            dueAt?: string;
+            dueAt?: string | null;
         };
         CreateDepartmentRequest: {
             name?: string;
             code?: string;
         };
         CheckoutRequest: {
-            reason?: string;
+            reason?: string | null;
         };
         UnpaidCheckoutOverrideRequest: {
             reason?: string;
@@ -6751,17 +7559,11 @@ export interface components {
             /** Format: uuid */
             reservationId?: string;
             /** Format: uuid */
-            roomId?: string;
+            roomId?: string | null;
         };
         CreateBuildingRequest: {
             name?: string;
-            description?: string;
-        };
-        PropertyReadinessResponse: {
-            /** Format: uuid */
-            propertyId?: string;
-            missingRequirements?: string[];
-            ready?: boolean;
+            description?: string | null;
         };
         CreateTaxRateRequest: {
             name?: string;
@@ -6772,17 +7574,39 @@ export interface components {
             compound?: boolean;
             inclusive?: boolean;
         };
+        PropertyBootstrapResponse: {
+            /** Format: uuid */
+            propertyId?: string;
+            /** Format: uuid */
+            tenantId?: string;
+            status?: string;
+            changed?: boolean;
+            replayed?: boolean;
+            nextAction?: components["schemas"]["OnboardingNextAction"] | null;
+            workflowStatus?: string;
+            currentStep?: string | null;
+            steps?: components["schemas"]["PropertyOnboardingStepView"][];
+            blockers?: components["schemas"]["PropertyGoLiveBlockerView"][];
+            operatorBlocker?: components["schemas"]["OperatorBlockerView"] | null;
+            ready?: boolean;
+        };
+        PlatformBillingWebhookReceipt: {
+            accepted?: boolean;
+            duplicate?: boolean;
+            /** Format: uuid */
+            attemptId?: string | null;
+        };
         PaymentWebhookReceipt: {
             providerEventId?: string;
             /** Format: uuid */
-            transactionId?: string;
+            transactionId?: string | null;
             /** @enum {string} */
             status?: "CREATED" | "INITIATED" | "PENDING" | "POSTED" | "FAILED" | "EXPIRED" | "REVERSED" | "PARTIALLY_REFUNDED" | "REFUNDED" | "RECONCILED";
             replayed?: boolean;
         };
         AcceptTenantUserInvitationHttpRequest: {
             invitationToken: string;
-            fullName?: string;
+            fullName?: string | null;
         };
         TenantUserInvitationAcceptanceHttpResponse: {
             /** Format: uuid */
@@ -6798,9 +7622,38 @@ export interface components {
             identityLinkId?: string;
             replayed?: boolean;
         };
+        PairingRequestHttpRequest: {
+            publicKey: string;
+        };
+        PairingRequestHttpResponse: {
+            /** Format: uuid */
+            pairingRequestId?: string;
+            deviceCode?: string;
+            pairingCode?: string;
+            fingerprint?: string;
+            /** Format: date-time */
+            expiresAt?: string;
+        };
+        DeviceChallengeHttpRequest: {
+            deviceCode: string;
+        };
+        DeviceChallengeHttpResponse: {
+            /** Format: uuid */
+            challengeId?: string;
+            nonce?: string;
+            /** Format: date-time */
+            expiresAt?: string;
+        };
+        BeemWhatsAppWebhookReceipt: {
+            accepted?: boolean;
+            kind?: string;
+            /** Format: uuid */
+            deliveryRequestId?: string | null;
+            status?: string | null;
+        };
         CreateTemplateRequest: {
             name?: string;
-            subject?: string;
+            subject?: string | null;
             content?: string;
             type?: string;
         };
@@ -6828,9 +7681,9 @@ export interface components {
             reportCode?: string;
             subscriptionName?: string;
             /** Format: uuid */
-            propertyId?: string;
+            propertyId?: string | null;
             frequency?: string;
-            scheduleTime?: string;
+            scheduleTime?: string | null;
             timezone?: string;
             deliveryFormat?: string;
         };
@@ -6848,23 +7701,23 @@ export interface components {
         };
         EnqueueNotificationRequest: {
             /** Format: uuid */
-            propertyId?: string;
+            propertyId?: string | null;
             /** Format: uuid */
             contactChannelId?: string;
             purpose?: string;
             /** Format: uuid */
-            templateId?: string;
+            templateId?: string | null;
             variables?: {
                 [key: string]: string;
             };
-            subject?: string;
-            content?: string;
+            subject?: string | null;
+            content?: string | null;
         };
         NotificationEnqueueReceipt: {
             /** Format: uuid */
             eventId?: string;
             /** Format: uuid */
-            deliveryRequestId?: string;
+            deliveryRequestId?: string | null;
             replayed?: boolean;
         };
         DeliveryRetryReceipt: {
@@ -6878,7 +7731,7 @@ export interface components {
             /** Format: uuid */
             id?: string;
             fullName?: string;
-            jobTitle?: string;
+            jobTitle?: string | null;
             status?: string;
             channels?: components["schemas"]["ContactChannelResponse"][];
             roles?: components["schemas"]["ContactRoleResponse"][];
@@ -6887,10 +7740,10 @@ export interface components {
         };
         CreateContactRequest: {
             fullName?: string;
-            jobTitle?: string;
+            jobTitle?: string | null;
             email?: string;
-            phone?: string;
-            whatsapp?: string;
+            phone?: string | null;
+            whatsapp?: string | null;
         };
         ContactMutationReceipt: {
             /** Format: uuid */
@@ -6901,7 +7754,7 @@ export interface components {
         AssignContactRoleRequest: {
             roleCode?: string;
             /** Format: uuid */
-            propertyId?: string;
+            propertyId?: string | null;
             primary?: boolean;
         };
         ContactRoleMutationReceipt: {
@@ -6911,7 +7764,7 @@ export interface components {
             roleAssignmentId?: string;
             roleCode?: string;
             /** Format: uuid */
-            propertyId?: string;
+            propertyId?: string | null;
             primary?: boolean;
             changed?: boolean;
             replayed?: boolean;
@@ -6921,7 +7774,7 @@ export interface components {
             policyVersion?: string;
             status?: string;
             /** Format: date-time */
-            expiresAt?: string;
+            expiresAt?: string | null;
         };
         CommunicationConsentReceipt: {
             /** Format: uuid */
@@ -6950,40 +7803,40 @@ export interface components {
             /** Format: uuid */
             notificationEventId?: string;
             /** Format: uuid */
-            deliveryRequestId?: string;
+            deliveryRequestId?: string | null;
             replayed?: boolean;
         };
         AmendReservationRequest: {
             /** Format: uuid */
-            roomTypeId?: string;
+            roomTypeId?: string | null;
             /** Format: uuid */
-            roomId?: string;
+            roomId?: string | null;
             /** Format: date */
-            checkInDate?: string;
+            checkInDate?: string | null;
             /** Format: date */
-            checkOutDate?: string;
+            checkOutDate?: string | null;
             /** Format: int32 */
-            adults?: number;
+            adults?: number | null;
             /** Format: int32 */
-            children?: number;
-            ratePerNight?: number;
-            specialRequests?: string;
-            internalNotes?: string;
+            children?: number | null;
+            ratePerNight?: number | null;
+            specialRequests?: string | null;
+            internalNotes?: string | null;
         };
         UpdateGuestRequest: {
-            fullName?: string;
-            firstName?: string;
-            lastName?: string;
+            fullName?: string | null;
+            firstName?: string | null;
+            lastName?: string | null;
             /** Format: date */
-            dateOfBirth?: string;
-            nationality?: string;
-            email?: string;
-            phonePrimary?: string;
+            dateOfBirth?: string | null;
+            nationality?: string | null;
+            email?: string | null;
+            phonePrimary?: string | null;
         };
         ReportCatalogResponse: {
             reportCode?: string;
             name?: string;
-            description?: string;
+            description?: string | null;
             scope?: string;
             sensitivity?: string;
             generatorAvailable?: boolean;
@@ -7009,7 +7862,7 @@ export interface components {
             email?: string;
             status?: string;
             /** Format: date-time */
-            lockedUntil?: string;
+            lockedUntil?: string | null;
             hasActiveIdentity?: boolean;
             active?: boolean;
         };
@@ -7017,10 +7870,10 @@ export interface components {
             /** Format: uuid */
             accessId?: string;
             /** Format: uuid */
-            supportTicketId?: string;
+            supportTicketId?: string | null;
             operatorName?: string;
             actionCode?: string;
-            operationCode?: string;
+            operationCode?: string | null;
             reason?: string;
             eventType?: string;
             /** Format: date-time */
@@ -7033,7 +7886,7 @@ export interface components {
             maxUses?: number;
             /** Format: int32 */
             useCount?: number;
-            denialReason?: string;
+            denialReason?: string | null;
         };
         PortfolioOverview: {
             units?: components["schemas"]["OrganizationUnitSummary"][];
@@ -7060,14 +7913,60 @@ export interface components {
             /** Format: uuid */
             tenantId?: string;
             code?: string;
-            description?: string;
+            description?: string | null;
+        };
+        TenantOnboardingResponse: {
+            /** Format: uuid */
+            tenantId?: string;
+            workflowStatus?: string;
+            currentStep?: string | null;
+            canCreateProperties?: boolean;
+            nextAction?: components["schemas"]["TenantOnboardingNextAction"] | null;
+            steps?: components["schemas"]["TenantOnboardingStepView"][];
         };
         TenantCommercialOverview: {
             /** Format: uuid */
             tenantId?: string;
-            subscription?: components["schemas"]["TenantSubscriptionSummary"];
+            subscription?: components["schemas"]["TenantSubscriptionSummary"] | null;
             entitlements?: components["schemas"]["EntitlementSummary"][];
-            latestUsage?: components["schemas"]["TenantUsageSummary"];
+            latestUsage?: components["schemas"]["TenantUsageSummary"] | null;
+        };
+        RenewalOffer: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: date-time */
+            coverEndsAt?: string;
+            /** Format: int32 */
+            termMonths?: number;
+            /** @enum {string} */
+            status?: "OFFERED" | "ACCEPTED" | "DECLINED" | "EXPIRED" | "SUPERSEDED";
+            /** Format: uuid */
+            renewsPurchaseId?: string | null;
+        };
+        Receipt: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            purchaseId?: string;
+            receiptNumber?: string;
+            /** Format: date-time */
+            issuedAt?: string;
+            totalAmount?: number;
+            currency?: string;
+            /** @enum {string} */
+            fiscalStatus?: "NOT_APPLICABLE" | "PENDING" | "ISSUED" | "FAILED";
+            fiscalReference?: string | null;
+        };
+        ProductSummary: {
+            code?: string;
+            name?: string;
+            description?: string | null;
+            /** @enum {string} */
+            kind?: "BASE" | "ADDON";
+            requiresProductCode?: string | null;
+            entitlements?: string[];
+            prices?: components["schemas"]["ProductPrice"][];
+            perProperty?: boolean;
         };
         TenantAdministratorHttpResponse: {
             /** Format: uuid */
@@ -7080,7 +7979,7 @@ export interface components {
             email?: string;
             status?: string;
             /** Format: date-time */
-            lockedUntil?: string;
+            lockedUntil?: string | null;
             hasActiveIdentity?: boolean;
             active?: boolean;
         };
@@ -7090,9 +7989,9 @@ export interface components {
             tenantId?: string;
             /** Format: uuid */
             userId?: string;
-            fullName?: string;
+            fullName?: string | null;
             email?: string;
-            languagePreference?: string;
+            languagePreference?: string | null;
             tenantRoleCodes?: string[];
             tenantPermissionCodes?: string[];
             enabledTenantModules?: string[];
@@ -7115,11 +8014,11 @@ export interface components {
             roomId?: string;
             status?: string;
             /** Format: date-time */
-            checkInTime?: string;
+            checkInTime?: string | null;
             /** Format: date-time */
-            checkOutTime?: string;
+            checkOutTime?: string | null;
             /** Format: uuid */
-            folioId?: string;
+            folioId?: string | null;
         };
         ReservationIdentityReadinessResponse: {
             /** Format: uuid */
@@ -7128,6 +8027,35 @@ export interface components {
             occupants?: components["schemas"]["ReservationGuestIdentityReadiness"][];
             reasons?: string[];
         };
+        RealtimeReplayPage: {
+            events?: {
+                [key: string]: unknown;
+            }[];
+            /** Format: int64 */
+            nextCursor?: number | null;
+        };
+        PropertyReadinessResponse: {
+            /** Format: uuid */
+            propertyId?: string;
+            missingRequirements?: string[];
+            workflowStatus?: string;
+            currentStep?: string | null;
+            steps?: components["schemas"]["PropertyOnboardingStepView"][];
+            blockers?: components["schemas"]["PropertyGoLiveBlockerView"][];
+            collectionEnabled?: boolean;
+            nextAction?: components["schemas"]["OnboardingNextAction"] | null;
+            operatorBlocker?: components["schemas"]["OperatorBlockerView"] | null;
+            ready?: boolean;
+        };
+        PosRoomChargeCandidateResponse: {
+            /** Format: uuid */
+            stayId?: string;
+            /** Format: uuid */
+            roomId?: string;
+            roomNumber?: string;
+            guestDisplayName?: string;
+            postingEligible?: boolean;
+        };
         PosSessionSummaryResponse: {
             session?: components["schemas"]["PosSessionResponse"];
             /** Format: int64 */
@@ -7135,6 +8063,20 @@ export interface components {
             /** Format: int64 */
             closedOrderCount?: number;
             grossSales?: number;
+        };
+        PropertyOnboardingResponse: {
+            /** Format: uuid */
+            propertyId?: string;
+            /** Format: uuid */
+            tenantId?: string;
+            workflowStatus?: string;
+            currentStep?: string | null;
+            collectionEnabled?: boolean;
+            steps?: components["schemas"]["PropertyOnboardingStepView"][];
+            blockers?: components["schemas"]["PropertyGoLiveBlockerView"][];
+            nextAction?: components["schemas"]["OnboardingNextAction"] | null;
+            operatorBlocker?: components["schemas"]["OperatorBlockerView"] | null;
+            ready?: boolean;
         };
         NightAuditCloseSnapshotResponse: {
             /** Format: uuid */
@@ -7189,7 +8131,7 @@ export interface components {
             balanceAfter?: number;
             averageCostAfter?: number;
             /** Format: uuid */
-            pairedMovementId?: string;
+            pairedMovementId?: string | null;
             /** Format: date-time */
             createdAt?: string;
         };
@@ -7223,7 +8165,7 @@ export interface components {
             /** Format: uuid */
             propertyId?: string;
             /** Format: uuid */
-            reservationId?: string;
+            reservationId?: string | null;
             status?: string;
             currencyCode?: string;
             subtotal?: number;
@@ -7249,11 +8191,19 @@ export interface components {
             revenueAssurance?: components["schemas"]["DailyRevenueAssurance"];
             actions?: components["schemas"]["FinancialControlCaseResponse"][];
         };
+        PairingStatusHttpResponse: {
+            status?: string;
+            deviceCode?: string | null;
+            /** Format: date-time */
+            expiresAt?: string | null;
+            terminalName?: string | null;
+            mode?: string | null;
+        };
         DeliveryRequestResponse: {
             /** Format: uuid */
             id?: string;
             /** Format: uuid */
-            propertyId?: string;
+            propertyId?: string | null;
             /** Format: uuid */
             originalOutboxEventId?: string;
             /** Format: uuid */
@@ -7269,10 +8219,10 @@ export interface components {
             /** Format: date-time */
             requestedAt?: string;
             /** Format: date-time */
-            deliveredAt?: string;
+            deliveredAt?: string | null;
             /** Format: date-time */
-            failedAt?: string;
-            lastError?: string;
+            failedAt?: string | null;
+            lastError?: string | null;
         };
         DeliveryAttemptResponse: {
             /** Format: uuid */
@@ -7285,12 +8235,12 @@ export interface components {
             attemptNumber?: number;
             provider?: string;
             status?: string;
-            providerMessageId?: string;
-            errorMessage?: string;
+            providerMessageId?: string | null;
+            errorMessage?: string | null;
             /** Format: date-time */
             startedAt?: string;
             /** Format: date-time */
-            completedAt?: string;
+            completedAt?: string | null;
         };
         PortfolioPropertyAssignment: {
             /** Format: uuid */
@@ -7339,9 +8289,9 @@ export interface components {
             note?: string;
             visibility?: string;
             /** Format: uuid */
-            platformUserId?: string;
+            platformUserId?: string | null;
             /** Format: uuid */
-            tenantUserId?: string;
+            tenantUserId?: string | null;
             /** Format: date-time */
             createdAt?: string;
         };
@@ -7350,15 +8300,15 @@ export interface components {
             eventId?: string;
             eventType?: string;
             /** Format: uuid */
-            actorPlatformUserId?: string;
+            actorPlatformUserId?: string | null;
             /** Format: uuid */
-            actorTenantUserId?: string;
+            actorTenantUserId?: string | null;
             beforeState?: {
                 [key: string]: unknown;
-            };
+            } | null;
             afterState?: {
                 [key: string]: unknown;
-            };
+            } | null;
             /** Format: date-time */
             occurredAt?: string;
         };
@@ -7368,13 +8318,13 @@ export interface components {
             /** Format: int32 */
             attemptNumber?: number;
             channelType?: string;
-            providerCode?: string;
+            providerCode?: string | null;
             state?: string;
-            errorCode?: string;
+            errorCode?: string | null;
             /** Format: date-time */
             startedAt?: string;
             /** Format: date-time */
-            completedAt?: string;
+            completedAt?: string | null;
         };
         PortfolioRevisionSummary: {
             /** Format: uuid */
@@ -7391,12 +8341,37 @@ export interface components {
         };
         PortfolioRolloutTargetHttpRequest: {
             /** Format: uuid */
-            organizationUnitId?: string;
+            organizationUnitId?: string | null;
             /** Format: uuid */
-            propertyId?: string;
+            propertyId?: string | null;
             overrides?: {
                 [key: string]: unknown;
             };
+        };
+        QuoteLine: {
+            productCode?: string;
+            productName?: string;
+            /** Format: int32 */
+            quantity?: number;
+            coveredPropertyIds?: string[];
+            unitAmount?: number;
+            amount?: number;
+        };
+        QuoteLineRequest: {
+            productCode?: string;
+            propertyIds?: string[];
+        };
+        PaymentMethodOption: {
+            provider?: string;
+            /** @enum {string} */
+            method?: "MOBILE_MONEY" | "BANK" | "CARD";
+            /** @enum {string} */
+            collectionFlow?: "DIRECT_PUSH" | "HOSTED_CHECKOUT";
+            currency?: string;
+            requiresMsisdn?: boolean;
+            eligible?: boolean;
+            ineligibleReason?: string | null;
+            maxAmount?: number | null;
         };
         WalkInReservationRequest: {
             /** Format: uuid */
@@ -7412,8 +8387,8 @@ export interface components {
             /** Format: int32 */
             children?: number;
             ratePerNight?: number;
-            specialRequests?: string;
-            internalNotes?: string;
+            specialRequests?: string | null;
+            internalNotes?: string | null;
         };
         PurchaseReceiptLineRequest: {
             /** Format: uuid */
@@ -7446,9 +8421,9 @@ export interface components {
             taxAmount?: number;
             totalPrice?: number;
             modifiers?: string[];
-            specialRequest?: string;
+            specialRequest?: string | null;
             serviceState?: string;
-            voidDisposition?: string;
+            voidDisposition?: string | null;
         };
         KitchenTicketItemResponse: {
             /** Format: uuid */
@@ -7458,7 +8433,7 @@ export interface components {
             itemName?: string;
             quantity?: number;
             modifiers?: string[];
-            specialRequest?: string;
+            specialRequest?: string | null;
         };
         ReconciliationItemRequest: {
             providerReference?: string;
@@ -7479,8 +8454,8 @@ export interface components {
             blocking?: boolean;
             overrideAllowed?: boolean;
             /** Format: date-time */
-            resolvedAt?: string;
-            resolutionNote?: string;
+            resolvedAt?: string | null;
+            resolutionNote?: string | null;
         };
         CreditNoteLineRequest: {
             /** Format: uuid */
@@ -7494,7 +8469,7 @@ export interface components {
             /** Format: uuid */
             locationId: string;
             quantity?: number;
-            unitCost?: number;
+            unitCost?: number | null;
         };
         TransferLine: {
             /** Format: uuid */
@@ -7507,16 +8482,16 @@ export interface components {
             /** Format: uuid */
             locationId: string;
             quantityDelta?: number;
-            unitCost?: number;
+            unitCost?: number | null;
         };
         FinancialControlEvidenceResponse: {
             /** Format: uuid */
             id?: string;
             evidenceType?: string;
-            resourceType?: string;
+            resourceType?: string | null;
             /** Format: uuid */
-            resourceId?: string;
-            amount?: number;
+            resourceId?: string | null;
+            amount?: number | null;
             payload?: {
                 [key: string]: unknown;
             };
@@ -7528,12 +8503,40 @@ export interface components {
             id?: string;
             eventType?: string;
             /** Format: uuid */
-            actorId?: string;
+            actorId?: string | null;
             payload?: {
                 [key: string]: unknown;
             };
             /** Format: date-time */
             occurredAt?: string;
+        };
+        OnboardingNextAction: {
+            step?: string;
+            title?: string;
+            why?: string;
+            method?: string;
+            path?: string;
+            bodyHint?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        PropertyOnboardingStepView: {
+            key?: string;
+            /** Format: int32 */
+            sequence?: number;
+            status?: string;
+            required?: boolean;
+            detail?: string;
+        };
+        PropertyGoLiveBlockerView: {
+            code?: string;
+            stepKey?: string;
+            detail?: string;
+        };
+        OperatorBlockerView: {
+            code?: string;
+            title?: string;
+            why?: string;
         };
         ContactChannelResponse: {
             /** Format: uuid */
@@ -7548,7 +8551,7 @@ export interface components {
             id?: string;
             roleCode?: string;
             /** Format: uuid */
-            propertyId?: string;
+            propertyId?: string | null;
             primary?: boolean;
         };
         ContactConsentResponse: {
@@ -7562,7 +8565,25 @@ export interface components {
             /** Format: date-time */
             capturedAt?: string;
             /** Format: date-time */
-            expiresAt?: string;
+            expiresAt?: string | null;
+        };
+        TenantOnboardingNextAction: {
+            step?: string;
+            title?: string;
+            why?: string;
+            method?: string;
+            path?: string;
+            bodyHint?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        TenantOnboardingStepView: {
+            key?: string;
+            /** Format: int32 */
+            sequence?: number;
+            status?: string;
+            required?: boolean;
+            detail?: string;
         };
         TenantSubscriptionSummary: {
             /** Format: uuid */
@@ -7576,16 +8597,16 @@ export interface components {
             billingCycle?: string;
             billingCurrency?: string;
             provider?: string;
-            providerCustomerId?: string;
-            providerSubscriptionId?: string;
+            providerCustomerId?: string | null;
+            providerSubscriptionId?: string | null;
             /** Format: date-time */
             currentPeriodStartsAt?: string;
             /** Format: date-time */
-            currentPeriodEndsAt?: string;
+            currentPeriodEndsAt?: string | null;
             /** Format: date-time */
-            trialEndsAt?: string;
+            trialEndsAt?: string | null;
             /** Format: date-time */
-            gracePeriodEndsAt?: string;
+            gracePeriodEndsAt?: string | null;
             cancelAtPeriodEnd?: boolean;
             /** Format: int64 */
             version?: number;
@@ -7598,11 +8619,11 @@ export interface components {
             };
             source?: string;
             /** Format: date-time */
-            startsAt?: string;
+            startsAt?: string | null;
             /** Format: date-time */
-            expiresAt?: string;
+            expiresAt?: string | null;
             /** Format: uuid */
-            overrideId?: string;
+            overrideId?: string | null;
         };
         TenantUsageSummary: {
             /** Format: uuid */
@@ -7625,11 +8646,17 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        ProductPrice: {
+            /** Format: int32 */
+            termMonths?: number;
+            currency?: string;
+            amount?: number;
+        };
         HospitalityPropertyAccess: {
             /** Format: uuid */
             propertyId?: string;
             name?: string;
-            code?: string;
+            code?: string | null;
             status?: string;
             roleNames?: string[];
             permissionCodes?: string[];
@@ -7649,7 +8676,7 @@ export interface components {
             /** Format: uuid */
             propertyId?: string;
             /** Format: uuid */
-            revenueCenterId?: string;
+            revenueCenterId?: string | null;
             chargeType?: string;
             description?: string;
             quantity?: number;
@@ -7668,13 +8695,13 @@ export interface components {
             /** Format: uuid */
             folioId?: string;
             /** Format: uuid */
-            propertyId?: string;
+            propertyId?: string | null;
             paymentMethod?: string;
             amount?: number;
-            referenceNumber?: string;
+            referenceNumber?: string | null;
             status?: string;
             /** Format: date-time */
-            paidAt?: string;
+            paidAt?: string | null;
         };
         DailyCloseCertification: {
             status?: string;
@@ -12120,6 +13147,71 @@ export interface operations {
             };
         };
     };
+    provision: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProvisionStaffHttpRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ProvisionStaffHttpResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
     listTenantRoles: {
         parameters: {
             query?: never;
@@ -13947,6 +15039,509 @@ export interface operations {
             };
         };
     };
+    revoke: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                tenantId: string;
+                deviceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    approve: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PairingApprovalHttpRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PairedDeviceHttpResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    declineRenewalOffer: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                tenantId: string;
+                offerId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    acceptRenewalOffer: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                tenantId: string;
+                offerId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PurchaseResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    quote: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuoteRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["Quote"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    purchases: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PurchaseResponse"][];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    createPurchase: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuoteRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PurchaseResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    pay: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                tenantId: string;
+                purchaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PayPurchaseRequest"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PaymentAttemptResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
     revokeTenantAdministrator: {
         parameters: {
             query?: never;
@@ -14032,6 +15627,130 @@ export interface operations {
                 content: {
                     "*/*": components["schemas"]["TenantUserRoleAssignmentHttpResponse"];
                 };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    login: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffSessionHttpRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["StaffSessionHttpResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    activate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActivateStaffCredentialHttpRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Invalid request */
             400: {
@@ -15951,7 +17670,7 @@ export interface operations {
             };
         };
     };
-    approve: {
+    approve_1: {
         parameters: {
             query?: never;
             header?: {
@@ -16728,6 +18447,66 @@ export interface operations {
             };
         };
     };
+    listMenuItems: {
+        parameters: {
+            query: {
+                outletId: string;
+            };
+            header?: never;
+            path: {
+                propertyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PosMenuItemResponse"][];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
     createMenuItem: {
         parameters: {
             query?: never;
@@ -16753,6 +18532,66 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["PosConfigurationResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    listMenuCategories: {
+        parameters: {
+            query: {
+                outletId: string;
+            };
+            header?: never;
+            path: {
+                propertyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PosMenuCategoryResponse"][];
                 };
             };
             /** @description Invalid request */
@@ -17315,6 +19154,258 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ConfigurePaymentProviderRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PaymentProviderAccountResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    verifyProvider: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                propertyId: string;
+                providerAccountId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PaymentProviderAccountResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    enableProvider: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                propertyId: string;
+                providerAccountId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PaymentProviderAccountResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    disableProvider: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                propertyId: string;
+                providerAccountId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PaymentProviderAccountResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    certifyProvider: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                propertyId: string;
+                providerAccountId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CertifyPaymentProviderRequest"];
             };
         };
         responses: {
@@ -20689,6 +22780,72 @@ export interface operations {
             };
         };
     };
+    register: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                propertyId: string;
+                guestId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterGuestWhatsAppRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["GuestWhatsAppChannelReceipt"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
     revokeGuestIdentity: {
         parameters: {
             query?: never;
@@ -22117,7 +24274,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["PropertyReadinessResponse"];
+                    "*/*": Record<string, never>;
                 };
             };
             /** @description Invalid request */
@@ -22277,7 +24434,201 @@ export interface operations {
             };
         };
     };
+    bootstrapFirstProperty: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePropertyRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PropertyBootstrapResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
     receive_1: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                providerCode: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": string;
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformBillingWebhookReceipt"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    receiveForProvider: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                providerCode: string;
+                providerAccountId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": string;
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentWebhookReceipt"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    receiveClickPesa: {
         parameters: {
             query?: never;
             header?: {
@@ -22365,6 +24716,198 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["TenantUserInvitationAcceptanceHttpResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    requestPairing: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PairingRequestHttpRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PairingRequestHttpResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    issueChallenge: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeviceChallengeHttpRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["DeviceChallengeHttpResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    receive_2: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                transactionId: string;
+                signature: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": string;
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BeemWhatsAppWebhookReceipt"];
                 };
             };
             /** @description Invalid request */
@@ -24044,6 +26587,64 @@ export interface operations {
             };
         };
     };
+    getTenantOnboarding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["TenantOnboardingResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
     overview_1: {
         parameters: {
             query?: never;
@@ -24062,6 +26663,241 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["TenantCommercialOverview"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    renewalOffers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["RenewalOffer"][];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    receipts: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["Receipt"][];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    purchase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+                purchaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PurchaseResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    catalog_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ProductSummary"][];
                 };
             };
             /** @description Invalid request */
@@ -24453,6 +27289,67 @@ export interface operations {
             };
         };
     };
+    replay: {
+        parameters: {
+            query?: {
+                after?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                propertyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["RealtimeReplayPage"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
     getReadinessReport: {
         parameters: {
             query?: never;
@@ -24471,6 +27368,66 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["PropertyReadinessResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    listCandidates: {
+        parameters: {
+            query?: {
+                query?: string;
+            };
+            header?: never;
+            path: {
+                propertyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PosRoomChargeCandidateResponse"][];
                 };
             };
             /** @description Invalid request */
@@ -24825,6 +27782,64 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["CashSessionResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    getOnboarding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                propertyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PropertyOnboardingResponse"];
                 };
             };
             /** @description Invalid request */
@@ -25809,6 +28824,64 @@ export interface operations {
             };
         };
     };
+    pairingStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pairingRequestId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PairingStatusHttpResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
     listDeliveryRequests: {
         parameters: {
             query?: never;
@@ -26004,6 +29077,63 @@ export interface operations {
                 content: {
                     "*/*": components["schemas"]["TenantModuleMutationHttpResponse"];
                 };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    lockCurrent: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Invalid request */
             400: {

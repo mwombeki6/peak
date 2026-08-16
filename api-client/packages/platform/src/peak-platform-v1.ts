@@ -749,7 +749,7 @@ export interface paths {
          * Revoke
          * @description Revoke
          */
-        post: operations["revoke"];
+        post: operations["revoke_1"];
         delete?: never;
         options?: never;
         head?: never;
@@ -789,7 +789,7 @@ export interface paths {
          * Activate
          * @description Activate
          */
-        post: operations["activate"];
+        post: operations["activate_1"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1042,6 +1042,46 @@ export interface paths {
          * @description Update Alert
          */
         post: operations["updateAlert"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/billing/reconciliation/{attemptId}/resolutions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve
+         * @description Resolve
+         */
+        post: operations["resolve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/billing/reconciliation/{attemptId}/requery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Requery
+         * @description Requery
+         */
+        post: operations["requery"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1308,6 +1348,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/tenants/{id}/onboarding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Onboarding
+         * @description Get Onboarding
+         */
+        get: operations["getOnboarding_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/support/tickets": {
         parameters: {
             query?: never;
@@ -1408,6 +1468,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/billing/standing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Commercial Standing
+         * @description Commercial Standing
+         */
+        get: operations["commercialStanding"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/billing/reconciliation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Payments Requiring Reconciliation
+         * @description Payments Requiring Reconciliation
+         */
+        get: operations["paymentsRequiringReconciliation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/billing/receipts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Receipts
+         * @description Receipts
+         */
+        get: operations["receipts_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/administrators": {
         parameters: {
             query?: never;
@@ -1439,7 +1559,7 @@ export interface components {
             email?: string;
             status?: string;
             /** Format: date-time */
-            lockedUntil?: string;
+            lockedUntil?: string | null;
             roleCodes?: string[];
             /** Format: int32 */
             activeIdentityLinks?: number;
@@ -1458,9 +1578,9 @@ export interface components {
             path?: string;
         };
         UpdatePlatformUserHttpRequest: {
-            fullName?: string;
+            fullName?: string | null;
             /** Format: email */
-            email?: string;
+            email?: string | null;
         };
         PlatformUserMutationHttpResponse: {
             /** Format: uuid */
@@ -1476,17 +1596,17 @@ export interface components {
             billingCycle: string;
             billingCurrency?: string;
             provider: string;
-            providerCustomerId?: string;
-            providerSubscriptionId?: string;
+            providerCustomerId?: string | null;
+            providerSubscriptionId?: string | null;
             /** Format: date-time */
-            currentPeriodEndsAt?: string;
+            currentPeriodEndsAt?: string | null;
             /** Format: date-time */
-            trialEndsAt?: string;
+            trialEndsAt?: string | null;
             /** Format: date-time */
-            gracePeriodEndsAt?: string;
+            gracePeriodEndsAt?: string | null;
             cancelAtPeriodEnd?: boolean;
             /** Format: int64 */
-            expectedVersion?: number;
+            expectedVersion?: number | null;
             reason: string;
         };
         TenantSubscriptionSummary: {
@@ -1501,31 +1621,31 @@ export interface components {
             billingCycle?: string;
             billingCurrency?: string;
             provider?: string;
-            providerCustomerId?: string;
-            providerSubscriptionId?: string;
+            providerCustomerId?: string | null;
+            providerSubscriptionId?: string | null;
             /** Format: date-time */
             currentPeriodStartsAt?: string;
             /** Format: date-time */
-            currentPeriodEndsAt?: string;
+            currentPeriodEndsAt?: string | null;
             /** Format: date-time */
-            trialEndsAt?: string;
+            trialEndsAt?: string | null;
             /** Format: date-time */
-            gracePeriodEndsAt?: string;
+            gracePeriodEndsAt?: string | null;
             cancelAtPeriodEnd?: boolean;
             /** Format: int64 */
             version?: number;
         };
         SupportTicketDetail: {
             ticket?: components["schemas"]["SupportTicketSummary"];
-            description?: string;
+            description?: string | null;
             notes?: components["schemas"]["SupportNoteSummary"][];
             timeline?: components["schemas"]["SupportEventSummary"][];
         };
         UpdateSupportTicketHttpRequest: {
-            status?: string;
-            priority?: string;
+            status?: string | null;
+            priority?: string | null;
             /** Format: uuid */
-            assignedPlatformUserId?: string;
+            assignedPlatformUserId?: string | null;
             reason: string;
         };
         PlatformRoleHttpResponse: {
@@ -1533,16 +1653,16 @@ export interface components {
             platformRoleId?: string;
             code?: string;
             name?: string;
-            description?: string;
+            description?: string | null;
             permissionCodes?: string[];
             scope?: string;
             active?: boolean;
             system?: boolean;
         };
         UpdatePlatformRoleHttpRequest: {
-            name?: string;
-            description?: string;
-            permissionCodes?: string[];
+            name?: string | null;
+            description?: string | null;
+            permissionCodes?: string[] | null;
         };
         PlatformRoleMutationHttpResponse: {
             /** Format: uuid */
@@ -1552,17 +1672,17 @@ export interface components {
             active?: boolean;
         };
         UpdatePlanHttpRequest: {
-            name?: string;
+            name?: string | null;
             /** Format: int32 */
-            maxProperties?: number;
+            maxProperties?: number | null;
             /** Format: int32 */
-            maxRooms?: number;
+            maxRooms?: number | null;
             /** Format: int32 */
-            maxUsers?: number;
+            maxUsers?: number | null;
             /** Format: int32 */
-            maxOutlets?: number;
-            monthlyUsd?: number;
-            annualUsd?: number;
+            maxOutlets?: number | null;
+            monthlyUsd?: number | null;
+            annualUsd?: number | null;
             active?: boolean;
         };
         PlanSummary: {
@@ -1594,17 +1714,17 @@ export interface components {
             };
             source?: string;
             /** Format: date-time */
-            startsAt?: string;
+            startsAt?: string | null;
             /** Format: date-time */
-            expiresAt?: string;
+            expiresAt?: string | null;
             /** Format: uuid */
-            overrideId?: string;
+            overrideId?: string | null;
         };
         RegisterServiceHttpRequest: {
             serviceKey: string;
             name: string;
             serviceType: string;
-            ownerTeam?: string;
+            ownerTeam?: string | null;
             active?: boolean;
         };
         PlatformServiceSummary: {
@@ -1613,18 +1733,18 @@ export interface components {
             serviceKey?: string;
             name?: string;
             serviceType?: string;
-            ownerTeam?: string;
+            ownerTeam?: string | null;
             active?: boolean;
             currentHealth?: string;
             /** Format: date-time */
-            lastCheckedAt?: string;
+            lastCheckedAt?: string | null;
         };
         RegisterJobHttpRequest: {
             jobKey: string;
             /** Format: uuid */
-            serviceId?: string;
-            description?: string;
-            scheduleCron?: string;
+            serviceId?: string | null;
+            description?: string | null;
+            scheduleCron?: string | null;
             active?: boolean;
         };
         PlatformJobSummary: {
@@ -1632,21 +1752,21 @@ export interface components {
             jobId?: string;
             jobKey?: string;
             /** Format: uuid */
-            serviceId?: string;
-            description?: string;
-            scheduleCron?: string;
+            serviceId?: string | null;
+            description?: string | null;
+            scheduleCron?: string | null;
             active?: boolean;
         };
         FeatureFlagSummary: {
             /** Format: uuid */
             flagId?: string;
             flagKey?: string;
-            description?: string;
+            description?: string | null;
             scope?: string;
             /** Format: uuid */
-            tenantId?: string;
+            tenantId?: string | null;
             /** Format: uuid */
-            propertyId?: string;
+            propertyId?: string | null;
             enabled?: boolean;
             rolloutRules?: {
                 [key: string]: unknown;
@@ -1656,12 +1776,12 @@ export interface components {
         };
         UpsertFeatureHttpRequest: {
             flagKey: string;
-            description?: string;
+            description?: string | null;
             scope: string;
             /** Format: uuid */
-            tenantId?: string;
+            tenantId?: string | null;
             /** Format: uuid */
-            propertyId?: string;
+            propertyId?: string | null;
             enabled?: boolean;
             rolloutRules?: {
                 [key: string]: unknown;
@@ -1672,7 +1792,7 @@ export interface components {
             fullName: string;
             /** Format: email */
             email: string;
-            status?: string;
+            status?: string | null;
         };
         PlatformUserRoleMutationHttpResponse: {
             /** Format: uuid */
@@ -1687,7 +1807,7 @@ export interface components {
             issuer: string;
             subject: string;
             /** Format: email */
-            email?: string;
+            email?: string | null;
         };
         PlatformIdentityLinkHttpResponse: {
             /** Format: uuid */
@@ -1695,14 +1815,14 @@ export interface components {
             /** Format: uuid */
             identityLinkId?: string;
             /** Format: date-time */
-            revokedAt?: string;
+            revokedAt?: string | null;
             changed?: boolean;
             replayed?: boolean;
         };
         TenantCatalogPage: {
             items?: components["schemas"]["TenantCatalogItem"][];
             /** Format: uuid */
-            nextCursor?: string;
+            nextCursor?: string | null;
             /** Format: int32 */
             limit?: number;
         };
@@ -1712,9 +1832,9 @@ export interface components {
             /** Format: uuid */
             planId: string;
             legalName: string;
-            tradingName?: string;
+            tradingName?: string | null;
             entityType: string;
-            businessRegistrationNumber?: string;
+            businessRegistrationNumber?: string | null;
             /** Format: email */
             businessEmail: string;
             businessPhone: string;
@@ -1734,14 +1854,15 @@ export interface components {
             /** Format: uuid */
             planId?: string;
             businessEmail?: string;
+            nextAction?: components["schemas"]["TenantOnboardingNextAction"] | null;
         };
         ReviewVerificationCaseHttpRequest: {
             /** @enum {string} */
             action: "START_REVIEW" | "REQUEST_INFORMATION" | "APPROVE" | "REJECT" | "SUSPEND";
-            reason?: string;
-            riskRating?: string;
+            reason?: string | null;
+            riskRating?: string | null;
             /** Format: date-time */
-            expiresAt?: string;
+            expiresAt?: string | null;
         };
         VerificationCaseSummary: {
             /** Format: uuid */
@@ -1753,14 +1874,14 @@ export interface components {
             status?: string;
             riskRating?: string;
             /** Format: uuid */
-            assignedPlatformUserId?: string;
+            assignedPlatformUserId?: string | null;
             /** Format: date-time */
-            submittedAt?: string;
+            submittedAt?: string | null;
             /** Format: date-time */
-            reviewedAt?: string;
+            reviewedAt?: string | null;
             /** Format: date-time */
-            expiresAt?: string;
-            rejectionReason?: string;
+            expiresAt?: string | null;
+            rejectionReason?: string | null;
             documents?: components["schemas"]["VerificationDocumentSummary"][];
             /** Format: date-time */
             createdAt?: string;
@@ -1777,7 +1898,7 @@ export interface components {
         ProcessPrivacyRequestHttpRequest: {
             /** @enum {string} */
             action: "ASSIGN" | "VERIFY_IDENTITY" | "START_PROCESSING" | "GENERATE_EXPORT" | "COMPLETE" | "REJECT" | "CANCEL";
-            reason?: string;
+            reason?: string | null;
         };
         PrivacyRequestSummary: {
             /** Format: uuid */
@@ -1788,16 +1909,16 @@ export interface components {
             subjectReference?: string;
             status?: string;
             /** Format: uuid */
-            assignedPlatformUserId?: string;
+            assignedPlatformUserId?: string | null;
             /** Format: date-time */
             dueAt?: string;
             /** Format: date-time */
-            verifiedAt?: string;
+            verifiedAt?: string | null;
             /** Format: date-time */
-            completedAt?: string;
-            rejectionReason?: string;
-            exportObjectKey?: string;
-            exportContentHash?: string;
+            completedAt?: string | null;
+            rejectionReason?: string | null;
+            exportObjectKey?: string | null;
+            exportContentHash?: string | null;
             /** Format: date-time */
             createdAt?: string;
             /** Format: date-time */
@@ -1805,10 +1926,10 @@ export interface components {
         };
         CreateLegalHoldHttpRequest: {
             scope: string;
-            subjectReference?: string;
+            subjectReference?: string | null;
             reason: string;
             /** Format: date-time */
-            expiresAt?: string;
+            expiresAt?: string | null;
         };
         LegalHoldSummary: {
             /** Format: uuid */
@@ -1816,15 +1937,15 @@ export interface components {
             /** Format: uuid */
             tenantId?: string;
             scope?: string;
-            subjectReference?: string;
+            subjectReference?: string | null;
             reason?: string;
             status?: string;
             /** Format: date-time */
             startsAt?: string;
             /** Format: date-time */
-            expiresAt?: string;
+            expiresAt?: string | null;
             /** Format: date-time */
-            releasedAt?: string;
+            releasedAt?: string | null;
         };
         TrustReasonHttpRequest: {
             reason: string;
@@ -1843,17 +1964,17 @@ export interface components {
             tenantId?: string;
             name?: string;
             protocol?: string;
-            issuer?: string;
-            verifiedDomain?: string;
-            discoveryUrl?: string;
-            clientId?: string;
+            issuer?: string | null;
+            verifiedDomain?: string | null;
+            discoveryUrl?: string | null;
+            clientId?: string | null;
             hasClientSecret?: boolean;
             scimEnabled?: boolean;
             status?: string;
             /** Format: int64 */
             version?: number;
             /** Format: date-time */
-            verifiedAt?: string;
+            verifiedAt?: string | null;
         };
         ReconcileTenantControlHttpRequest: {
             /** Format: int64 */
@@ -1870,7 +1991,7 @@ export interface components {
             /** Format: int64 */
             version?: number;
             /** Format: uuid */
-            workflowId?: string;
+            workflowId?: string | null;
             changed?: boolean;
             replayed?: boolean;
         };
@@ -1910,7 +2031,7 @@ export interface components {
             };
             reason: string;
             /** Format: date-time */
-            expiresAt?: string;
+            expiresAt?: string | null;
         };
         ReasonHttpRequest: {
             reason: string;
@@ -1951,7 +2072,7 @@ export interface components {
             tenantRoleId?: string;
             /** Format: date-time */
             expiresAt?: string;
-            invitationToken?: string;
+            invitationToken?: string | null;
             replayed?: boolean;
         };
         GovernanceActionRequest: {
@@ -1976,25 +2097,25 @@ export interface components {
             /** Format: date-time */
             requestedAt?: string;
             /** Format: uuid */
-            approvedBy?: string;
+            approvedBy?: string | null;
             /** Format: date-time */
-            approvedAt?: string;
+            approvedAt?: string | null;
             /** Format: date-time */
-            activatedAt?: string;
+            activatedAt?: string | null;
             /** Format: date-time */
             startsAt?: string;
             /** Format: date-time */
             expiresAt?: string;
             /** Format: date-time */
-            revokedAt?: string;
+            revokedAt?: string | null;
             /** Format: int32 */
             maxUses?: number;
             /** Format: int32 */
             useCount?: number;
             /** Format: date-time */
-            lastUsedAt?: string;
+            lastUsedAt?: string | null;
             assuranceLevel?: string;
-            decisionReason?: string;
+            decisionReason?: string | null;
         };
         RequestBreakGlassAccessHttpRequest: {
             /** Format: uuid */
@@ -2020,7 +2141,7 @@ export interface components {
         CreatePlatformRoleHttpRequest: {
             code: string;
             name: string;
-            description?: string;
+            description?: string | null;
             permissionCodes: string[];
         };
         PlatformReleaseSummary: {
@@ -2031,15 +2152,15 @@ export interface components {
             /** Format: int32 */
             schemaVersion?: number;
             status?: string;
-            releaseNotes?: string;
+            releaseNotes?: string | null;
             /** Format: uuid */
             createdByPlatformUserId?: string;
             /** Format: uuid */
-            approvedByPlatformUserId?: string;
+            approvedByPlatformUserId?: string | null;
             /** Format: date-time */
             createdAt?: string;
             /** Format: date-time */
-            approvedAt?: string;
+            approvedAt?: string | null;
             assignments?: components["schemas"]["PlatformReleaseAssignmentSummary"][];
         };
         CreateReleaseHttpRequest: {
@@ -2047,14 +2168,14 @@ export interface components {
             imageDigest: string;
             /** Format: int32 */
             schemaVersion?: number;
-            releaseNotes?: string;
+            releaseNotes?: string | null;
         };
         AssignReleaseHttpRequest: {
             /** Format: uuid */
-            tenantId?: string;
+            tenantId?: string | null;
             releaseChannel: string;
             /** Format: date-time */
-            scheduledAt?: string;
+            scheduledAt?: string | null;
         };
         PlatformReleaseAssignmentSummary: {
             /** Format: uuid */
@@ -2062,20 +2183,20 @@ export interface components {
             /** Format: uuid */
             releaseId?: string;
             /** Format: uuid */
-            tenantId?: string;
+            tenantId?: string | null;
             releaseChannel?: string;
             status?: string;
             desiredVersion?: string;
-            actualVersion?: string;
+            actualVersion?: string | null;
             /** Format: date-time */
             scheduledAt?: string;
             /** Format: date-time */
-            startedAt?: string;
+            startedAt?: string | null;
             /** Format: date-time */
-            completedAt?: string;
+            completedAt?: string | null;
             /** Format: uuid */
-            rollbackReleaseId?: string;
-            errorDetail?: string;
+            rollbackReleaseId?: string | null;
+            errorDetail?: string | null;
         };
         ChangeReleaseHttpRequest: {
             /** @enum {string} */
@@ -2084,10 +2205,10 @@ export interface components {
         };
         UpdateReleaseAssignmentHttpRequest: {
             status: string;
-            actualVersion?: string;
+            actualVersion?: string | null;
             /** Format: uuid */
-            rollbackReleaseId?: string;
-            errorDetail?: string;
+            rollbackReleaseId?: string | null;
+            errorDetail?: string | null;
         };
         CreatePlanHttpRequest: {
             code: string;
@@ -2106,7 +2227,7 @@ export interface components {
         ServiceHealthHttpRequest: {
             status: string;
             /** Format: int32 */
-            latencyMs?: number;
+            latencyMs?: number | null;
             details?: {
                 [key: string]: unknown;
             };
@@ -2120,14 +2241,14 @@ export interface components {
             checkedAt?: string;
             status?: string;
             /** Format: int32 */
-            latencyMs?: number;
+            latencyMs?: number | null;
             details?: {
                 [key: string]: unknown;
             };
         };
         RunJobHttpRequest: {
             /** Format: uuid */
-            tenantId?: string;
+            tenantId?: string | null;
             metadata?: {
                 [key: string]: unknown;
             };
@@ -2138,15 +2259,15 @@ export interface components {
             /** Format: uuid */
             jobId?: string;
             /** Format: uuid */
-            tenantId?: string;
+            tenantId?: string | null;
             status?: string;
             /** Format: date-time */
-            startedAt?: string;
+            startedAt?: string | null;
             /** Format: date-time */
-            finishedAt?: string;
+            finishedAt?: string | null;
             /** Format: int32 */
-            durationMs?: number;
-            errorMessage?: string;
+            durationMs?: number | null;
+            errorMessage?: string | null;
             metadata?: {
                 [key: string]: unknown;
             };
@@ -2155,7 +2276,7 @@ export interface components {
         };
         CompleteJobRunHttpRequest: {
             status: string;
-            errorMessage?: string;
+            errorMessage?: string | null;
             metadata?: {
                 [key: string]: unknown;
             };
@@ -2163,9 +2284,9 @@ export interface components {
         CreateIncidentHttpRequest: {
             title: string;
             severity: string;
-            summary?: string;
+            summary?: string | null;
             /** Format: uuid */
-            ownerPlatformUserId?: string;
+            ownerPlatformUserId?: string | null;
         };
         PlatformIncidentSummary: {
             /** Format: uuid */
@@ -2177,19 +2298,19 @@ export interface components {
             /** Format: date-time */
             startedAt?: string;
             /** Format: date-time */
-            resolvedAt?: string;
-            summary?: string;
+            resolvedAt?: string | null;
+            summary?: string | null;
             /** Format: uuid */
-            ownerPlatformUserId?: string;
+            ownerPlatformUserId?: string | null;
             /** Format: date-time */
             updatedAt?: string;
         };
         UpdateIncidentHttpRequest: {
             status: string;
-            severity?: string;
-            summary?: string;
+            severity?: string | null;
+            summary?: string | null;
             /** Format: uuid */
-            ownerPlatformUserId?: string;
+            ownerPlatformUserId?: string | null;
             reason: string;
         };
         UpdateAlertHttpRequest: {
@@ -2200,22 +2321,40 @@ export interface components {
             /** Format: uuid */
             alertId?: string;
             /** Format: uuid */
-            serviceId?: string;
+            serviceId?: string | null;
             /** Format: uuid */
-            tenantId?: string;
+            tenantId?: string | null;
             alertKey?: string;
             severity?: string;
             status?: string;
             title?: string;
-            body?: string;
+            body?: string | null;
             /** Format: date-time */
             openedAt?: string;
             /** Format: uuid */
-            acknowledgedBy?: string;
+            acknowledgedBy?: string | null;
             /** Format: date-time */
-            acknowledgedAt?: string;
+            acknowledgedAt?: string | null;
             /** Format: date-time */
-            resolvedAt?: string;
+            resolvedAt?: string | null;
+        };
+        ResolvePaymentCommand: {
+            /** @enum {string} */
+            resolution?: "CONFIRMED_PAID" | "CONFIRMED_FAILED" | "ABANDONED";
+            /** @enum {string|null} */
+            evidenceType?: "PROVIDER_PORTAL" | "PROVIDER_SUPPORT" | "SETTLEMENT_REPORT" | "BANK_STATEMENT" | null;
+            evidenceReference?: string | null;
+            providerReference?: string | null;
+            observedAmount?: number | null;
+            observedCurrency?: string | null;
+            reason?: string;
+        };
+        ReconciliationOutcome: {
+            /** Format: uuid */
+            attemptId?: string;
+            providerStatus?: string;
+            resolved?: boolean;
+            message?: string;
         };
         PlatformAdministratorChangeHttpRequest: {
             /** Format: uuid */
@@ -2242,15 +2381,15 @@ export interface components {
         PlatformAdministratorChangeDecisionHttpRequest: {
             seatCode: string;
             approve?: boolean;
-            reason?: string;
+            reason?: string | null;
         };
         TenantControlOverview: {
             tenant?: components["schemas"]["TenantCatalogItem"];
             legalName?: string;
             businessEmail?: string;
             businessPhone?: string;
-            subscription?: components["schemas"]["TenantSubscriptionSummary"];
-            latestUsage?: components["schemas"]["TenantUsageSummary"];
+            subscription?: components["schemas"]["TenantSubscriptionSummary"] | null;
+            latestUsage?: components["schemas"]["TenantUsageSummary"] | null;
             /** Format: int32 */
             enabledModules?: number;
             /** Format: int32 */
@@ -2261,20 +2400,20 @@ export interface components {
             unresolvedAlerts?: number;
             configurationDrift?: boolean;
             activation?: components["schemas"]["TenantActivationReadiness"];
-            onboardingWorkflow?: components["schemas"]["TenantWorkflowSummary"];
+            onboardingWorkflow?: components["schemas"]["TenantWorkflowSummary"] | null;
         };
         TenantWorkflowSummary: {
             /** Format: uuid */
             workflowId?: string;
             workflowType?: string;
             status?: string;
-            currentStep?: string;
+            currentStep?: string | null;
             /** Format: int32 */
             completedSteps?: number;
             /** Format: int32 */
             totalSteps?: number;
-            reason?: string;
-            errorCode?: string;
+            reason?: string | null;
+            errorCode?: string | null;
             /** Format: date-time */
             createdAt?: string;
             /** Format: date-time */
@@ -2285,11 +2424,11 @@ export interface components {
             /** Format: uuid */
             id?: string;
             /** Format: uuid */
-            platformUserId?: string;
+            platformUserId?: string | null;
             action?: string;
             entityType?: string;
             /** Format: uuid */
-            entityId?: string;
+            entityId?: string | null;
             outcome?: string;
             correlationId?: string;
             /** Format: date-time */
@@ -2298,9 +2437,9 @@ export interface components {
         TenantCommercialOverview: {
             /** Format: uuid */
             tenantId?: string;
-            subscription?: components["schemas"]["TenantSubscriptionSummary"];
+            subscription?: components["schemas"]["TenantSubscriptionSummary"] | null;
             entitlements?: components["schemas"]["EntitlementSummary"][];
-            latestUsage?: components["schemas"]["TenantUsageSummary"];
+            latestUsage?: components["schemas"]["TenantUsageSummary"] | null;
         };
         TenantActivationReadiness: {
             /** Format: uuid */
@@ -2318,24 +2457,33 @@ export interface components {
             /** Format: date-time */
             evaluatedAt?: string;
         };
+        TenantOnboardingResponse: {
+            /** Format: uuid */
+            tenantId?: string;
+            workflowStatus?: string;
+            currentStep?: string | null;
+            canCreateProperties?: boolean;
+            nextAction?: components["schemas"]["TenantOnboardingNextAction"] | null;
+            steps?: components["schemas"]["TenantOnboardingStepView"][];
+        };
         SupportTicketSummary: {
             /** Format: uuid */
             ticketId?: string;
             /** Format: uuid */
-            tenantId?: string;
+            tenantId?: string | null;
             /** Format: uuid */
-            propertyId?: string;
+            propertyId?: string | null;
             ticketNumber?: string;
             subject?: string;
             priority?: string;
             status?: string;
             category?: string;
             /** Format: uuid */
-            assignedPlatformUserId?: string;
+            assignedPlatformUserId?: string | null;
             /** Format: date-time */
             openedAt?: string;
             /** Format: date-time */
-            resolvedAt?: string;
+            resolvedAt?: string | null;
             /** Format: date-time */
             updatedAt?: string;
         };
@@ -2352,7 +2500,7 @@ export interface components {
             platformPermissionId?: string;
             code?: string;
             namespace?: string;
-            description?: string;
+            description?: string | null;
         };
         FleetSnapshot: {
             services?: components["schemas"]["PlatformServiceSummary"][];
@@ -2372,6 +2520,55 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        TenantCommercialStanding: {
+            /** Format: uuid */
+            tenantId?: string;
+            tenantName?: string;
+            commercialStanding?: string;
+            subscriptionRowStatus?: string | null;
+            serviceRelationship?: string;
+            operationalPolicy?: string;
+            /** Format: date-time */
+            paidThrough?: string | null;
+            paymentStatus?: string;
+            renewalOfferStatus?: string | null;
+            outstandingAmount?: number | null;
+            outstandingCurrency?: string | null;
+        };
+        StuckPayment: {
+            /** Format: uuid */
+            tenantId?: string;
+            tenantName?: string | null;
+            /** Format: uuid */
+            purchaseId?: string;
+            /** Format: uuid */
+            attemptId?: string;
+            amount?: number;
+            currency?: string;
+            provider?: string;
+            payerMsisdnMasked?: string | null;
+            internalReference?: string;
+            providerReference?: string | null;
+            /** Format: date-time */
+            startedAt?: string;
+            /** Format: date-time */
+            lastStatusCheckedAt?: string | null;
+            /** Format: int32 */
+            statusCheckCount?: number;
+            lastProviderStatus?: string | null;
+            lastStatusError?: string | null;
+        };
+        IssuedReceipt: {
+            receiptNumber?: string;
+            /** Format: uuid */
+            tenantId?: string;
+            /** Format: uuid */
+            purchaseId?: string;
+            /** Format: date-time */
+            issuedAt?: string;
+            totalAmount?: number;
+            currency?: string;
+        };
         PlatformAdministratorHttpResponse: {
             /** Format: uuid */
             platformUserId?: string;
@@ -2381,7 +2578,7 @@ export interface components {
             email?: string;
             status?: string;
             /** Format: date-time */
-            lockedUntil?: string;
+            lockedUntil?: string | null;
             /** Format: int32 */
             activeIdentityLinks?: number;
             effective?: boolean;
@@ -2392,9 +2589,9 @@ export interface components {
             note?: string;
             visibility?: string;
             /** Format: uuid */
-            platformUserId?: string;
+            platformUserId?: string | null;
             /** Format: uuid */
-            tenantUserId?: string;
+            tenantUserId?: string | null;
             /** Format: date-time */
             createdAt?: string;
         };
@@ -2403,15 +2600,15 @@ export interface components {
             eventId?: string;
             eventType?: string;
             /** Format: uuid */
-            actorPlatformUserId?: string;
+            actorPlatformUserId?: string | null;
             /** Format: uuid */
-            actorTenantUserId?: string;
+            actorTenantUserId?: string | null;
             beforeState?: {
                 [key: string]: unknown;
-            };
+            } | null;
             afterState?: {
                 [key: string]: unknown;
-            };
+            } | null;
             /** Format: date-time */
             occurredAt?: string;
         };
@@ -2427,8 +2624,8 @@ export interface components {
             tenantId?: string;
             name?: string;
             slug?: string;
-            countryCode?: string;
-            currencyCode?: string;
+            countryCode?: string | null;
+            currencyCode?: string | null;
             planCode?: string;
             lifecycleStatus?: string;
             verificationStatus?: string;
@@ -2444,22 +2641,32 @@ export interface components {
             /** Format: date-time */
             updatedAt?: string;
         };
+        TenantOnboardingNextAction: {
+            step?: string;
+            title?: string;
+            why?: string;
+            method?: string;
+            path?: string;
+            bodyHint?: {
+                [key: string]: unknown;
+            } | null;
+        };
         VerificationDocumentSummary: {
             /** Format: uuid */
             documentId?: string;
             /** Format: uuid */
             caseId?: string;
             documentType?: string;
-            documentNumberMasked?: string;
+            documentNumberMasked?: string | null;
             storageObjectKey?: string;
             contentHash?: string;
             mimeType?: string;
             /** Format: date */
-            issuedAt?: string;
+            issuedAt?: string | null;
             /** Format: date */
-            expiresAt?: string;
+            expiresAt?: string | null;
             status?: string;
-            rejectionReason?: string;
+            rejectionReason?: string | null;
         };
         TenantWorkflowStepSummary: {
             stepKey?: string;
@@ -2468,9 +2675,9 @@ export interface components {
             status?: string;
             /** Format: int32 */
             attemptCount?: number;
-            errorCode?: string;
+            errorCode?: string | null;
             /** Format: date-time */
-            completedAt?: string;
+            completedAt?: string | null;
         };
         TenantActivationGate: {
             code?: string;
@@ -2482,8 +2689,16 @@ export interface components {
             code?: string;
             label?: string;
             responsibleParty?: string;
-            method?: string;
-            path?: string;
+            method?: string | null;
+            path?: string | null;
+        };
+        TenantOnboardingStepView: {
+            key?: string;
+            /** Format: int32 */
+            sequence?: number;
+            status?: string;
+            required?: boolean;
+            detail?: string;
         };
     };
     responses: never;
@@ -5211,7 +5426,7 @@ export interface operations {
             };
         };
     };
-    revoke: {
+    revoke_1: {
         parameters: {
             query?: never;
             header?: {
@@ -5341,7 +5556,7 @@ export interface operations {
             };
         };
     };
-    activate: {
+    activate_1: {
         parameters: {
             query?: never;
             header?: {
@@ -6342,6 +6557,132 @@ export interface operations {
             };
         };
     };
+    resolve: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                attemptId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolvePaymentCommand"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ReconciliationOutcome"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    requery: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                attemptId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ReconciliationOutcome"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
     revokePlatformAdministrator: {
         parameters: {
             query?: never;
@@ -7118,6 +7459,64 @@ export interface operations {
             };
         };
     };
+    getOnboarding_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["TenantOnboardingResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
     list_6: {
         parameters: {
             query?: {
@@ -7367,6 +7766,180 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["EffectiveFeatureFlag"][];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    commercialStanding: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["TenantCommercialStanding"][];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    paymentsRequiringReconciliation: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["StuckPayment"][];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    receipts_1: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["IssuedReceipt"][];
                 };
             };
             /** @description Invalid request */
