@@ -68,6 +68,7 @@ jobs:
             -e 's|^KEYCLOAK_SMTP_USER=.*|KEYCLOAK_SMTP_USER=soak-keycloak-smtp-user|' \
             -e 's|^KEYCLOAK_SMTP_PASSWORD=.*|KEYCLOAK_SMTP_PASSWORD=soak-keycloak-smtp-password|' \
             -e 's|^KEYCLOAK_RECONCILER_SECRET=.*|KEYCLOAK_RECONCILER_SECRET=soak-reconciler-secret|' \
+            -e 's|^VALKEY_PASSWORD=.*|VALKEY_PASSWORD=soak-valkey-password|' \
             -e 's|^PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=.*|PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=soak-communication-key|' \
             -e 's|^PEAK_COMMUNICATION_PROVIDERS_BEEM_API_KEY=.*|PEAK_COMMUNICATION_PROVIDERS_BEEM_API_KEY=soak-beem-api-key|' \
             -e 's|^PEAK_COMMUNICATION_PROVIDERS_BEEM_SECRET_KEY=.*|PEAK_COMMUNICATION_PROVIDERS_BEEM_SECRET_KEY=soak-beem-secret-key|' \

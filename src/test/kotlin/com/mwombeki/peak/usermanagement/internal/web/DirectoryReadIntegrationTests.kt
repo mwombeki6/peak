@@ -194,10 +194,11 @@ class DirectoryReadIntegrationTests {
             INSERT INTO paired_devices (
                 id, tenant_id, property_id, device_code, public_key, key_fingerprint,
                 terminal_name, mode, status, paired_by
-            ) VALUES (?, ?, ?, ?, 'test-public-key', ?, ?, 'POS', 'active', ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'POS', 'active', ?)
             """.trimIndent(),
             deviceId, fixture.tenantId, propertyId,
             "dev_${deviceId.toString().take(8)}",
+            "pk_$deviceId",
             "fp_${deviceId.toString().take(8)}",
             terminalName, fixture.userId,
         )
