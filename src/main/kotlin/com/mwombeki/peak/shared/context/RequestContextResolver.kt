@@ -167,6 +167,13 @@ class RequestContextResolver(
             )
         }
 
+        if (this is OnboardingSessionAuthentication) {
+            return RequestIdentity.OnboardingApplicant(
+                applicationId = applicationId,
+                correlationId = correlationId,
+            )
+        }
+
         if (this !is JwtAuthenticationToken) {
             throw RequestContextException(
                 "Unsupported authenticated principal for request identity",

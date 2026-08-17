@@ -5,12 +5,23 @@ import java.time.LocalDate
 import java.util.UUID
 import org.springframework.modulith.NamedInterface
 
+/**
+ * A verification case belongs to exactly one of these, enforced at the database by a CHECK
+ * constraint — never both, never neither. The same case/document/review machinery in
+ * [TenantTrustControlService] operates on either without knowing which one it's holding.
+ */
+@NamedInterface("api")
+sealed interface VerificationSubjectRef {
+    data class Tenant(val tenantId: UUID) : VerificationSubjectRef
+    data class Application(val applicationId: UUID) : VerificationSubjectRef
+}
+
 @NamedInterface("api")
 interface TenantTrustControlPort {
-    fun listVerificationCases(tenantId: UUID, platformView: Boolean): List<VerificationCaseSummary>
+    fun listVerificationCases(subject: VerificationSubjectRef, platformView: Boolean): List<VerificationCaseSummary>
     fun createVerificationCase(command: CreateVerificationCaseCommand): VerificationCaseSummary
     fun addVerificationDocument(command: AddVerificationDocumentCommand): VerificationDocumentSummary
-    fun submitVerificationCase(tenantId: UUID, caseId: UUID): VerificationCaseSummary
+    fun submitVerificationCase(subject: VerificationSubjectRef, caseId: UUID): VerificationCaseSummary
     fun reviewVerificationCase(command: ReviewVerificationCaseCommand): VerificationCaseSummary
 
     fun listPrivacyRequests(tenantId: UUID, platformView: Boolean): List<PrivacyRequestSummary>
@@ -26,7 +37,8 @@ interface TenantTrustControlPort {
 
 data class VerificationCaseSummary(
     val caseId: UUID,
-    val tenantId: UUID,
+    val tenantId: UUID?,
+    val onboardingApplicationId: UUID?,
     val caseType: String,
     val requiredLevel: String,
     val status: String,
@@ -56,13 +68,13 @@ data class VerificationDocumentSummary(
 )
 
 data class CreateVerificationCaseCommand(
-    val tenantId: UUID,
+    val subject: VerificationSubjectRef,
     val caseType: String,
     val requiredLevel: String,
 )
 
 data class AddVerificationDocumentCommand(
-    val tenantId: UUID,
+    val subject: VerificationSubjectRef,
     val caseId: UUID,
     val documentType: String,
     val documentNumberMasked: String?,
@@ -82,7 +94,7 @@ enum class VerificationReviewAction {
 }
 
 data class ReviewVerificationCaseCommand(
-    val tenantId: UUID,
+    val subject: VerificationSubjectRef,
     val caseId: UUID,
     val action: VerificationReviewAction,
     val reason: String?,

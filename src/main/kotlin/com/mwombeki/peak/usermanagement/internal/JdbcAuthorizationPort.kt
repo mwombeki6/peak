@@ -219,6 +219,7 @@ class JdbcAuthorizationPort(
                 identity is RequestIdentity.Tenant &&
                     request.tenantId == identity.tenantId
             RouteScope.PLATFORM -> identity is RequestIdentity.Platform
+            RouteScope.ONBOARDING_APPLICATION -> identity is RequestIdentity.OnboardingApplicant
             RouteScope.PROPERTY,
             RouteScope.PUBLIC_PROPERTY,
             RouteScope.PUBLIC,

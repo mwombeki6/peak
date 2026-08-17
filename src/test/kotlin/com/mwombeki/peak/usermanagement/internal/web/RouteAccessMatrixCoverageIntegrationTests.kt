@@ -460,6 +460,9 @@ class RouteAccessMatrixCoverageIntegrationTests {
                     startsWith("/api/v1/devices/") -> GuardMode.PUBLIC_TOKEN
             this == "/api/v1/verifications" || this == "/api/v1/verifications/confirm" ->
                 GuardMode.PUBLIC_TOKEN
+            this == "/api/v1/onboarding/request-access" ||
+                    this == "/api/v1/onboarding/verify-phone" -> GuardMode.PUBLIC_TOKEN
+            startsWith("/api/v1/onboarding/me/") -> GuardMode.AUTHENTICATED_IDENTITY
             startsWith("/api/v1/tenants/") -> GuardMode.STAFF_PERMISSION
             startsWith("/api/v1/properties") -> GuardMode.STAFF_PERMISSION
             startsWith("/api/v1/communication") -> GuardMode.STAFF_PERMISSION
@@ -487,6 +490,9 @@ class RouteAccessMatrixCoverageIntegrationTests {
                     startsWith("/api/v1/devices/") -> RouteScope.PUBLIC
             this == "/api/v1/verifications" || this == "/api/v1/verifications/confirm" ->
                 RouteScope.PUBLIC
+            this == "/api/v1/onboarding/request-access" ||
+                    this == "/api/v1/onboarding/verify-phone" -> RouteScope.PUBLIC
+            startsWith("/api/v1/onboarding/me/") -> RouteScope.ONBOARDING_APPLICATION
             startsWith("/api/v1/tenants/") -> RouteScope.TENANT
             this == "/api/v1/properties" -> RouteScope.TENANT
             // First hotel is a tenant act: no propertyId exists yet.

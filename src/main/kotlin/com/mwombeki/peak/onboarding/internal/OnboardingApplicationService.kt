@@ -5,6 +5,7 @@ import com.mwombeki.peak.onboarding.api.OnboardingVerificationFailedException
 import com.mwombeki.peak.onboarding.api.RequestAccessCommand
 import com.mwombeki.peak.onboarding.api.RequestAccessReceipt
 import com.mwombeki.peak.onboarding.api.VerifyOnboardingPhoneCommand
+import com.mwombeki.peak.shared.context.OnboardingSessionAuthentication
 import com.mwombeki.peak.verification.api.ConfirmVerificationCommand
 import com.mwombeki.peak.verification.api.RequestVerificationCommand
 import com.mwombeki.peak.verification.api.VerificationPort
@@ -94,7 +95,7 @@ class OnboardingApplicationService(
                     "SELECT mark_onboarding_phone_verified(?)",
                     command.applicationId,
                 )
-                val token = TOKEN_PREFIX + randomToken(32)
+                val token = OnboardingSessionAuthentication.TOKEN_PREFIX + randomToken(32)
                 val row = jdbcTemplate.query(
                     "SELECT * FROM issue_onboarding_session(?, ?, ?)",
                     { rs, _ -> rs.getTimestamp("expires_at").toInstant() },
@@ -114,8 +115,6 @@ class OnboardingApplicationService(
     }
 
     private companion object {
-        const val TOKEN_PREFIX = "onb_"
-
         fun sha256Hex(value: String): String {
             val digest = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
             return HexFormat.of().formatHex(digest)

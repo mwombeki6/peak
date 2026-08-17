@@ -49,6 +49,7 @@ import com.mwombeki.peak.tenantmanagement.api.TenantControlAction
 import com.mwombeki.peak.tenantmanagement.api.TenantControlTransitionCommand
 import com.mwombeki.peak.tenantmanagement.api.UpsertIdentityConnectionCommand
 import com.mwombeki.peak.tenantmanagement.api.VerificationReviewAction
+import com.mwombeki.peak.tenantmanagement.api.VerificationSubjectRef
 import com.mwombeki.peak.usermanagement.api.BreakGlassAccessPort
 import com.mwombeki.peak.usermanagement.api.DecideBreakGlassAccessCommand
 import com.mwombeki.peak.usermanagement.api.RequestBreakGlassAccessCommand
@@ -99,25 +100,26 @@ class HospitalityPlatformControlPlaneIntegrationTests {
         assertEquals(1, commercial.captureUsageSnapshot(fixture.tenantId, LocalDate.now()).propertyCount)
 
         tenant(fixture)
+        val subject = VerificationSubjectRef.Tenant(fixture.tenantId)
         val verification = trust.createVerificationCase(
-            CreateVerificationCaseCommand(fixture.tenantId, "initial_onboarding", "standard"),
+            CreateVerificationCaseCommand(subject, "initial_onboarding", "standard"),
         )
         tenant(fixture)
         trust.addVerificationDocument(AddVerificationDocumentCommand(
-            fixture.tenantId, verification.caseId, "business_registration", "***1234",
+            subject, verification.caseId, "business_registration", "***1234",
             "verification/${verification.caseId}.pdf", "a".repeat(64), "application/pdf",
             LocalDate.now().minusYears(1), LocalDate.now().plusYears(1),
         ))
         tenant(fixture)
-        trust.submitVerificationCase(fixture.tenantId, verification.caseId)
+        trust.submitVerificationCase(subject, verification.caseId)
         platform(root)
         trust.reviewVerificationCase(ReviewVerificationCaseCommand(
-            fixture.tenantId, verification.caseId, VerificationReviewAction.START_REVIEW,
+            subject, verification.caseId, VerificationReviewAction.START_REVIEW,
             null, "low", null,
         ))
         platform(root)
         val approved = trust.reviewVerificationCase(ReviewVerificationCaseCommand(
-            fixture.tenantId, verification.caseId, VerificationReviewAction.APPROVE,
+            subject, verification.caseId, VerificationReviewAction.APPROVE,
             "Evidence verified", "low", null,
         ))
         assertEquals("approved", approved.status)

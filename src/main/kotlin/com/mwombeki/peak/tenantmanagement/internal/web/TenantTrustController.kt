@@ -12,6 +12,7 @@ import com.mwombeki.peak.tenantmanagement.api.ReviewVerificationCaseCommand
 import com.mwombeki.peak.tenantmanagement.api.TenantTrustControlPort
 import com.mwombeki.peak.tenantmanagement.api.UpsertIdentityConnectionCommand
 import com.mwombeki.peak.tenantmanagement.api.VerificationReviewAction
+import com.mwombeki.peak.tenantmanagement.api.VerificationSubjectRef
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
@@ -38,7 +39,7 @@ class TenantTrustController(
 ) {
     @GetMapping("/verification-cases")
     fun verificationCases(@PathVariable tenantId: UUID) =
-        trustPort.listVerificationCases(tenantId, platformView = false)
+        trustPort.listVerificationCases(VerificationSubjectRef.Tenant(tenantId), platformView = false)
 
     @PostMapping("/verification-cases")
     fun createVerificationCase(
@@ -46,7 +47,9 @@ class TenantTrustController(
         @Valid @RequestBody request: CreateVerificationCaseHttpRequest,
     ) = ResponseEntity.status(HttpStatus.CREATED).body(
         trustPort.createVerificationCase(
-            CreateVerificationCaseCommand(tenantId, request.caseType, request.requiredLevel),
+            CreateVerificationCaseCommand(
+                VerificationSubjectRef.Tenant(tenantId), request.caseType, request.requiredLevel,
+            ),
         ),
     )
 
@@ -56,14 +59,14 @@ class TenantTrustController(
         @PathVariable caseId: UUID,
         @Valid @RequestBody request: VerificationDocumentHttpRequest,
     ) = ResponseEntity.status(HttpStatus.CREATED).body(
-        trustPort.addVerificationDocument(request.toCommand(tenantId, caseId)),
+        trustPort.addVerificationDocument(request.toCommand(VerificationSubjectRef.Tenant(tenantId), caseId)),
     )
 
     @PostMapping("/verification-cases/{caseId}/submit")
     fun submitVerificationCase(
         @PathVariable tenantId: UUID,
         @PathVariable caseId: UUID,
-    ) = trustPort.submitVerificationCase(tenantId, caseId)
+    ) = trustPort.submitVerificationCase(VerificationSubjectRef.Tenant(tenantId), caseId)
 
     @GetMapping("/privacy-requests")
     fun privacyRequests(@PathVariable tenantId: UUID) =
@@ -108,7 +111,7 @@ class PlatformTenantTrustController(
 ) {
     @GetMapping("/verification-cases")
     fun verificationCases(@PathVariable tenantId: UUID) =
-        trustPort.listVerificationCases(tenantId, platformView = true)
+        trustPort.listVerificationCases(VerificationSubjectRef.Tenant(tenantId), platformView = true)
 
     @PostMapping("/verification-cases/{caseId}/review")
     fun reviewVerificationCase(
@@ -117,7 +120,7 @@ class PlatformTenantTrustController(
         @Valid @RequestBody request: ReviewVerificationCaseHttpRequest,
     ) = trustPort.reviewVerificationCase(
         ReviewVerificationCaseCommand(
-            tenantId, caseId, request.action, request.reason,
+            VerificationSubjectRef.Tenant(tenantId), caseId, request.action, request.reason,
             request.riskRating, request.expiresAt,
         ),
     )
@@ -185,8 +188,8 @@ data class VerificationDocumentHttpRequest(
     val issuedAt: LocalDate? = null,
     val expiresAt: LocalDate? = null,
 ) {
-    fun toCommand(tenantId: UUID, caseId: UUID) = AddVerificationDocumentCommand(
-        tenantId, caseId, documentType, documentNumberMasked, storageObjectKey,
+    fun toCommand(subject: VerificationSubjectRef, caseId: UUID) = AddVerificationDocumentCommand(
+        subject, caseId, documentType, documentNumberMasked, storageObjectKey,
         contentHash, mimeType, issuedAt, expiresAt,
     )
 }

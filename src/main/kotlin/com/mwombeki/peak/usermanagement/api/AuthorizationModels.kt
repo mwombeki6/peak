@@ -42,6 +42,7 @@ enum class RouteScope {
     PUBLIC_PROPERTY,
     PUBLIC,
     PLATFORM,
+    ONBOARDING_APPLICATION,
 }
 
 class AuthorizationDeniedException(
