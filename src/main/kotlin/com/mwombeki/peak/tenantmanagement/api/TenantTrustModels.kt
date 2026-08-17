@@ -20,6 +20,9 @@ sealed interface VerificationSubjectRef {
 interface TenantTrustControlPort {
     fun listVerificationCases(subject: VerificationSubjectRef, platformView: Boolean): List<VerificationCaseSummary>
     fun createVerificationCase(command: CreateVerificationCaseCommand): VerificationCaseSummary
+    fun requestVerificationDocumentUpload(
+        command: RequestVerificationDocumentUploadCommand,
+    ): VerificationDocumentUploadAuthorization
     fun addVerificationDocument(command: AddVerificationDocumentCommand): VerificationDocumentSummary
     fun submitVerificationCase(subject: VerificationSubjectRef, caseId: UUID): VerificationCaseSummary
     fun reviewVerificationCase(command: ReviewVerificationCaseCommand): VerificationCaseSummary
@@ -83,6 +86,19 @@ data class AddVerificationDocumentCommand(
     val mimeType: String,
     val issuedAt: LocalDate?,
     val expiresAt: LocalDate?,
+)
+
+data class RequestVerificationDocumentUploadCommand(
+    val subject: VerificationSubjectRef,
+    val caseId: UUID,
+    val mimeType: String,
+)
+
+/** [uploadUrl] is a single-use, time-limited write authorization — never a bucket credential. */
+data class VerificationDocumentUploadAuthorization(
+    val objectKey: String,
+    val uploadUrl: String,
+    val expiresAt: Instant,
 )
 
 enum class VerificationReviewAction {

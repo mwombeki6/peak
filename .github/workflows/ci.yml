@@ -234,6 +234,10 @@ jobs:
             -e 's|^PEAK_GUEST_IDENTITY_HASH_KEY=.*|PEAK_GUEST_IDENTITY_HASH_KEY=ci-guest-identity-hmac-key-1234567890|' \
             -e 's|^PEAK_REPORT_STORAGE_ACCESS_KEY=.*|PEAK_REPORT_STORAGE_ACCESS_KEY=ci-report-access-key|' \
             -e 's|^PEAK_REPORT_STORAGE_SECRET_KEY=.*|PEAK_REPORT_STORAGE_SECRET_KEY=ci-report-secret-key-1234|' \
+            -e 's|^MINIO_ROOT_USER=.*|MINIO_ROOT_USER=ci-minio-root-user|' \
+            -e 's|^MINIO_ROOT_PASSWORD=.*|MINIO_ROOT_PASSWORD=ci-minio-root-password-1234|' \
+            -e 's|^PEAK_VERIFICATION_STORAGE_ACCESS_KEY=.*|PEAK_VERIFICATION_STORAGE_ACCESS_KEY=ci-verification-access-key|' \
+            -e 's|^PEAK_VERIFICATION_STORAGE_SECRET_KEY=.*|PEAK_VERIFICATION_STORAGE_SECRET_KEY=ci-verification-secret-key-1234|' \
             "$tmp"
           ops/scripts/validate-production-env.sh "$tmp"
       - name: Validate scripts and observability assets
@@ -375,6 +379,10 @@ jobs:
             -e 's|^PEAK_GUEST_IDENTITY_HASH_KEY=.*|PEAK_GUEST_IDENTITY_HASH_KEY=acceptance-guest-identity-hmac-key-2026|' \
             -e 's|^PEAK_REPORT_STORAGE_ACCESS_KEY=.*|PEAK_REPORT_STORAGE_ACCESS_KEY=acceptance-report-access-key|' \
             -e 's|^PEAK_REPORT_STORAGE_SECRET_KEY=.*|PEAK_REPORT_STORAGE_SECRET_KEY=acceptance-report-secret-key|' \
+            -e 's|^MINIO_ROOT_USER=.*|MINIO_ROOT_USER=acceptance-minio-root-user|' \
+            -e 's|^MINIO_ROOT_PASSWORD=.*|MINIO_ROOT_PASSWORD=acceptance-minio-root-password|' \
+            -e 's|^PEAK_VERIFICATION_STORAGE_ACCESS_KEY=.*|PEAK_VERIFICATION_STORAGE_ACCESS_KEY=acceptance-verification-access-key|' \
+            -e 's|^PEAK_VERIFICATION_STORAGE_SECRET_KEY=.*|PEAK_VERIFICATION_STORAGE_SECRET_KEY=acceptance-verification-secret-key|' \
             "$RUNNER_TEMP/peak-acceptance.env"
       - name: Run multi-role adversarial hotel journey
         # Bounded under the job ceiling so a hang becomes a diagnosis instead of a

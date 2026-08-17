@@ -7,6 +7,7 @@ import com.mwombeki.peak.tenantmanagement.api.CreateVerificationCaseCommand
 import com.mwombeki.peak.tenantmanagement.api.IdentityConnectionReviewAction
 import com.mwombeki.peak.tenantmanagement.api.ProcessPrivacyRequestCommand
 import com.mwombeki.peak.tenantmanagement.api.PrivacyRequestAction
+import com.mwombeki.peak.tenantmanagement.api.RequestVerificationDocumentUploadCommand
 import com.mwombeki.peak.tenantmanagement.api.ReviewIdentityConnectionCommand
 import com.mwombeki.peak.tenantmanagement.api.ReviewVerificationCaseCommand
 import com.mwombeki.peak.tenantmanagement.api.TenantTrustControlPort
@@ -50,6 +51,17 @@ class TenantTrustController(
             CreateVerificationCaseCommand(
                 VerificationSubjectRef.Tenant(tenantId), request.caseType, request.requiredLevel,
             ),
+        ),
+    )
+
+    @PostMapping("/verification-cases/{caseId}/documents/upload-url")
+    fun requestVerificationDocumentUpload(
+        @PathVariable tenantId: UUID,
+        @PathVariable caseId: UUID,
+        @Valid @RequestBody request: VerificationDocumentUploadHttpRequest,
+    ) = trustPort.requestVerificationDocumentUpload(
+        RequestVerificationDocumentUploadCommand(
+            VerificationSubjectRef.Tenant(tenantId), caseId, request.mimeType,
         ),
     )
 
@@ -177,6 +189,10 @@ class PlatformTenantTrustController(
 data class CreateVerificationCaseHttpRequest(
     @field:NotBlank val caseType: String,
     @field:NotBlank val requiredLevel: String,
+)
+
+data class VerificationDocumentUploadHttpRequest(
+    @field:NotBlank @field:Pattern(regexp = "[a-zA-Z0-9.+-]+/[a-zA-Z0-9.+-]+") val mimeType: String,
 )
 
 data class VerificationDocumentHttpRequest(

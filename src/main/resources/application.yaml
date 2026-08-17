@@ -130,6 +130,14 @@ peak:
       region: ${PEAK_REPORT_STORAGE_REGION:us-east-1}
     retention:
       cleanup-interval-ms: ${PEAK_REPORT_RETENTION_CLEANUP_INTERVAL_MS:3600000}
+  verification:
+    storage:
+      enabled: ${PEAK_VERIFICATION_STORAGE_ENABLED:false}
+      endpoint: ${PEAK_VERIFICATION_STORAGE_ENDPOINT:http://localhost:9000}
+      access-key: ${PEAK_VERIFICATION_STORAGE_ACCESS_KEY:peak}
+      secret-key: ${PEAK_VERIFICATION_STORAGE_SECRET_KEY:peak-development-secret}
+      bucket: ${PEAK_VERIFICATION_STORAGE_BUCKET:peak-private-kyc-documents}
+      region: ${PEAK_VERIFICATION_STORAGE_REGION:us-east-1}
   reliability:
     outbox:
       worker:

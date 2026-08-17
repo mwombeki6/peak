@@ -81,6 +81,10 @@ jobs:
             -e 's|^PEAK_GUEST_IDENTITY_HASH_KEY=.*|PEAK_GUEST_IDENTITY_HASH_KEY=soak-guest-identity-hmac-key-2026|' \
             -e 's|^PEAK_REPORT_STORAGE_ACCESS_KEY=.*|PEAK_REPORT_STORAGE_ACCESS_KEY=soak-report-access-key|' \
             -e 's|^PEAK_REPORT_STORAGE_SECRET_KEY=.*|PEAK_REPORT_STORAGE_SECRET_KEY=soak-report-secret-key|' \
+            -e 's|^MINIO_ROOT_USER=.*|MINIO_ROOT_USER=soak-minio-root-user|' \
+            -e 's|^MINIO_ROOT_PASSWORD=.*|MINIO_ROOT_PASSWORD=soak-minio-root-password|' \
+            -e 's|^PEAK_VERIFICATION_STORAGE_ACCESS_KEY=.*|PEAK_VERIFICATION_STORAGE_ACCESS_KEY=soak-verification-access-key|' \
+            -e 's|^PEAK_VERIFICATION_STORAGE_SECRET_KEY=.*|PEAK_VERIFICATION_STORAGE_SECRET_KEY=soak-verification-secret-key|' \
             "$RUNNER_TEMP/peak-soak.env"
           ops/scripts/validate-production-env.sh "$RUNNER_TEMP/peak-soak.env"
       - name: Run endurance profile and recovery drill

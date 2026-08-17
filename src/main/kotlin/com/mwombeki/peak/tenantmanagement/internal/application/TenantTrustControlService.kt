@@ -12,6 +12,7 @@ import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.shared.outbound.KYC_DOCUMENT_OBJECT_STORAGE_QUALIFIER
 import com.mwombeki.peak.shared.outbound.ObjectStoragePort
 import com.mwombeki.peak.shared.outbound.StoreObject
 import com.mwombeki.peak.tenantmanagement.api.AddVerificationDocumentCommand
@@ -27,12 +28,14 @@ import com.mwombeki.peak.tenantmanagement.api.PlatformControlNotFoundException
 import com.mwombeki.peak.tenantmanagement.api.PrivacyRequestAction
 import com.mwombeki.peak.tenantmanagement.api.PrivacyRequestSummary
 import com.mwombeki.peak.tenantmanagement.api.ProcessPrivacyRequestCommand
+import com.mwombeki.peak.tenantmanagement.api.RequestVerificationDocumentUploadCommand
 import com.mwombeki.peak.tenantmanagement.api.ReviewIdentityConnectionCommand
 import com.mwombeki.peak.tenantmanagement.api.ReviewVerificationCaseCommand
 import com.mwombeki.peak.tenantmanagement.api.TenantTrustControlPort
 import com.mwombeki.peak.tenantmanagement.api.UpsertIdentityConnectionCommand
 import com.mwombeki.peak.tenantmanagement.api.VerificationCaseSummary
 import com.mwombeki.peak.tenantmanagement.api.VerificationDocumentSummary
+import com.mwombeki.peak.tenantmanagement.api.VerificationDocumentUploadAuthorization
 import com.mwombeki.peak.tenantmanagement.api.VerificationReviewAction
 import com.mwombeki.peak.tenantmanagement.api.VerificationSubjectRef
 import com.mwombeki.peak.usermanagement.api.PlatformAccessPort
@@ -42,10 +45,12 @@ import com.mwombeki.peak.usermanagement.api.TenantPermissionAccessRequest
 import java.security.MessageDigest
 import java.sql.ResultSet
 import java.sql.Timestamp
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import java.util.UUID
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
@@ -63,6 +68,8 @@ class TenantTrustControlService(
     private val auditPort: AuditPort,
     private val outboxPort: OutboxPort,
     private val objectStoragePort: ObjectStoragePort,
+    @param:Qualifier(KYC_DOCUMENT_OBJECT_STORAGE_QUALIFIER)
+    private val kycDocumentStoragePort: ObjectStoragePort,
     private val objectMapper: ObjectMapper,
 ) : TenantTrustControlPort {
 
@@ -136,6 +143,32 @@ class TenantTrustControlService(
         }
     }
 
+    override fun requestVerificationDocumentUpload(
+        command: RequestVerificationDocumentUploadCommand,
+    ): VerificationDocumentUploadAuthorization {
+        require(command.mimeType in ALLOWED_VERIFICATION_MIME_TYPES) {
+            "Unsupported verification document content type"
+        }
+        val subject = command.subject
+        return requireNotNull(
+            transactionTemplate.execute {
+                authorizeSubjectAccess(subject, "tenant.profile.manage")
+                val case = lockedVerificationCase(subject, command.caseId)
+                require(case.status in setOf("draft", "needs_information")) {
+                    "Documents can be added only while a case is draft or needs information"
+                }
+                // Opaque and case-scoped: never a filename, never guessable, and the prefix
+                // lets addVerificationDocument reject a key issued for a different case.
+                val objectKey = "kyc/${command.caseId}/${UUID.randomUUID()}"
+                VerificationDocumentUploadAuthorization(
+                    objectKey = objectKey,
+                    uploadUrl = kycDocumentStoragePort.presignedPut(objectKey, UPLOAD_URL_EXPIRY),
+                    expiresAt = Instant.now().plus(UPLOAD_URL_EXPIRY),
+                )
+            },
+        )
+    }
+
     override fun addVerificationDocument(
         command: AddVerificationDocumentCommand,
     ): VerificationDocumentSummary {
@@ -148,6 +181,9 @@ class TenantTrustControlService(
         }
         require(command.storageObjectKey.matches(SAFE_OBJECT_KEY)) {
             "Invalid verification document storage key"
+        }
+        require(command.storageObjectKey.startsWith("kyc/${command.caseId}/")) {
+            "Document storage key was not issued for this case"
         }
         if (command.issuedAt != null && command.expiresAt != null) {
             require(command.expiresAt > command.issuedAt) { "Document expiry must follow issue date" }
@@ -164,6 +200,17 @@ class TenantTrustControlService(
             val case = lockedVerificationCase(subject, command.caseId)
             require(case.status in setOf("draft", "needs_information")) {
                 "Documents can be added only while a case is draft or needs information"
+            }
+            // The caller's claimed key is never trusted on its own — it must actually be a
+            // byte-bearing object in the private KYC bucket, and within the size ceiling.
+            // What it does not yet verify is that the bytes match contentHash or are actually
+            // the claimed mimeType; that happens when the scan step reads them (not built yet).
+            val stored = kycDocumentStoragePort.stat(command.storageObjectKey)
+                ?: throw PlatformControlConflictException(
+                    "Document was not found in storage — upload it before adding it to the case",
+                )
+            require(stored.contentLength in 1..MAX_VERIFICATION_DOCUMENT_BYTES) {
+                "Uploaded document size is outside the allowed range"
             }
             val id = UUID.randomUUID()
             jdbcTemplate.update(
@@ -1341,6 +1388,8 @@ class TenantTrustControlService(
     private companion object {
         const val PLATFORM_VERIFICATION = "platform.tenants.verification.manage"
         val SAFE_OBJECT_KEY = Regex("[A-Za-z0-9][A-Za-z0-9/_ .-]{0,499}")
+        val UPLOAD_URL_EXPIRY: Duration = Duration.ofMinutes(10)
+        const val MAX_VERIFICATION_DOCUMENT_BYTES = 10L * 1024 * 1024
         val ALLOWED_VERIFICATION_MIME_TYPES = setOf(
             "application/pdf", "image/jpeg", "image/png", "image/webp",
         )

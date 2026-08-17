@@ -168,6 +168,9 @@ dependencies {
     testImplementation(
         "org.testcontainers:testcontainers-grafana"
     )
+    testImplementation(
+        "org.testcontainers:testcontainers-minio"
+    )
 
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

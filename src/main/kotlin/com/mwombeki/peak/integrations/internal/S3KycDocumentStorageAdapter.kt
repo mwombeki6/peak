@@ -1,5 +1,6 @@
 package com.mwombeki.peak.integrations.internal
 
+import com.mwombeki.peak.shared.outbound.KYC_DOCUMENT_OBJECT_STORAGE_QUALIFIER
 import com.mwombeki.peak.shared.outbound.ObjectStoragePort
 import com.mwombeki.peak.shared.outbound.StoreObject
 import com.mwombeki.peak.shared.outbound.StoredObject
@@ -8,6 +9,7 @@ import io.minio.GetBucketEncryptionArgs
 import io.minio.GetBucketPolicyArgs
 import io.minio.GetPresignedObjectUrlArgs
 import io.minio.Http
+import io.minio.MakeBucketArgs
 import io.minio.MinioClient
 import io.minio.PutObjectArgs
 import io.minio.RemoveObjectArgs
@@ -16,33 +18,40 @@ import io.minio.ServerSideEncryption
 import io.minio.errors.ErrorResponseException
 import java.io.ByteArrayInputStream
 import java.time.Duration
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.boot.health.contributor.Health
 import org.springframework.boot.health.contributor.HealthIndicator
-import org.springframework.context.annotation.Primary
 import org.springframework.stereotype.Component
-import tools.jackson.databind.json.JsonMapper
 
-@ConfigurationProperties(prefix = "peak.reporting.storage")
-data class ReportObjectStorageProperties(
+@ConfigurationProperties(prefix = "peak.verification.storage")
+data class KycDocumentStorageProperties(
     val enabled: Boolean = false,
     val endpoint: String = "http://localhost:9000",
     val accessKey: String = "peak",
     val secretKey: String = "peak-development-secret",
-    val bucket: String = "peak-private-reports",
+    val bucket: String = "peak-private-kyc-documents",
     val region: String = "us-east-1",
 )
 
+/**
+ * A second, distinct private bucket from the report one — KYC documents are regulated
+ * government-ID / business-registration evidence, not internal export artifacts, and the
+ * two must never share a lifecycle, retention posture, or bucket. Same MinIO/S3-compatible
+ * wire logic as [S3ReportObjectStorageAdapter] because the mechanics genuinely are
+ * identical; only the bucket, credentials, and the qualifier that keeps them from being
+ * autowired into each other's callers differ.
+ */
 @Component
-@Primary
+@Qualifier(KYC_DOCUMENT_OBJECT_STORAGE_QUALIFIER)
 @ConditionalOnProperty(
-    prefix = "peak.reporting.storage",
+    prefix = "peak.verification.storage",
     name = ["enabled"],
     havingValue = "true",
 )
-class S3ReportObjectStorageAdapter(
-    private val properties: ReportObjectStorageProperties,
+class S3KycDocumentStorageAdapter(
+    private val properties: KycDocumentStorageProperties,
 ) : ObjectStoragePort, HealthIndicator {
     private val client = MinioClient.builder()
         .endpoint(properties.endpoint)
@@ -52,13 +61,22 @@ class S3ReportObjectStorageAdapter(
 
     override val bucketName: String = properties.bucket
 
+    init {
+        // Idempotent by construction (bucketExists guards it), so this is safe to run on
+        // every startup rather than depending on an external bootstrap step having run first
+        // — the same self-sufficiency Postgres migrations already give the schema.
+        if (!client.bucketExists(BucketExistsArgs.builder().bucket(bucketName).build())) {
+            client.makeBucket(MakeBucketArgs.builder().bucket(bucketName).build())
+        }
+    }
+
     override fun validatePrivateEncryptedBucket() {
         check(
             client.bucketExists(
                 BucketExistsArgs.builder().bucket(bucketName).build(),
             ),
         ) {
-            "Private report bucket does not exist"
+            "Private KYC document bucket does not exist"
         }
         val policy = try {
             client.getBucketPolicy(
@@ -74,7 +92,7 @@ class S3ReportObjectStorageAdapter(
         check(
             policy == null || !reportBucketPolicyGrantsPublicAccess(policy),
         ) {
-            "Report bucket policy must not grant public access"
+            "KYC document bucket policy must not grant public access"
         }
         client.getBucketEncryption(
             GetBucketEncryptionArgs.builder().bucket(bucketName).build(),
@@ -94,13 +112,10 @@ class S3ReportObjectStorageAdapter(
     ): StoredObject {
         val existing = statOrNull(command.objectKey)
         if (existing != null) {
-            val existingHash = existing.userMetadata().caseInsensitiveValue(
-                "sha256",
-            ) ?: existing.headers().caseInsensitiveValue(
-                "x-amz-meta-sha256",
-            )
+            val existingHash = existing.userMetadata().caseInsensitiveValue("sha256")
+                ?: existing.headers().caseInsensitiveValue("x-amz-meta-sha256")
             check(existingHash == command.sha256) {
-                "Object key already contains different report content"
+                "Object key already contains different document content"
             }
             return StoredObject(
                 objectKey = command.objectKey,
@@ -221,73 +236,28 @@ class S3ReportObjectStorageAdapter(
 }
 
 @Component
-@Primary
+@Qualifier(KYC_DOCUMENT_OBJECT_STORAGE_QUALIFIER)
 @ConditionalOnProperty(
-    prefix = "peak.reporting.storage",
+    prefix = "peak.verification.storage",
     name = ["enabled"],
     havingValue = "false",
     matchIfMissing = true,
 )
-class DisabledReportObjectStorageAdapter(
-    private val properties: ReportObjectStorageProperties,
+class DisabledKycDocumentStorageAdapter(
+    private val properties: KycDocumentStorageProperties,
 ) : ObjectStoragePort {
     override val bucketName: String = properties.bucket
     override fun validatePrivateEncryptedBucket() =
-        error("Report object storage is disabled")
+        error("KYC document object storage is disabled")
     override fun isHealthy() = false
     override fun putIfAbsent(command: StoreObject): StoredObject =
-        error("Report object storage is disabled")
+        error("KYC document object storage is disabled")
     override fun presignedGet(objectKey: String, expiry: Duration): String =
-        error("Report object storage is disabled")
+        error("KYC document object storage is disabled")
     override fun presignedPut(objectKey: String, expiry: Duration): String =
-        error("Report object storage is disabled")
+        error("KYC document object storage is disabled")
     override fun stat(objectKey: String): StoredObject? =
-        error("Report object storage is disabled")
+        error("KYC document object storage is disabled")
     override fun delete(objectKey: String) =
-        error("Report object storage is disabled")
+        error("KYC document object storage is disabled")
 }
-
-private val reportBucketPolicyMapper = JsonMapper.builder().build()
-
-internal fun reportBucketPolicyGrantsPublicAccess(policy: String): Boolean {
-    if (policy.isBlank()) {
-        return false
-    }
-    val document = try {
-        @Suppress("UNCHECKED_CAST")
-        reportBucketPolicyMapper.readValue(policy, Map::class.java) as Map<Any?, Any?>
-    } catch (ex: Exception) {
-        throw IllegalStateException("Report bucket policy must be valid JSON", ex)
-    }
-    return policyStatements(document["Statement"])
-        .any(::statementGrantsPublicAccess)
-}
-
-private fun policyStatements(value: Any?): List<Map<Any?, Any?>> {
-    @Suppress("UNCHECKED_CAST")
-    return when (value) {
-        is Map<*, *> -> listOf(value as Map<Any?, Any?>)
-        is Iterable<*> -> value.filterIsInstance<Map<Any?, Any?>>()
-        else -> emptyList()
-    }
-}
-
-private fun statementGrantsPublicAccess(statement: Map<Any?, Any?>): Boolean {
-    val effect = statement["Effect"]?.toString()?.trim()
-    if (effect != null && !effect.equals("Allow", ignoreCase = true)) {
-        return false
-    }
-    if (statement.containsKey("NotPrincipal")) {
-        return true
-    }
-    return valueContainsWildcardPrincipal(statement["Principal"])
-}
-
-private fun valueContainsWildcardPrincipal(value: Any?): Boolean =
-    when (value) {
-        is String -> value.trim() == "*"
-        is Map<*, *> -> value.values.any(::valueContainsWildcardPrincipal)
-        is Iterable<*> -> value.any(::valueContainsWildcardPrincipal)
-        is Array<*> -> value.any(::valueContainsWildcardPrincipal)
-        else -> false
-    }

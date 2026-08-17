@@ -9,6 +9,7 @@ import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.tenantmanagement.api.AddVerificationDocumentCommand
 import com.mwombeki.peak.tenantmanagement.api.CreateVerificationCaseCommand
+import com.mwombeki.peak.tenantmanagement.api.RequestVerificationDocumentUploadCommand
 import com.mwombeki.peak.tenantmanagement.api.TenantTrustControlPort
 import com.mwombeki.peak.tenantmanagement.api.VerificationSubjectRef
 import jakarta.validation.Valid
@@ -69,6 +70,14 @@ class OnboardingController(
         ),
     )
 
+    @PostMapping("/me/verification-cases/{caseId}/documents/upload-url")
+    fun requestVerificationDocumentUpload(
+        @PathVariable caseId: UUID,
+        @Valid @RequestBody request: OnboardingVerificationDocumentUploadHttpRequest,
+    ) = trustPort.requestVerificationDocumentUpload(
+        RequestVerificationDocumentUploadCommand(currentSubject(), caseId, request.mimeType),
+    )
+
     @PostMapping("/me/verification-cases/{caseId}/documents")
     fun addVerificationDocument(
         @PathVariable caseId: UUID,
@@ -109,6 +118,10 @@ data class VerifyPhoneHttpRequest(
 data class CreateVerificationCaseHttpRequest(
     @field:NotBlank val caseType: String,
     @field:NotBlank val requiredLevel: String,
+)
+
+data class OnboardingVerificationDocumentUploadHttpRequest(
+    @field:NotBlank @field:Pattern(regexp = "[a-zA-Z0-9.+-]+/[a-zA-Z0-9.+-]+") val mimeType: String,
 )
 
 data class OnboardingVerificationDocumentHttpRequest(
