@@ -1,6 +1,7 @@
 package com.mwombeki.peak.shared.ephemeral
 
 import java.time.Duration
+import org.springframework.modulith.NamedInterface
 
 /**
  * A fixed-window counter for the flows that must not be allowed to run unbounded.
@@ -14,6 +15,7 @@ import java.time.Duration
  * happened, and holds nothing another system needs to be correct. Anything a dispute, an
  * audit or a night audit could ask about lives in PostgreSQL.
  */
+@NamedInterface("ephemeral")
 interface RateLimitStore {
 
     /**
@@ -41,6 +43,7 @@ interface RateLimitStore {
  * the thing being counted is evidence. Verification attempt budgets, OTP challenge state
  * and anything a decision is later justified by are evidence, and belong in a table.
  */
+@NamedInterface("ephemeral")
 enum class RateLimitScope(val keyspace: String) {
     /** Unauthenticated request volume from one source address. */
     REQUESTS_PER_IP("ip"),
@@ -68,6 +71,7 @@ enum class RateLimitScope(val keyspace: String) {
  * @param used attempts recorded in the current window, including this one.
  * @param retryAfter how long until the window ends; [Duration.ZERO] while allowed.
  */
+@NamedInterface("ephemeral")
 data class RateLimitDecision(
     val allowed: Boolean,
     val used: Long,

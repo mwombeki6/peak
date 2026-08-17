@@ -280,6 +280,7 @@ unpaid_checkout_overrides,frontdesk,active,frontdesk::api-or-internal-owner
 user_property_roles,usermanagement,active,usermanagement::api-or-internal-owner
 user_tenant_roles,usermanagement,active,usermanagement::api-or-internal-owner
 users,usermanagement,active,usermanagement::api-or-internal-owner
+verification_challenges,verification,active,verification::api-or-internal-owner
 work_orders,maintenance,active,maintenance::api-or-internal-owner
 worker_runtime_heartbeats,reliability,active,reliability::api-or-internal-owner
 workflow_catalog,shared,active,shared::api-or-internal-owner
