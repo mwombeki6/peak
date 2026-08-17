@@ -28,10 +28,11 @@ class TenantRepository(
                 country_code,
                 currency_code,
                 plan_id,
+                tenant_number,
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """.trimIndent(),
             tenant.id,
             tenant.name,
@@ -41,6 +42,7 @@ class TenantRepository(
             tenant.countryCode,
             tenant.currencyCode,
             tenant.planId,
+            tenant.tenantNumber,
             Timestamp.from(tenant.createdAt),
             Timestamp.from(tenant.updatedAt),
         )
@@ -73,7 +75,7 @@ class TenantRepository(
         return jdbcTemplate.query(
             """
             SELECT id, name, slug, status, schema_name, country_code, currency_code,
-                   plan_id, created_at, updated_at
+                   plan_id, tenant_number, created_at, updated_at
             FROM tenants
             WHERE id = ?
               AND deleted_at IS NULL
@@ -121,6 +123,7 @@ class TenantRepository(
             countryCode = rs.getString("country_code"),
             currencyCode = rs.getString("currency_code"),
             planId = rs.getObject("plan_id", UUID::class.java),
+            tenantNumber = rs.getString("tenant_number"),
             createdAt = rs.getTimestamp("created_at").toInstant(),
             updatedAt = rs.getTimestamp("updated_at").toInstant(),
         )

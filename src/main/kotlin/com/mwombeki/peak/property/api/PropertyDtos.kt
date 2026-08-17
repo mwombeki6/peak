@@ -39,6 +39,7 @@ data class PropertyMutationReceipt(
     val status: String,
     val changed: Boolean,
     val replayed: Boolean,
+    val propertyNumber: String? = null,
 )
 
 data class PropertyChildMutationReceipt(

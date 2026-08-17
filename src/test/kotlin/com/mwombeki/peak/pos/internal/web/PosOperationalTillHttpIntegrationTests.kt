@@ -146,17 +146,12 @@ class PosOperationalTillHttpIntegrationTests {
             """.trimIndent(),
             managerId, tenantId, "mgr-$managerId@example.com",
         )
-        val staffNumber = requireNotNull(
-            jdbcTemplate.queryForObject(
-                "SELECT allocate_staff_number(?)", String::class.java, tenantId,
-            ),
-        )
         jdbcTemplate.update(
             """
-            INSERT INTO users (id, tenant_id, full_name, staff_number, status, is_active)
-            VALUES (?, ?, 'Amina Hassan', ?, 'active', true)
+            INSERT INTO users (id, tenant_id, full_name, status, is_active)
+            VALUES (?, ?, 'Amina Hassan', 'active', true)
             """.trimIndent(),
-            staffUserId, tenantId, staffNumber,
+            staffUserId, tenantId,
         )
         jdbcTemplate.update(
             """
@@ -164,6 +159,13 @@ class PosOperationalTillHttpIntegrationTests {
             VALUES (?, ?, ?, ?, 'active', true)
             """.trimIndent(),
             propertyId, tenantId, "Property $propertyId", "P${propertyId.toString().take(8)}",
+        )
+        val staffNumber = requireNotNull(
+            jdbcTemplate.queryForObject(
+                "SELECT allocate_property_staff_number(?, ?, ?)",
+                String::class.java,
+                tenantId, propertyId, staffUserId,
+            ),
         )
 
         listOf("pos", "property", "reservations", "tenant_admin").forEach { moduleId ->
@@ -310,7 +312,7 @@ class PosOperationalTillHttpIntegrationTests {
                 deviceCode = paired.deviceCode,
                 challengeId = challenge.challengeId,
                 signature = sign(keys, challenge.nonce),
-                staffNumber = staffNumber,
+                staffNumber = staffNumber.substringAfterLast('-'),
                 pin = pin,
             ),
         )

@@ -102,6 +102,9 @@ class DeviceSessionService(
         }
 
     /**
+     * @param staffNumber the local sequence a staff member types on this terminal ("00042"),
+     *   not the full staff number — resolved against this device's own trusted property, never
+     *   a property the caller supplies.
      * @return a session, or null for any failure — unknown device, revoked device, bad
      *   signature, wrong PIN, lockout. Deliberately indistinguishable over HTTP; tests
      *   assert the revoked-device path separately by observing that a valid PIN is not
@@ -156,7 +159,7 @@ class DeviceSessionService(
                 challengeId,
             )
 
-            val userId = credentials.verify(device.tenantId, staffNumber, pin)
+            val userId = credentials.verify(device.tenantId, device.propertyId, staffNumber, pin)
                 ?: return@execute null
 
             jdbcTemplate.queryForObject(

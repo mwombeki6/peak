@@ -4,6 +4,7 @@
         allowedDependencies = {
                 "shared::context",
                 "shared::exception",
+                "shared::util",
                 "audit::api",
                 "reliability::api",
                 "tenantmanagement::api",

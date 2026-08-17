@@ -124,12 +124,17 @@ class StaffProvisionService(
             databaseSessionContext.bind(RequestIdentity.Tenant(tenantId, identity.tenantUserId))
             jdbcTemplate.query(
                 """
-                SELECT u.id, u.full_name, u.staff_number, u.phone_number, u.status, u.is_active,
-                       upr.property_id, upr.role_id
+                SELECT u.id, u.full_name, u.phone_number, u.status, u.is_active,
+                       upr.property_id, upr.role_id, psn.staff_number
                 FROM users u
                 LEFT JOIN user_property_roles upr
                        ON upr.user_id = u.id
                       AND upr.tenant_id = u.tenant_id
+                LEFT JOIN property_staff_numbers psn
+                       ON psn.tenant_id = u.tenant_id
+                      AND psn.user_id = u.id
+                      AND psn.property_id = upr.property_id
+                      AND psn.status = 'ACTIVE'
                 WHERE u.tenant_id = ?
                   AND (CAST(? AS uuid) IS NULL OR upr.property_id = CAST(? AS uuid))
                 ORDER BY u.created_at DESC, u.id
@@ -204,26 +209,18 @@ class StaffProvisionService(
         )
 
         val userId = UUID.randomUUID()
-        val staffNumber = requireNotNull(
-            jdbcTemplate.queryForObject(
-                "SELECT allocate_staff_number(?)",
-                String::class.java,
-                command.tenantId,
-            ),
-        )
 
         try {
             jdbcTemplate.update(
                 """
                 INSERT INTO users (
-                    id, tenant_id, full_name, phone_number, staff_number, status, is_active
-                ) VALUES (?, ?, ?, ?, ?, 'active', true)
+                    id, tenant_id, full_name, phone_number, status, is_active
+                ) VALUES (?, ?, ?, ?, 'active', true)
                 """.trimIndent(),
                 userId,
                 command.tenantId,
                 command.fullName,
                 command.phoneNumber,
-                staffNumber,
             )
         } catch (ex: DuplicateKeyException) {
             throw StaffProvisionConflictException(
@@ -240,6 +237,19 @@ class StaffProvisionService(
             command.propertyId,
             command.propertyRoleId,
             command.tenantId,
+        )
+
+        // Property-membership scoped, not a tenant-wide human attribute: this person gets a
+        // different number at every property they're assigned to, so moving/adding a property
+        // assignment always allocates fresh rather than reusing a number tied to a different job.
+        val staffNumber = requireNotNull(
+            jdbcTemplate.queryForObject(
+                "SELECT allocate_property_staff_number(?, ?, ?)",
+                String::class.java,
+                command.tenantId,
+                command.propertyId,
+                userId,
+            ),
         )
 
         val activation = credentials.issueActivation(command.tenantId, userId, actorUserId)

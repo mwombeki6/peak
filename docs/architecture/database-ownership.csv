@@ -196,6 +196,8 @@ property_onboarding_states,property,active,property::api-or-internal-owner
 property_onboarding_steps,property,active,property::api-or-internal-owner
 property_pos_settings,pos,active,pos::api-or-internal-owner
 property_reservation_settings,reservations,active,reservations::api-or-internal-owner
+property_staff_number_sequences,usermanagement,active,usermanagement::api-or-internal-owner
+property_staff_numbers,usermanagement,active,usermanagement::api-or-internal-owner
 purchase_order_approvals,procurement,active,procurement::api-or-internal-owner
 purchase_order_items,procurement,active,procurement::api-or-internal-owner
 purchase_orders,procurement,active,procurement::api-or-internal-owner

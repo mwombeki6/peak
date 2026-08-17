@@ -54,6 +54,8 @@ import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.shared.util.HumanIdentifierGenerator
+import com.mwombeki.peak.shared.util.violatesConstraint
 import com.mwombeki.peak.tenantmanagement.api.ConfigureTenantModuleCommand
 import com.mwombeki.peak.tenantmanagement.api.TenantModuleConfigurationPort
 import com.mwombeki.peak.usermanagement.api.EnsurePropertyAdministratorCommand
@@ -85,6 +87,8 @@ class PropertyManagementService(
     private val tenantModuleConfigurationPort: TenantModuleConfigurationPort,
     private val goLiveEvaluator: PropertyGoLiveEvaluator,
 ) : PropertyPort, PropertyOperationsPort {
+
+    private val propertyNumberGenerator = HumanIdentifierGenerator()
 
     override fun requireAssignableRoom(
         tenantId: UUID,
@@ -384,12 +388,13 @@ class PropertyManagementService(
             resourceType = "properties",
             replayType = PropertyMutationReceipt::class.java,
         ) { identity, reservationId ->
-            val propertyId = insertDraftProperty(identity, request, reservationId)
+            val draft = insertDraftProperty(identity, request, reservationId)
             PropertyMutationReceipt(
-                propertyId = propertyId,
+                propertyId = draft.propertyId,
                 status = PROPERTY_STATUS_DRAFT,
                 changed = true,
                 replayed = false,
+                propertyNumber = draft.propertyNumber,
             )
         }
     }
@@ -401,7 +406,7 @@ class PropertyManagementService(
             resourceType = "properties",
             replayType = PropertyBootstrapResponse::class.java,
         ) { identity, reservationId ->
-            val propertyId = insertDraftProperty(identity, request, reservationId)
+            val propertyId = insertDraftProperty(identity, request, reservationId).propertyId
             goLiveEvaluator.evaluateAndPersist(identity.tenantId, propertyId)
                 .toBootstrapResponse(
                     status = PROPERTY_STATUS_DRAFT,
@@ -2192,37 +2197,49 @@ class PropertyManagementService(
         }
     }
 
+    private data class DraftProperty(val propertyId: UUID, val propertyNumber: String)
+
     private fun insertDraftProperty(
         identity: TenantIdentity,
         request: CreatePropertyRequest,
         reservationId: UUID,
-    ): UUID {
+    ): DraftProperty {
         requireTenantCapacity(identity.tenantId, "limit.properties")
         val propertyId = UUID.randomUUID()
-        try {
-            jdbcTemplate.update(
-                """
-                INSERT INTO properties (
-                    id, tenant_id, name, location, code, type, status,
-                    is_active, timezone, business_date_offset, business_date
+        var propertyNumber = propertyNumberGenerator.generate("PR")
+        var propertyNumberAttempts = 0
+        while (true) {
+            try {
+                jdbcTemplate.update(
+                    """
+                    INSERT INTO properties (
+                        id, tenant_id, name, location, code, type, status,
+                        is_active, timezone, business_date_offset, business_date, property_number
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, false, ?, ?,
+                            ((now() AT TIME ZONE ?)::date + ?), ?)
+                    """.trimIndent(),
+                    propertyId,
+                    identity.tenantId,
+                    request.name.normalizedRequired("name"),
+                    request.location?.trimmedOrNull(),
+                    request.code?.normalizedCode(),
+                    request.type.normalizedRequired("type").uppercase(),
+                    PROPERTY_STATUS_DRAFT,
+                    request.timezone.validatedTimezone(),
+                    request.businessDateOffset.validatedBusinessDateOffset(),
+                    request.timezone.validatedTimezone(),
+                    request.businessDateOffset.validatedBusinessDateOffset(),
+                    propertyNumber,
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, false, ?, ?,
-                        ((now() AT TIME ZONE ?)::date + ?))
-                """.trimIndent(),
-                propertyId,
-                identity.tenantId,
-                request.name.normalizedRequired("name"),
-                request.location?.trimmedOrNull(),
-                request.code?.normalizedCode(),
-                request.type.normalizedRequired("type").uppercase(),
-                PROPERTY_STATUS_DRAFT,
-                request.timezone.validatedTimezone(),
-                request.businessDateOffset.validatedBusinessDateOffset(),
-                request.timezone.validatedTimezone(),
-                request.businessDateOffset.validatedBusinessDateOffset(),
-            )
-        } catch (ex: DuplicateKeyException) {
-            throw PropertyManagementConflictException("Property code is already in use")
+                break
+            } catch (ex: DuplicateKeyException) {
+                if (ex.violatesConstraint("uq_properties_property_number") && ++propertyNumberAttempts < 5) {
+                    propertyNumber = propertyNumberGenerator.generate("PR")
+                    continue
+                }
+                throw PropertyManagementConflictException("Property code is already in use")
+            }
         }
 
         tenantModuleConfigurationPort.enableConfiguredModule(
@@ -2256,7 +2273,7 @@ class PropertyManagementService(
             ),
             idempotencyKeyId = reservationId,
         )
-        return propertyId
+        return DraftProperty(propertyId, propertyNumber)
     }
 
     private fun upsertPropertyModule(

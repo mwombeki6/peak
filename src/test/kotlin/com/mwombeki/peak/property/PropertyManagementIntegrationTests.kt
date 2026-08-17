@@ -472,6 +472,40 @@ class PropertyManagementIntegrationTests {
         return this
     }
 
+    @Test
+    fun assignsAnImmutableCrockfordPropertyNumberOnCreate() {
+        val fixture = propertyFixture()
+        insertAuthorizedFixture(fixture)
+        enableTenantModule(fixture, "property")
+
+        val createResponse = mockMvc.perform(
+            post("/api/v1/properties")
+                .secureJson(
+                    """
+                    {
+                      "name": "Peak Number Test Hotel",
+                      "location": "Dodoma",
+                      "type": "HOTEL"
+                    }
+                    """.trimIndent(),
+                )
+                .headersFor(fixture, "corr-property-number", "idem-property-number-${fixture.tenantId}"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.propertyNumber").value(org.hamcrest.Matchers.matchesPattern("^PR-[0-9ABCDEFGHJKMNPQRSTVWXYZ]{8}$")))
+            .andReturn()
+
+        val propertyId = UUID.fromString(JsonPath.read(createResponse.response.contentAsString, "$.propertyId"))
+        val propertyNumber = JsonPath.read<String>(createResponse.response.contentAsString, "$.propertyNumber")
+
+        val stored = jdbcTemplate.queryForObject(
+            "SELECT property_number FROM properties WHERE id = ?",
+            String::class.java,
+            propertyId,
+        )
+        assertEquals(propertyNumber, stored)
+    }
+
     private fun propertyFixture(): PropertyFixture {
         return PropertyFixture(
             planId = UUID.randomUUID(),

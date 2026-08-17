@@ -395,6 +395,17 @@ class TenantPropertyRoleManagementService(
                 command.tenantId,
             ) == 1
 
+            // Idempotent on the DB side (returns the existing ACTIVE number if this person is
+            // already staffed at this property under a different role), so it's safe to call
+            // whether or not this particular (user, property, role) triple was new.
+            jdbcTemplate.queryForObject(
+                "SELECT allocate_property_staff_number(?, ?, ?)",
+                String::class.java,
+                command.tenantId,
+                command.propertyId,
+                command.userId,
+            )
+
             PropertyUserRoleAssignmentReceipt(
                 tenantId = command.tenantId,
                 propertyId = command.propertyId,
@@ -456,6 +467,35 @@ class TenantPropertyRoleManagementService(
                 command.userId,
                 command.propertyRoleId,
             ) == 1
+
+            if (deleted) {
+                // Retire the staff number only once no role ties this person to the property at
+                // all — losing one of several roles there isn't a departure. Re-assignment later
+                // allocates a fresh number (the sequence never goes backwards), so a retired
+                // number is never handed to anyone else.
+                jdbcTemplate.update(
+                    """
+                    UPDATE property_staff_numbers
+                    SET status = 'RETIRED', retired_at = now()
+                    WHERE tenant_id = ?
+                      AND property_id = ?
+                      AND user_id = ?
+                      AND status = 'ACTIVE'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM user_property_roles
+                          WHERE tenant_id = ?
+                            AND property_id = ?
+                            AND user_id = ?
+                      )
+                    """.trimIndent(),
+                    command.tenantId,
+                    command.propertyId,
+                    command.userId,
+                    command.tenantId,
+                    command.propertyId,
+                    command.userId,
+                )
+            }
 
             PropertyUserRoleAssignmentReceipt(
                 tenantId = command.tenantId,
