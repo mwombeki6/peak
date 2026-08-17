@@ -310,11 +310,13 @@ jobs:
     # chaos stages, which now drive 939 probes across 416 operations at 800 requests
     # and 24 concurrent. It was cancelled at 45m41s with nothing wrong.
     #
-    # A hang is still caught — 90 minutes is a ceiling, not a target, and the stack
-    # startup inside the script carries its own tighter bound with diagnostics.
-    # Shrinking the load profile to fit the old number would trade real coverage for
-    # a figure nobody measured.
-    timeout-minutes: 90
+    # Back down to 45 now that chaos recovery and the restore drill run in the weekly
+    # soak instead. Those two stages were the only ones that killed running services or
+    # built a second stack, they were where all three hangs occurred, and neither
+    # answers a question a pull request can change. What is left — five role journeys,
+    # security, penetration, close reporting and a light load profile — is the part
+    # that a code change can actually break.
+    timeout-minutes: 45
     needs: [unit-integration, operations, container-security]
     steps:
       - uses: actions/checkout@v6
@@ -374,7 +376,7 @@ jobs:
         # printed nothing: the job could only ever report "cancelled", which says where it
         # stopped and nothing about why. Failing at 45 leaves the evidence upload and the
         # teardown below room to run and report what was actually stuck.
-        timeout-minutes: 45
+        timeout-minutes: 30
         env:
           COMPOSE_PROJECT_NAME: peak-acceptance-ci
           ENV_FILE: ${{ runner.temp }}/peak-acceptance.env

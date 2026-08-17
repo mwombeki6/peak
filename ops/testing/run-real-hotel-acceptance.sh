@@ -126,13 +126,27 @@ python3 "$ROOT_DIR/ops/testing/api_load_test.py" \
 export CLOSE_REPORTING_REUSE_FOUNDATION=true
 "$ROOT_DIR/ops/testing/run-close-reporting-acceptance.sh"
 
-CHAOS_TENANT_PASSWORD="$tenant_password" \
-  "$ROOT_DIR/ops/testing/run-chaos-recovery-acceptance.sh"
+# Chaos recovery and the restore drill run in the weekly soak, not on every pull request.
+#
+# They are the only two stages that kill running services and build a second stack, and they
+# are what turned this gate into ninety minutes. Neither answers a per-commit question: a code
+# change cannot alter whether podman restores a dump or whether the API survives losing
+# PostgreSQL. Those are properties of the deployment, and weekly is the right cadence to prove
+# them — with a two-hour budget instead of a merge queue waiting.
+#
+# The evidence document below reports which stages actually ran, so a gate result is never
+# mistaken for a resilience result.
+RESILIENCE_STAGES="${ACCEPTANCE_RESILIENCE_STAGES:-false}"
 
-SOURCE_PROJECT="$PROJECT" \
-RESTORE_PROJECT="${PROJECT}-restore" \
-EVIDENCE_DIR="$EVIDENCE_DIR/backup-restore" \
-  "$ROOT_DIR/ops/testing/run-backup-restore-drill.sh"
+if [[ "$RESILIENCE_STAGES" == "true" ]]; then
+  CHAOS_TENANT_PASSWORD="$tenant_password" \
+    "$ROOT_DIR/ops/testing/run-chaos-recovery-acceptance.sh"
+
+  SOURCE_PROJECT="$PROJECT" \
+  RESTORE_PROJECT="${PROJECT}-restore" \
+  EVIDENCE_DIR="$EVIDENCE_DIR/backup-restore" \
+    "$ROOT_DIR/ops/testing/run-backup-restore-drill.sh"
+fi
 
 tenant_id="$(jq -er '.tenantId' "$EVIDENCE_DIR/tenant-property-foundation.json")"
 compose=(
@@ -169,7 +183,20 @@ IFS='|' read -r audit_count outbox_count dead_letter_count payment_count stock_m
 [[ "$stock_movement_count" -gt 0 ]]
 [[ "$report_count" -gt 0 ]]
 
+# Absent rather than false when a stage did not run, because those are different claims and a
+# reader who cannot tell them apart will eventually read one as the other.
+resilience_args=()
+if [[ "$RESILIENCE_STAGES" == "true" ]]; then
+  resilience_args+=(--slurpfile chaos "$EVIDENCE_DIR/chaos-recovery.json")
+  resilience_args+=(--slurpfile restore "$EVIDENCE_DIR/backup-restore/backup-restore-drill.json")
+else
+  resilience_args+=(--argjson chaos '[null]')
+  resilience_args+=(--argjson restore '[null]')
+fi
+
 jq -n \
+  --argjson resilienceStages "$RESILIENCE_STAGES" \
+  "${resilience_args[@]}" \
   --arg generatedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg tenantId "$tenant_id" \
   --arg propertyId "$(jq -er '.propertyId' "$EVIDENCE_DIR/core-hospitality-journey.json")" \
@@ -185,10 +212,8 @@ jq -n \
   --slurpfile writeLoad "$EVIDENCE_DIR/api-write-load.json" \
   --slurpfile load "$EVIDENCE_DIR/api-load.json" \
   --slurpfile close "$EVIDENCE_DIR/close-reporting.json" \
-  --slurpfile chaos "$EVIDENCE_DIR/chaos-recovery.json" \
-  --slurpfile restore "$EVIDENCE_DIR/backup-restore/backup-restore-drill.json" \
   '{
-    suite: "real-hotel-end-to-end",
+    suite: (if $resilienceStages then "real-hotel-end-to-end" else "real-hotel-merge-gate" end),
     result: "passed",
     generatedAt: $generatedAt,
     tenantId: $tenantId,
@@ -201,8 +226,8 @@ jq -n \
       mixedDepartmentLoad: true,
       closeReportingAndPdf: true,
       databaseInvariantAssertions: true,
-      serviceFailureRecovery: true,
-      populatedBackupRestore: true
+      serviceFailureRecovery: $resilienceStages,
+      populatedBackupRestore: $resilienceStages
     },
     databaseEvidence: {
       auditRecords: $auditRecords,
@@ -221,9 +246,9 @@ jq -n \
     load: $load[0].workload,
     loadLatency: $load[0].latency,
     certifiedBusinessDate: $close[0].generatedAt,
-    chaosRecovery: $chaos[0].recovery,
-    backupRestore: $restore[0],
-    evidenceFiles: [
+    chaosRecovery: (if $resilienceStages then $chaos[0].recovery else null end),
+    backupRestore: (if $resilienceStages then $restore[0] else null end),
+    evidenceFiles: ([
       "tenant-property-foundation.json",
       "stay-finance-foundation.json",
       "core-hospitality-journey.json",
@@ -233,8 +258,9 @@ jq -n \
       "api-write-load.json",
       "api-load.json",
       "close-reporting.json",
-      "chaos-recovery.json",
-      "backup-restore/backup-restore-drill.json",
       "daily-management-summary.pdf"
-    ]
+    ] + (if $resilienceStages then [
+      "chaos-recovery.json",
+      "backup-restore/backup-restore-drill.json"
+    ] else [] end))
   }' | tee "$EVIDENCE_DIR/real-hotel-acceptance.json"
