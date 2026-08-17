@@ -33,10 +33,9 @@ class JdbcIdempotencyPort(
         val key = context.idempotencyKey
             ?: throw RequestContextException("Idempotency-Key header is required")
         val requestHash = requestHasher.hash(context, command.operationType, command.requestPayload)
-        val actor = actorFor(context.identity)
         val scope = scopeFor(context.identity)
 
-        val existing = findExisting(scope.tenantId, key)
+        val existing = findExisting(scope, key)
         if (existing != null) {
             return existing.toReservation(requestHash)
         }
@@ -70,14 +69,14 @@ class JdbcIdempotencyPort(
                 context.httpMethod,
                 context.requestPath,
                 requestHash,
-                actor.type,
-                actor.id,
+                scope.actorType,
+                scope.actorId,
                 command.operationType,
                 command.resourceType,
                 Timestamp.from(clock.instant().plus(command.ttl)),
             )
         } catch (ex: DuplicateKeyException) {
-            return requireNotNull(findExisting(scope.tenantId, key)) {
+            return requireNotNull(findExisting(scope, key)) {
                 "Duplicate idempotency key was not readable after conflict"
             }.toReservation(requestHash)
         }
@@ -133,40 +132,38 @@ class JdbcIdempotencyPort(
         )
     }
 
+    /**
+     * Every predicate here must be null-safe (`IS NOT DISTINCT FROM`, not `=`) to match
+     * idx_idempotency_keys_actor_scope's `NULLS NOT DISTINCT` semantics — tenant_id,
+     * property_id and actor_id are all nullable depending on identity type, and plain `=`
+     * never matches NULL to NULL, which would silently widen this lookup back into a shared
+     * namespace for exactly the actors that need isolating (platform, onboarding applicant,
+     * guest).
+     */
     private fun findExisting(
-        tenantId: UUID?,
+        scope: IdempotencyScope,
         key: String,
     ): ExistingIdempotencyRecord? {
-        val rows = if (tenantId == null) {
-            jdbcTemplate.query(
-                """
-                SELECT id, request_hash, status, response_code,
-                       response_body::text AS response_body, expires_at
-                FROM idempotency_keys
-                WHERE tenant_id IS NULL
-                  AND idempotency_key = ?
-                  AND status <> 'expired'
-                FOR UPDATE
-                """.trimIndent(),
-                ::mapExisting,
-                key,
-            )
-        } else {
-            jdbcTemplate.query(
-                """
-                SELECT id, request_hash, status, response_code,
-                       response_body::text AS response_body, expires_at
-                FROM idempotency_keys
-                WHERE tenant_id = ?
-                  AND idempotency_key = ?
-                  AND status <> 'expired'
-                FOR UPDATE
-                """.trimIndent(),
-                ::mapExisting,
-                tenantId,
-                key,
-            )
-        }
+        val rows = jdbcTemplate.query(
+            """
+            SELECT id, request_hash, status, response_code,
+                   response_body::text AS response_body, expires_at
+            FROM idempotency_keys
+            WHERE tenant_id IS NOT DISTINCT FROM ?
+              AND property_id IS NOT DISTINCT FROM ?
+              AND actor_type = ?
+              AND actor_id IS NOT DISTINCT FROM ?
+              AND idempotency_key = ?
+              AND status <> 'expired'
+            FOR UPDATE
+            """.trimIndent(),
+            ::mapExisting,
+            scope.tenantId,
+            scope.propertyId,
+            scope.actorType,
+            scope.actorId,
+            key,
+        )
 
         val existing = rows.singleOrNull() ?: return null
         if (!existing.expiresAt.isAfter(clock.instant())) {
@@ -222,23 +219,52 @@ class JdbcIdempotencyPort(
         }
     }
 
-    private fun actorFor(identity: RequestIdentity): ActorScope {
+    /**
+     * The full identity of an idempotency slot: which tenant (if any), which property (if the
+     * identity carries one), which kind of actor, and which actor. Request idempotency belongs
+     * to the authenticated calling actor, not just their tenant — two different tenant users,
+     * two different platform operators, or two different onboarding applicants must never
+     * share a slot merely because they picked the same key value. `Public`/guest sessions are
+     * the one identity with no stable actor id at all (no login, no applicant token), so guests
+     * within the same tenant+property necessarily still share one slot — a limit of that
+     * identity, not something scoping alone can close.
+     */
+    private fun scopeFor(identity: RequestIdentity): IdempotencyScope {
         return when (identity) {
-            is RequestIdentity.Tenant -> ActorScope("tenant_user", identity.tenantUserId)
-            is RequestIdentity.Platform -> ActorScope("platform_user", identity.platformUserId)
-            is RequestIdentity.Support -> ActorScope("platform_user", identity.platformUserId)
-            is RequestIdentity.Public -> ActorScope("guest", null)
-            is RequestIdentity.OnboardingApplicant -> ActorScope("onboarding_applicant", identity.applicationId)
-        }
-    }
+            is RequestIdentity.Tenant -> IdempotencyScope(
+                tenantId = identity.tenantId,
+                propertyId = null,
+                actorType = "tenant_user",
+                actorId = identity.tenantUserId,
+            )
 
-    private fun scopeFor(identity: RequestIdentity): TenantScope {
-        return when (identity) {
-            is RequestIdentity.Tenant -> TenantScope(identity.tenantId, null)
-            is RequestIdentity.Support -> TenantScope(identity.tenantId, null)
-            is RequestIdentity.Public -> TenantScope(identity.tenantId, identity.propertyId)
-            is RequestIdentity.Platform -> TenantScope(null, null)
-            is RequestIdentity.OnboardingApplicant -> TenantScope(null, null)
+            is RequestIdentity.Support -> IdempotencyScope(
+                tenantId = identity.tenantId,
+                propertyId = null,
+                actorType = "platform_user",
+                actorId = identity.platformUserId,
+            )
+
+            is RequestIdentity.Public -> IdempotencyScope(
+                tenantId = identity.tenantId,
+                propertyId = identity.propertyId,
+                actorType = "guest",
+                actorId = null,
+            )
+
+            is RequestIdentity.Platform -> IdempotencyScope(
+                tenantId = null,
+                propertyId = null,
+                actorType = "platform_user",
+                actorId = identity.platformUserId,
+            )
+
+            is RequestIdentity.OnboardingApplicant -> IdempotencyScope(
+                tenantId = null,
+                propertyId = null,
+                actorType = "onboarding_applicant",
+                actorId = identity.applicationId,
+            )
         }
     }
 
@@ -261,13 +287,10 @@ class JdbcIdempotencyPort(
         val expiresAt: Instant,
     )
 
-    private data class ActorScope(
-        val type: String,
-        val id: UUID?,
-    )
-
-    private data class TenantScope(
+    private data class IdempotencyScope(
         val tenantId: UUID?,
         val propertyId: UUID?,
+        val actorType: String,
+        val actorId: UUID?,
     )
 }
