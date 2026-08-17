@@ -79,6 +79,7 @@ interface PropertyPort {
     fun deleteDepartment(propertyId: UUID, departmentId: UUID): PropertyChildMutationReceipt
 
     fun setRoomTypeBaseRate(propertyId: UUID, request: SetBaseRateRequest): PropertyChildMutationReceipt
+    fun listRoomTypeBaseRates(propertyId: UUID): List<BaseRateResponse>
 
     fun createTaxRate(request: CreateTaxRateRequest): PropertyChildMutationReceipt
     fun listTaxRates(): List<TaxRateResponse>

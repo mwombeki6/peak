@@ -4,6 +4,7 @@ import com.mwombeki.peak.audit.api.AuditOutcome
 import com.mwombeki.peak.audit.api.AuditPort
 import com.mwombeki.peak.audit.api.AuditResource
 import com.mwombeki.peak.audit.api.TenantAuditEvent
+import com.mwombeki.peak.property.api.BaseRateResponse
 import com.mwombeki.peak.property.api.BuildingResponse
 import com.mwombeki.peak.property.api.CreateBuildingRequest
 import com.mwombeki.peak.property.api.CreateDepartmentRequest
@@ -1565,6 +1566,27 @@ class PropertyManagementService(
         }
     }
 
+    /**
+     * A room type that has never had a rate set reads back at its `base_price` of 0, and is
+     * listed rather than filtered out. The onboarding wizard's question is "which room types
+     * still need a price", so the unpriced ones are the rows it most needs to see.
+     */
+    override fun listRoomTypeBaseRates(propertyId: UUID): List<BaseRateResponse> {
+        return readProperty(propertyId) { identity ->
+            jdbcTemplate.query(
+                """
+                SELECT id, property_id, name, code, base_price, max_occupancy, is_active
+                FROM room_types
+                WHERE tenant_id = ? AND property_id = ? AND deleted_at IS NULL
+                ORDER BY name, id
+                """.trimIndent(),
+                ::mapBaseRate,
+                identity.tenantId,
+                propertyId,
+            )
+        }
+    }
+
     override fun createTaxRate(request: CreateTaxRateRequest): PropertyChildMutationReceipt {
         return mutate(
             operationType = "property.tax_rate.create",
@@ -2578,6 +2600,18 @@ class PropertyManagementService(
             basePrice = rs.getDouble("base_price"),
             maxAdults = rs.getInt("max_adults"),
             maxChildren = rs.getInt("max_children"),
+            maxOccupancy = rs.getInt("max_occupancy"),
+            isActive = rs.getBoolean("is_active"),
+        )
+    }
+
+    private fun mapBaseRate(rs: ResultSet, @Suppress("UNUSED_PARAMETER") row: Int): BaseRateResponse {
+        return BaseRateResponse(
+            roomTypeId = rs.getObject("id", UUID::class.java),
+            propertyId = rs.getObject("property_id", UUID::class.java),
+            roomTypeName = rs.getString("name"),
+            roomTypeCode = rs.getString("code"),
+            basePrice = rs.getDouble("base_price"),
             maxOccupancy = rs.getInt("max_occupancy"),
             isActive = rs.getBoolean("is_active"),
         )

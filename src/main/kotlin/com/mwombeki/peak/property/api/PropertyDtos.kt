@@ -301,6 +301,25 @@ data class SetBaseRateRequest(
     val currency: String = "TZS",
 )
 
+/**
+ * The nightly base rate a room type sells at, which is `room_types.base_price` — the column
+ * `setRoomTypeBaseRate` writes.
+ *
+ * There is deliberately no currency here. [SetBaseRateRequest] accepts one, validates it is a
+ * three-letter code, and then discards it; nothing in the schema stores a per-rate currency.
+ * Echoing back "TZS" would be this response inventing a fact the row cannot support, and a
+ * caller would reasonably believe a non-TZS rate had been recorded when it had not.
+ */
+data class BaseRateResponse(
+    val roomTypeId: UUID,
+    val propertyId: UUID,
+    val roomTypeName: String,
+    val roomTypeCode: String?,
+    val basePrice: Double,
+    val maxOccupancy: Int,
+    val isActive: Boolean,
+)
+
 data class CreateTaxRateRequest(
     val name: String,
     val code: String,

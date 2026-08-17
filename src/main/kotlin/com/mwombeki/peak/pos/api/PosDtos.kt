@@ -253,6 +253,15 @@ data class CreatePosMenuItemRequest(
     val price: BigDecimal,
 )
 
+data class PosOutletResponse(
+    val id: UUID,
+    val propertyId: UUID,
+    val revenueCenterId: UUID?,
+    val name: String,
+    val type: String,
+    val isActive: Boolean,
+)
+
 data class PosMenuCategoryResponse(
     val id: UUID,
     val outletId: UUID,
