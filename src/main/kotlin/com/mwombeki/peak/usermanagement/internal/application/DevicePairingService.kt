@@ -348,6 +348,45 @@ class DevicePairingService(
         }
     }
 
+    /**
+     * Paired tills and displays for a tenant, newest first.
+     *
+     * Revoked devices stay in the list and carry their revocation time. A till that vanishes
+     * the moment it is revoked leaves a manager unable to confirm the revocation happened, and
+     * unable to tell a device that was retired from one that was never paired.
+     */
+    fun listDevices(tenantId: UUID, propertyId: UUID?, actorId: UUID): List<PairedDeviceSummary> =
+        transactionTemplate.execute {
+            databaseSessionContext.bind(RequestIdentity.Tenant(tenantId, actorId))
+            jdbcTemplate.query(
+                """
+                SELECT id, property_id, outlet_id, device_code, terminal_name, mode, status,
+                       key_fingerprint, paired_at, revoked_at
+                FROM paired_devices
+                WHERE tenant_id = ?
+                  AND (CAST(? AS uuid) IS NULL OR property_id = CAST(? AS uuid))
+                ORDER BY paired_at DESC
+                """.trimIndent(),
+                { rs, _ ->
+                    PairedDeviceSummary(
+                        deviceId = rs.getObject("id", UUID::class.java),
+                        propertyId = rs.getObject("property_id", UUID::class.java),
+                        outletId = rs.getObject("outlet_id", UUID::class.java),
+                        deviceCode = rs.getString("device_code"),
+                        terminalName = rs.getString("terminal_name"),
+                        mode = rs.getString("mode"),
+                        status = rs.getString("status"),
+                        keyFingerprint = rs.getString("key_fingerprint"),
+                        pairedAt = rs.getTimestamp("paired_at").toInstant(),
+                        revokedAt = rs.getTimestamp("revoked_at")?.toInstant(),
+                    )
+                },
+                tenantId,
+                propertyId,
+                propertyId,
+            )
+        }
+
     /** Rejected approvals charged to [tenantId] inside the throttling window. */
     private fun recentMisses(tenantId: UUID): Int =
         jdbcTemplate.queryForObject(
@@ -422,4 +461,17 @@ class DevicePairingService(
 
 class PairingCreateThrottledException : RuntimeException(
     "Too many pairing requests from this terminal. Wait and try again.",
+)
+
+data class PairedDeviceSummary(
+    val deviceId: UUID,
+    val propertyId: UUID,
+    val outletId: UUID?,
+    val deviceCode: String,
+    val terminalName: String,
+    val mode: String,
+    val status: String,
+    val keyFingerprint: String,
+    val pairedAt: Instant,
+    val revokedAt: Instant?,
 )

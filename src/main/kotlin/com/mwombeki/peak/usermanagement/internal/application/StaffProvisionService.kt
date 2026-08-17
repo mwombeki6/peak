@@ -47,6 +47,17 @@ class StaffProvisionService(
     private val invitationSecurityProperties: TenantInvitationSecurityProperties,
     private val credentials: StaffCredentialService,
 ) {
+    data class StaffMember(
+        val userId: UUID,
+        val fullName: String,
+        val staffNumber: String?,
+        val phoneNumber: String?,
+        val status: String,
+        val isActive: Boolean,
+        val propertyId: UUID?,
+        val propertyRoleId: UUID?,
+    )
+
     data class ProvisionCommand(
         val tenantId: UUID,
         val fullName: String,
@@ -93,6 +104,53 @@ class StaffProvisionService(
             )
         }
     }
+
+    /**
+     * The tenant's staff, newest first, optionally narrowed to one property.
+     *
+     * The onboarding wizard's manager step needs a real user id and has no other way to find
+     * one, which is why this exists. Disabled staff are included and carry their status, since
+     * a manager checking why someone cannot log in needs to see them.
+     *
+     * Left joined to the property role: a user created but not yet assigned to a property is
+     * exactly the half-finished state a directory should surface rather than hide.
+     */
+    fun listStaff(tenantId: UUID, propertyId: UUID?): List<StaffMember> =
+        transactionTemplate.execute {
+            val identity = requestContextHolder.current().identity
+            require(identity is RequestIdentity.Tenant) {
+                "Tenant user identity is required to read the staff directory"
+            }
+            databaseSessionContext.bind(RequestIdentity.Tenant(tenantId, identity.tenantUserId))
+            jdbcTemplate.query(
+                """
+                SELECT u.id, u.full_name, u.staff_number, u.phone_number, u.status, u.is_active,
+                       upr.property_id, upr.role_id
+                FROM users u
+                LEFT JOIN user_property_roles upr
+                       ON upr.user_id = u.id
+                      AND upr.tenant_id = u.tenant_id
+                WHERE u.tenant_id = ?
+                  AND (CAST(? AS uuid) IS NULL OR upr.property_id = CAST(? AS uuid))
+                ORDER BY u.created_at DESC, u.id
+                """.trimIndent(),
+                { rs, _ ->
+                    StaffMember(
+                        userId = rs.getObject("id", UUID::class.java),
+                        fullName = rs.getString("full_name"),
+                        staffNumber = rs.getString("staff_number"),
+                        phoneNumber = rs.getString("phone_number"),
+                        status = rs.getString("status"),
+                        isActive = rs.getBoolean("is_active"),
+                        propertyId = rs.getObject("property_id", UUID::class.java),
+                        propertyRoleId = rs.getObject("role_id", UUID::class.java),
+                    )
+                },
+                tenantId,
+                propertyId,
+                propertyId,
+            )
+        }
 
     private fun provisionInsideTransaction(command: NormalizedProvision): ProvisionReceipt {
         val actorUserId = tenantPermissionAccessPort.requireAuthorized(
