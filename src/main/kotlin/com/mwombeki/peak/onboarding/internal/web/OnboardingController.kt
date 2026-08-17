@@ -3,6 +3,7 @@ package com.mwombeki.peak.onboarding.internal.web
 import com.mwombeki.peak.onboarding.api.OnboardingSessionReceipt
 import com.mwombeki.peak.onboarding.api.RequestAccessCommand
 import com.mwombeki.peak.onboarding.api.RequestAccessReceipt
+import com.mwombeki.peak.onboarding.api.UpdateOnboardingProfileCommand
 import com.mwombeki.peak.onboarding.api.VerifyOnboardingPhoneCommand
 import com.mwombeki.peak.onboarding.internal.OnboardingApplicationService
 import com.mwombeki.peak.shared.context.RequestContextHolder
@@ -13,6 +14,7 @@ import com.mwombeki.peak.tenantmanagement.api.RequestVerificationDocumentUploadC
 import com.mwombeki.peak.tenantmanagement.api.TenantTrustControlPort
 import com.mwombeki.peak.tenantmanagement.api.VerificationSubjectRef
 import jakarta.validation.Valid
+import jakarta.validation.constraints.Email
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Pattern
 import java.time.LocalDate
@@ -58,6 +60,13 @@ class OnboardingController(
         VerifyOnboardingPhoneCommand(request.applicationId, request.code),
     )
 
+    @PostMapping("/me/profile")
+    fun updateProfile(@Valid @RequestBody request: UpdateProfileHttpRequest) {
+        onboardingApplicationService.updateProfile(
+            UpdateOnboardingProfileCommand(currentApplicationId(), request.legalName, request.businessEmail),
+        )
+    }
+
     @GetMapping("/me/verification-cases")
     fun verificationCases() = trustPort.listVerificationCases(currentSubject(), platformView = false)
 
@@ -96,11 +105,24 @@ class OnboardingController(
     fun submitVerificationCase(@PathVariable caseId: UUID) =
         trustPort.submitVerificationCase(currentSubject(), caseId)
 
-    private fun currentSubject(): VerificationSubjectRef.Application {
+    private fun currentSubject(): VerificationSubjectRef.Application =
+        VerificationSubjectRef.Application(currentApplicationId())
+
+    private fun currentApplicationId(): UUID {
         val identity = requestContextHolder.current().identity as? RequestIdentity.OnboardingApplicant
             ?: error("Onboarding applicant identity is required")
-        return VerificationSubjectRef.Application(identity.applicationId)
+        return identity.applicationId
     }
+}
+
+@RestController
+@RequestMapping("/api/v1/platform/onboarding")
+class PlatformOnboardingController(
+    private val onboardingApplicationService: OnboardingApplicationService,
+) {
+    @PostMapping("/{applicationId}/provision")
+    fun provisionTenant(@PathVariable applicationId: UUID) =
+        onboardingApplicationService.provisionTenant(applicationId)
 }
 
 data class RequestAccessHttpRequest(
@@ -113,6 +135,11 @@ data class RequestAccessHttpRequest(
 data class VerifyPhoneHttpRequest(
     val applicationId: UUID,
     @field:NotBlank val code: String,
+)
+
+data class UpdateProfileHttpRequest(
+    @field:NotBlank val legalName: String,
+    @field:NotBlank @field:Email val businessEmail: String,
 )
 
 data class CreateVerificationCaseHttpRequest(

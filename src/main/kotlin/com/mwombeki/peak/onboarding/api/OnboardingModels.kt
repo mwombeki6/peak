@@ -32,3 +32,13 @@ data class OnboardingSessionReceipt(
 
 @NamedInterface("api")
 class OnboardingVerificationFailedException(message: String) : RuntimeException(message)
+
+@NamedInterface("api")
+data class UpdateOnboardingProfileCommand(
+    val applicationId: UUID,
+    val legalName: String,
+    val businessEmail: String,
+)
+
+@NamedInterface("api")
+class OnboardingProvisioningException(message: String) : RuntimeException(message)
