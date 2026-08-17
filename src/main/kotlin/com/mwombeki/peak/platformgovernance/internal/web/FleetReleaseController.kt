@@ -30,6 +30,8 @@ import jakarta.validation.constraints.PositiveOrZero
 import jakarta.validation.constraints.Size
 import java.time.Instant
 import java.util.UUID
+import org.springframework.core.Ordered
+import org.springframework.core.annotation.Order
 import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
 import org.springframework.http.ResponseEntity
@@ -175,6 +177,11 @@ class FeatureControlController(private val features: FeatureControlPort) {
     ) = features.effectiveFlags(tenantId, propertyId)
 }
 
+// A controller-specific advice must outrank GlobalExceptionHandler, whose
+// @ExceptionHandler(Exception) catch-all otherwise turns every domain exception
+// it does not name explicitly into a 500. Both default to LOWEST_PRECEDENCE, and
+// the tie is broken arbitrarily.
+@Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(assignableTypes = [
     FleetControlController::class, ReleaseControlController::class, FeatureControlController::class,
 ])

@@ -24,6 +24,7 @@ class RequestContextResolver(
         val correlationId = resolveCorrelationId(request)
         val idempotencyKey = resolveIdempotencyKey(request)
         val identity = resolveIdentity(request, authentication, correlationId)
+        val operational = authentication as? OperationalSessionAuthentication
 
         return RequestContext(
             identity = identity,
@@ -40,6 +41,13 @@ class RequestContextResolver(
                 ?.take(MAX_USER_AGENT_LENGTH)
                 ?.takeIf(String::isNotEmpty),
             authentication = resolveAssurance(authentication),
+            sessionClass = when (authentication) {
+                is OperationalSessionAuthentication -> SessionClass.OPERATIONAL
+                else -> SessionClass.STRONG
+            },
+            boundPropertyId = operational?.propertyId,
+            boundOutletId = operational?.outletId,
+            boundSessionId = operational?.sessionId,
         )
     }
 
@@ -138,7 +146,10 @@ class RequestContextResolver(
     }
 
     private fun Authentication?.hasAuthenticatedPrincipal(): Boolean {
-        return this != null && this !is AnonymousAuthenticationToken && isAuthenticated
+        return this != null &&
+            this !is AnonymousAuthenticationToken &&
+            this !is HeaderIdentityAuthentication &&
+            isAuthenticated
     }
 
     private fun Authentication?.toRequestIdentity(
@@ -146,6 +157,14 @@ class RequestContextResolver(
     ): RequestIdentity? {
         if (!hasAuthenticatedPrincipal()) {
             return null
+        }
+
+        if (this is OperationalSessionAuthentication) {
+            return RequestIdentity.Tenant(
+                tenantId = tenantId,
+                tenantUserId = tenantUserId,
+                correlationId = correlationId,
+            )
         }
 
         if (this !is JwtAuthenticationToken) {

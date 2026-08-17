@@ -6,7 +6,8 @@
                 "shared::exception",
                 "audit::api",
                 "reliability::api",
-                "billing::api"
+                "billing::api",
+                "communications::api"
         }
 )
 package com.mwombeki.peak.reservations;

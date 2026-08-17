@@ -18,30 +18,46 @@ set -a
 source "$ENV_FILE"
 set +a
 
+# Bounded, and no longer silent, because this ran on every exit path and could not report.
+#
+# It is the drill's genuine last act, which matches what three cancelled runs printed: the
+# container removals immediately before it, then nothing. Discarding its output meant whatever
+# it said while stuck was thrown away, and `|| true` meant it could never fail — so a teardown
+# that never returned looked exactly like a drill that had finished.
+#
+# `down -v` removes volumes and the network, which is the slowest thing podman does here, so
+# the bound is generous. If it is exceeded that is the finding, and saying so costs one line.
 cleanup() {
-  podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" \
-    -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" down -v --remove-orphans >/dev/null 2>&1 || true
+  if ! timeout 180 podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" \
+      -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" down -v --remove-orphans >/dev/null 2>&1; then
+    echo "Restore drill teardown did not finish within 180s; leaving $RESTORE_PROJECT behind." >&2
+  fi
 }
 trap cleanup EXIT
 
+# Every query helper below is bounded twice: an outer timeout for a wedged exec channel, and
+# a statement_timeout for a query blocked on a lock, which PostgreSQL would otherwise wait on
+# forever. These are all small reads against a freshly restored database, so exceeding either
+# bound is a finding rather than slow work.
+
 source_db() {
-  podman compose -p "$SOURCE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
-    exec -T postgres psql -XAt -U "$POSTGRES_MIGRATOR_USER" -d "$POSTGRES_DB" -c "$1"
+  timeout 60 podman compose -p "$SOURCE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
+    exec -T -e PGOPTIONS='-c statement_timeout=30000' postgres psql -XAt -U "$POSTGRES_MIGRATOR_USER" -d "$POSTGRES_DB" -c "$1"
 }
 
 restored_db() {
-  podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
-    exec -T postgres psql -XAt -U "$POSTGRES_MIGRATOR_USER" -d "$POSTGRES_DB" -c "$1"
+  timeout 60 podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
+    exec -T -e PGOPTIONS='-c statement_timeout=30000' postgres psql -XAt -U "$POSTGRES_MIGRATOR_USER" -d "$POSTGRES_DB" -c "$1"
 }
 
 source_keycloak_db() {
-  podman compose -p "$SOURCE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
-    exec -T keycloak-db psql -XAt -U "$KEYCLOAK_DB_USER" -d "$KEYCLOAK_DB" -c "$1"
+  timeout 60 podman compose -p "$SOURCE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
+    exec -T -e PGOPTIONS='-c statement_timeout=30000' keycloak-db psql -XAt -U "$KEYCLOAK_DB_USER" -d "$KEYCLOAK_DB" -c "$1"
 }
 
 restored_keycloak_db() {
-  podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
-    exec -T keycloak-db psql -XAt -U "$KEYCLOAK_DB_USER" -d "$KEYCLOAK_DB" -c "$1"
+  timeout 60 podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
+    exec -T -e PGOPTIONS='-c statement_timeout=30000' keycloak-db psql -XAt -U "$KEYCLOAK_DB_USER" -d "$KEYCLOAK_DB" -c "$1"
 }
 
 export BACKUP_DIR="$EVIDENCE_DIR/backups"
@@ -59,8 +75,28 @@ source_clients="$(source_keycloak_db "SELECT count(*) FROM client")"
 source_users="$(source_keycloak_db "SELECT count(*) FROM user_entity")"
 
 export COMPOSE_PROJECT_NAME="$RESTORE_PROJECT"
-podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
-  up -d postgres keycloak-db
+# Bounded, and --no-deps, because this is where the job went silent.
+#
+# The acceptance job was cancelled twice at its ceiling. The last line it ever printed came
+# from this project — containers created, then nothing for 82 minutes until the runner killed
+# it. The readiness poll below is already bounded at 120s, so the wait was never the problem:
+# the compose call itself never returned. depends_on: condition: service_healthy needs the
+# runtime to execute healthchecks, and podman on the CI runner does not, so anything that
+# evaluates the dependency graph can block on a condition nothing will satisfy.
+#
+# --no-deps stops compose evaluating that graph; the poll below establishes readiness itself.
+# The timeout turns a silent consumer of the whole budget into a diagnosis — the same trade
+# 970dd6d made for the foundation stack.
+if ! timeout 600 podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" \
+    -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
+    up -d --no-deps postgres keycloak-db; then
+  echo "Restore drill could not bring up postgres and keycloak-db." >&2
+  podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" \
+    -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" ps >&2 || true
+  podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" \
+    -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" logs --tail 100 postgres keycloak-db >&2 || true
+  exit 1
+fi
 for _ in $(seq 1 60); do
   if podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
       exec -T postgres pg_isready -U "$POSTGRES_MIGRATOR_USER" -d "$POSTGRES_DB" >/dev/null 2>&1 &&

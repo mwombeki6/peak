@@ -22,6 +22,34 @@ class RequestContextResolverTests {
         assertEquals("corr-123", context.correlationId)
         assertEquals("GET", context.httpMethod)
         assertEquals("/api/v1/public/ping", context.requestPath)
+        assertEquals(SessionClass.STRONG, context.sessionClass)
+    }
+
+    @Test
+    fun resolvesOperationalSessionAsTenantIdentityWithOperationalClass() {
+        val tenantId = UUID.randomUUID()
+        val tenantUserId = UUID.randomUUID()
+        val deviceId = UUID.randomUUID()
+        val propertyId = UUID.randomUUID()
+        val request = MockHttpServletRequest("GET", "/api/v1/properties/$propertyId/pos/orders")
+        request.addHeader(PeakRequestHeaders.CORRELATION_ID, "corr-ops")
+
+        val context = resolver().resolve(
+            request,
+            OperationalSessionAuthentication(
+                sessionId = UUID.randomUUID(),
+                tenantId = tenantId,
+                tenantUserId = tenantUserId,
+                deviceId = deviceId,
+                propertyId = propertyId,
+            ),
+        )
+
+        assertEquals(
+            RequestIdentity.Tenant(tenantId, tenantUserId, "corr-ops"),
+            context.identity,
+        )
+        assertEquals(SessionClass.OPERATIONAL, context.sessionClass)
     }
 
     @Test
@@ -315,6 +343,61 @@ class RequestContextResolverTests {
         }
 
         assertEquals("Identity headers are disabled for this runtime", error.message)
+    }
+
+    @Test
+    fun rejectsIdentityHeadersCombinedWithOperationalSession() {
+        val tenantId = UUID.randomUUID()
+        val tenantUserId = UUID.randomUUID()
+        val request = MockHttpServletRequest("GET", "/api/v1/properties/${UUID.randomUUID()}/pos-orders")
+        request.addHeader(PeakRequestHeaders.TENANT_ID, tenantId.toString())
+        request.addHeader(PeakRequestHeaders.TENANT_USER_ID, tenantUserId.toString())
+
+        val error = assertFailsWith<RequestContextException> {
+            resolver(allowHeaderIdentity = true).resolve(
+                request,
+                OperationalSessionAuthentication(
+                    sessionId = UUID.randomUUID(),
+                    tenantId = tenantId,
+                    tenantUserId = tenantUserId,
+                    deviceId = UUID.randomUUID(),
+                    propertyId = UUID.randomUUID(),
+                ),
+            )
+        }
+
+        assertEquals(
+            "Identity headers cannot be combined with authenticated identity",
+            error.message,
+        )
+    }
+
+    @Test
+    fun bindsOperationalSessionPropertyAndOutlet() {
+        val tenantId = UUID.randomUUID()
+        val tenantUserId = UUID.randomUUID()
+        val propertyId = UUID.randomUUID()
+        val outletId = UUID.randomUUID()
+        val sessionId = UUID.randomUUID()
+        val request = MockHttpServletRequest("GET", "/api/v1/properties/$propertyId/pos-orders")
+        request.addHeader(PeakRequestHeaders.CORRELATION_ID, "corr-ops-bound")
+
+        val context = resolver().resolve(
+            request,
+            OperationalSessionAuthentication(
+                sessionId = sessionId,
+                tenantId = tenantId,
+                tenantUserId = tenantUserId,
+                deviceId = UUID.randomUUID(),
+                propertyId = propertyId,
+                outletId = outletId,
+            ),
+        )
+
+        assertEquals(SessionClass.OPERATIONAL, context.sessionClass)
+        assertEquals(propertyId, context.boundPropertyId)
+        assertEquals(outletId, context.boundOutletId)
+        assertEquals(sessionId, context.boundSessionId)
     }
 
     @Test

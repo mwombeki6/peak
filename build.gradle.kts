@@ -199,10 +199,29 @@ tasks.withType<Test>().configureEach {
     // Spring integration contexts and container clients retain native resources;
     // bounded forks keep the complete suite deterministic on CI-sized runners.
     forkEvery = 25
+
+    // Several tests assert against files that are not on the classpath — migrations, the
+    // production role bootstrap, the ownership CSV. Gradle hashes declared inputs to decide
+    // whether a task is up to date, so without these it will report a stale PASS after one of
+    // them changes. That was not theoretical: the role-bootstrap guard silently skipped when
+    // only role-bootstrap.sql was edited, which is exactly when it needs to run.
+    inputs.files(
+        fileTree("src/main/resources/db/migration"),
+        file("ops/production/role-bootstrap.sql"),
+        file("docs/architecture/database-ownership.csv"),
+        file("ops/production/.env.example"),
+        file(".github/workflows/ci.yml"),
+        file(".github/workflows/resilience-soak.yml"),
+    )
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .withPropertyName("peakSourceOfTruthFiles")
     systemProperty(
         "spring.profiles.active",
         System.getProperty("spring.profiles.active") ?: "test",
     )
+    // The WebSocket handshake client in the E2E realtime journey test must be
+    // able to send the Upgrade/Connection hop-by-hop headers.
+    systemProperty("jdk.httpclient.allowRestrictedHeaders", "connection,upgrade")
     System.getProperty("peak.openapi.write-baseline")?.let { value ->
         systemProperty("peak.openapi.write-baseline", value)
     }

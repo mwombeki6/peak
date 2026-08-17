@@ -1,7 +1,9 @@
 package com.mwombeki.peak.realtime.internal.config
 
+import com.mwombeki.peak.realtime.internal.RealtimeDestinationParser
 import com.mwombeki.peak.realtime.internal.RealtimeSecurityAuditService
 import com.mwombeki.peak.realtime.internal.RealtimeSubscriptionAuthorizer
+import com.mwombeki.peak.realtime.internal.RealtimeSubscriptionTarget
 import com.mwombeki.peak.shared.context.RequestContext
 import com.mwombeki.peak.shared.context.RequestContextException
 import com.mwombeki.peak.shared.context.RequestContextResolver
@@ -124,34 +126,35 @@ class WebSocketConfig(
                         releaseConnection(accessor.sessionAttributes)
                     }
                     StompCommand.SUBSCRIBE -> {
-                        val destination = accessor.destination ?: throw IllegalStateException("No channel destination provided.")
+                        val destination = accessor.destination
+                            ?: throw IllegalStateException("No channel destination provided.")
                         val context = accessor.sessionAttributes
                             ?.get(SESSION_CONTEXT_ATTRIBUTE) as? RequestContext
                             ?: throw SecurityException("Authenticated WebSocket session is required.")
-                        val match = STREAM_DESTINATION_PATTERN.matchEntire(destination)
-                            ?: run {
-                                val identity = context.identity as? RequestIdentity.Tenant
-                                if (identity != null) {
-                                    recordDeniedSubscription(
-                                        context,
-                                        identity.tenantId,
-                                        INVALID_PROPERTY_ID,
-                                        destination,
-                                    )
-                                }
-                                throw SecurityException(
-                                    "Realtime subscription destination is not allowed.",
-                                )
-                            }
-                        val targetTenantId = UUID.fromString(match.groupValues[1])
-                        val targetPropertyId = UUID.fromString(match.groupValues[2])
                         val identity = context.identity
-
-                        if (!subscriptionAuthorizer.canSubscribe(identity, targetTenantId, targetPropertyId)) {
-                            recordDeniedSubscription(context, targetTenantId, targetPropertyId, destination)
-                            throw SecurityException("Access denied for realtime property stream.")
+                        val target = RealtimeDestinationParser.parse(destination)
+                        if (
+                            target == null ||
+                            !subscriptionAuthorizer.canSubscribeDestination(
+                                identity,
+                                target,
+                                context.sessionClass,
+                                boundPropertyId = context.boundPropertyId,
+                                boundOutletId = context.boundOutletId,
+                            )
+                        ) {
+                            recordDeniedSubscription(
+                                context = context,
+                                targetTenantId = target.targetTenantIdOr(
+                                    identity.tenantIdOrUnknown(),
+                                ),
+                                targetPropertyId = target.propertyIdOrUnknown(),
+                                destination = destination,
+                            )
+                            throw SecurityException(
+                                "Access denied for realtime subscription destination.",
+                            )
                         }
-
                         meterRegistry.counter("peak.realtime.websocket.subscriptions").increment()
                     }
                     StompCommand.SEND -> throw SecurityException(
@@ -191,10 +194,42 @@ class WebSocketConfig(
     }
 
     private companion object {
-        val STREAM_DESTINATION_PATTERN = Regex("^/topic/tenants/([^/]+)/properties/([^/]+)/stream$")
         const val SESSION_CONTEXT_ATTRIBUTE = "peak.realtime.request-context"
         const val SESSION_COUNTED_ATTRIBUTE = "peak.realtime.connection-counted"
         val INVALID_PROPERTY_ID: UUID = UUID(0, 0)
+
+        fun RequestIdentity?.tenantIdOrUnknown(): UUID =
+            (this as? RequestIdentity.Tenant)?.tenantId ?: INVALID_PROPERTY_ID
+
+        fun RealtimeSubscriptionTarget?.propertyIdOrUnknown(): UUID =
+            when (this) {
+                is RealtimeSubscriptionTarget.PropertyStream -> propertyId
+                is RealtimeSubscriptionTarget.PropertyOperations -> propertyId
+                is RealtimeSubscriptionTarget.Outlet,
+                is RealtimeSubscriptionTarget.Order,
+                is RealtimeSubscriptionTarget.Payment,
+                null,
+                -> INVALID_PROPERTY_ID
+            }
+
+        /**
+         * The tenant the subscription was aimed at, which is the whole point of auditing
+         * a denial: the actor is already recorded as the row's tenant, so recording the
+         * actor again as the target makes a cross-tenant attempt indistinguishable from a
+         * same-tenant one. Only PropertyStream names a tenant in the destination; the
+         * others carry a property, outlet, order or payment, so there the caller's tenant
+         * is still the most truthful answer available without a lookup.
+         */
+        fun RealtimeSubscriptionTarget?.targetTenantIdOr(fallback: UUID): UUID =
+            when (this) {
+                is RealtimeSubscriptionTarget.PropertyStream -> tenantId
+                is RealtimeSubscriptionTarget.PropertyOperations,
+                is RealtimeSubscriptionTarget.Outlet,
+                is RealtimeSubscriptionTarget.Order,
+                is RealtimeSubscriptionTarget.Payment,
+                null,
+                -> fallback
+            }
     }
 }
 

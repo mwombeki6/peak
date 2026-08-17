@@ -3,6 +3,7 @@ package com.mwombeki.peak.usermanagement.internal
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.shared.context.SessionClass
 import com.mwombeki.peak.usermanagement.api.AuthorizationDecision
 import com.mwombeki.peak.usermanagement.api.AuthorizationPort
 import com.mwombeki.peak.usermanagement.api.GuardMode
@@ -66,6 +67,20 @@ class JdbcAuthorizationPort(
             return AuthorizationDecision.denied("Invalid route scope for staff permission guard")
         }
 
+        val sessionClass = requestContextHolder.current().sessionClass
+        if (sessionClass == SessionClass.OPERATIONAL) {
+            val boundPropertyId = requestContextHolder.current().boundPropertyId
+            if (
+                boundPropertyId != null &&
+                request.propertyId != null &&
+                request.propertyId != boundPropertyId
+            ) {
+                return AuthorizationDecision.denied(
+                    "Operational session is bound to a different property",
+                )
+            }
+        }
+
         val allowed = jdbcTemplate.queryForObject(
             "SELECT can_access_module(?, ?, ?, ?, ?)",
             Boolean::class.java,
@@ -76,10 +91,22 @@ class JdbcAuthorizationPort(
             request.permissionCode,
         ) == true
 
-        return if (allowed) {
+        if (!allowed) {
+            return AuthorizationDecision.denied("Tenant user lacks required module permission")
+        }
+
+        val requiredClass = jdbcTemplate.query(
+            "SELECT minimum_session_class FROM permission_catalog WHERE code = ?",
+            { rs, _ -> rs.getString("minimum_session_class") },
+            request.permissionCode,
+        ).firstOrNull()
+            ?.let(SessionClass::fromPolicy)
+            ?: SessionClass.STRONG
+
+        return if (sessionClass.satisfies(requiredClass)) {
             AuthorizationDecision.allowed()
         } else {
-            AuthorizationDecision.denied("Tenant user lacks required module permission")
+            AuthorizationDecision.denied("Session class is insufficient for this permission")
         }
     }
 

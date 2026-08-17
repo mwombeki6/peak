@@ -24,6 +24,15 @@ peak:
     providers:
       contract-mock:
         enabled: false
+  platformbilling:
+    enabled: ${PEAK_PLATFORMBILLING_ENABLED:true}
+    primary-provider: ${PEAK_PLATFORMBILLING_PRIMARY_PROVIDER:snippe}
+    fallback-provider: ${PEAK_PLATFORMBILLING_FALLBACK_PROVIDER:}
+    app-name: ${PEAK_PLATFORMBILLING_APP_NAME:}
+    client-id-secret-ref: ${PEAK_PLATFORMBILLING_CLIENT_ID_SECRET_REF:}
+    api-key-secret-ref: ${PEAK_PLATFORMBILLING_API_KEY_SECRET_REF:}
+    checksum-key-secret-ref: ${PEAK_PLATFORMBILLING_CHECKSUM_KEY_SECRET_REF:}
+    endpoint-url: ${PEAK_PLATFORMBILLING_ENDPOINT_URL:}
   fiscal:
     production-approved-provider-codes: ${PEAK_FISCAL_PRODUCTION_APPROVED_PROVIDER_CODES:}
     providers:

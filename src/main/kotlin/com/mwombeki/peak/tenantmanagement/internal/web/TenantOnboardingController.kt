@@ -3,6 +3,7 @@ package com.mwombeki.peak.tenantmanagement.internal.web
 import com.mwombeki.peak.shared.exception.ApiProblemFactory
 
 import com.mwombeki.peak.tenantmanagement.api.TenantOnboardingPort
+import com.mwombeki.peak.tenantmanagement.api.TenantOnboardingResponse
 import com.mwombeki.peak.tenantmanagement.api.TenantRegisterRequest
 import com.mwombeki.peak.tenantmanagement.api.TenantResponse
 import jakarta.validation.Valid
@@ -37,6 +38,11 @@ class TenantOnboardingController(
         val response = tenantOnboardingPort.getTenantById(id)
             ?: return ResponseEntity.notFound().build()
         return ResponseEntity.ok(response)
+    }
+
+    @GetMapping("/{id}/onboarding")
+    fun getOnboarding(@PathVariable id: UUID): TenantOnboardingResponse {
+        return tenantOnboardingPort.getOnboarding(id)
     }
 
     @ExceptionHandler(IllegalArgumentException::class)

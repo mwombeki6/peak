@@ -7,6 +7,7 @@ import org.springframework.modulith.NamedInterface
 @NamedInterface("api")
 interface PropertyPort {
     fun createProperty(request: CreatePropertyRequest): PropertyMutationReceipt
+    fun bootstrapFirstProperty(request: CreatePropertyRequest): PropertyBootstrapResponse
     fun updateProperty(propertyId: UUID, request: UpdatePropertyRequest): PropertyMutationReceipt
     fun getProperty(propertyId: UUID): PropertyResponse?
     fun listProperties(): List<PropertyResponse>
@@ -14,6 +15,7 @@ interface PropertyPort {
     fun suspendProperty(propertyId: UUID): PropertyMutationReceipt
     fun archiveProperty(propertyId: UUID): PropertyMutationReceipt
     fun checkReadiness(propertyId: UUID): PropertyReadinessResponse
+    fun getOnboarding(propertyId: UUID): PropertyOnboardingResponse
     fun activateProperty(propertyId: UUID): PropertyReadinessResponse
 
     fun createBuilding(propertyId: UUID, request: CreateBuildingRequest): PropertyChildMutationReceipt

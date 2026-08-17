@@ -15,6 +15,8 @@ import com.mwombeki.peak.property.api.CreateRoomTypeRequest
 import com.mwombeki.peak.property.api.CreateTaxRateRequest
 import com.mwombeki.peak.property.api.DepartmentResponse
 import com.mwombeki.peak.property.api.FloorResponse
+import com.mwombeki.peak.property.api.PropertyActivationBlockedException
+import com.mwombeki.peak.property.api.PropertyBootstrapResponse
 import com.mwombeki.peak.property.api.PropertyChildMutationReceipt
 import com.mwombeki.peak.property.api.PropertyManagementConflictException
 import com.mwombeki.peak.property.api.PropertyManagementInProgressException
@@ -23,6 +25,7 @@ import com.mwombeki.peak.property.api.PropertyModuleMutationReceipt
 import com.mwombeki.peak.property.api.PropertyMutationReceipt
 import com.mwombeki.peak.property.api.PropertyOperationsPort
 import com.mwombeki.peak.property.api.PropertyCloseSnapshotSummary
+import com.mwombeki.peak.property.api.PropertyOnboardingResponse
 import com.mwombeki.peak.property.api.PropertyPort
 import com.mwombeki.peak.property.api.PropertyReadinessResponse
 import com.mwombeki.peak.property.api.PropertyResponse
@@ -79,6 +82,7 @@ class PropertyManagementService(
     private val meterRegistry: MeterRegistry,
     private val propertyAccessBootstrapPort: PropertyAccessBootstrapPort,
     private val tenantModuleConfigurationPort: TenantModuleConfigurationPort,
+    private val goLiveEvaluator: PropertyGoLiveEvaluator,
 ) : PropertyPort, PropertyOperationsPort {
 
     override fun requireAssignableRoom(
@@ -379,72 +383,30 @@ class PropertyManagementService(
             resourceType = "properties",
             replayType = PropertyMutationReceipt::class.java,
         ) { identity, reservationId ->
-            requireTenantCapacity(identity.tenantId, "limit.properties")
-            val propertyId = UUID.randomUUID()
-            try {
-                jdbcTemplate.update(
-                    """
-                    INSERT INTO properties (
-                        id, tenant_id, name, location, code, type, status,
-                        is_active, timezone, business_date_offset, business_date
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, false, ?, ?,
-                            ((now() AT TIME ZONE ?)::date + ?))
-                    """.trimIndent(),
-                    propertyId,
-                    identity.tenantId,
-                    request.name.normalizedRequired("name"),
-                    request.location?.trimmedOrNull(),
-                    request.code?.normalizedCode(),
-                    request.type.normalizedRequired("type").uppercase(),
-                    PROPERTY_STATUS_DRAFT,
-                    request.timezone.validatedTimezone(),
-                    request.businessDateOffset.validatedBusinessDateOffset(),
-                    request.timezone.validatedTimezone(),
-                    request.businessDateOffset.validatedBusinessDateOffset(),
-                )
-            } catch (ex: DuplicateKeyException) {
-                throw PropertyManagementConflictException("Property code is already in use")
-            }
-
-            tenantModuleConfigurationPort.enableConfiguredModule(
-                ConfigureTenantModuleCommand(
-                    tenantId = identity.tenantId,
-                    moduleId = PROPERTY_MODULE_ID,
-                    source = "system",
-                ),
-            )
-            upsertPropertyModule(identity.tenantId, propertyId, PROPERTY_MODULE_ID, enabled = true)
-            propertyAccessBootstrapPort.ensurePropertyAdministrator(
-                EnsurePropertyAdministratorCommand(
-                    tenantId = identity.tenantId,
-                    propertyId = propertyId,
-                    tenantUserId = identity.tenantUserId,
-                ),
-            )
-
+            val propertyId = insertDraftProperty(identity, request, reservationId)
             PropertyMutationReceipt(
                 propertyId = propertyId,
                 status = PROPERTY_STATUS_DRAFT,
                 changed = true,
                 replayed = false,
-            ).also { receipt ->
-                recordPropertySideEffects(
-                    tenantId = identity.tenantId,
-                    propertyId = propertyId,
-                    action = "property.created",
-                    eventType = "property.created",
-                    aggregateType = "properties",
-                    aggregateId = propertyId,
-                    payload = mapOf(
-                        "propertyId" to propertyId,
-                        "name" to request.name.normalizedRequired("name"),
-                        "code" to request.code?.normalizedCode(),
-                        "status" to receipt.status,
-                    ),
-                    idempotencyKeyId = reservationId,
+            )
+        }
+    }
+
+    override fun bootstrapFirstProperty(request: CreatePropertyRequest): PropertyBootstrapResponse {
+        return mutate(
+            operationType = "property.bootstrap",
+            requestPayload = request,
+            resourceType = "properties",
+            replayType = PropertyBootstrapResponse::class.java,
+        ) { identity, reservationId ->
+            val propertyId = insertDraftProperty(identity, request, reservationId)
+            goLiveEvaluator.evaluateAndPersist(identity.tenantId, propertyId)
+                .toBootstrapResponse(
+                    status = PROPERTY_STATUS_DRAFT,
+                    changed = true,
+                    replayed = false,
                 )
-            }
         }
     }
 
@@ -563,7 +525,13 @@ class PropertyManagementService(
 
     override fun checkReadiness(propertyId: UUID): PropertyReadinessResponse {
         return read { identity ->
-            propertyReadiness(identity.tenantId, propertyId)
+            goLiveEvaluator.evaluateAndPersist(identity.tenantId, propertyId).toReadinessResponse()
+        }
+    }
+
+    override fun getOnboarding(propertyId: UUID): PropertyOnboardingResponse {
+        return read { identity ->
+            goLiveEvaluator.evaluateAndPersist(identity.tenantId, propertyId).toOnboardingResponse()
         }
     }
 
@@ -574,7 +542,7 @@ class PropertyManagementService(
             resourceType = "properties",
             replayType = PropertyReadinessResponse::class.java,
         ) { identity, reservationId ->
-            val readiness = propertyReadiness(identity.tenantId, propertyId)
+            val readiness = goLiveEvaluator.evaluateAndPersist(identity.tenantId, propertyId)
             if (!readiness.isReady) {
                 auditPort.recordTenantEvent(
                     TenantAuditEvent(
@@ -582,11 +550,19 @@ class PropertyManagementService(
                         action = "property.activation_failed",
                         resource = AuditResource("property", propertyId),
                         outcome = AuditOutcome.FAILURE,
-                        after = mapOf("missing" to readiness.missingRequirements),
+                        after = mapOf(
+                            "missing" to readiness.blockers.map { it.code },
+                            "nextAction" to readiness.nextAction?.step,
+                            "collectionEnabled" to readiness.collectionEnabled,
+                        ),
                     ),
                 )
-                throw PropertyManagementConflictException(
-                    "Cannot activate property until readiness requirements are complete.",
+                throw PropertyActivationBlockedException(
+                    readiness.nextAction?.why
+                        ?: "Cannot activate property until readiness requirements are complete.",
+                    nextAction = readiness.nextAction,
+                    blockers = readiness.blockers,
+                    operatorBlocker = readiness.operatorBlocker,
                 )
             }
 
@@ -613,7 +589,7 @@ class PropertyManagementService(
                 payload = mapOf("propertyId" to propertyId, "status" to PROPERTY_STATUS_ACTIVE),
                 idempotencyKeyId = reservationId,
             )
-            readiness
+            goLiveEvaluator.evaluateAndPersist(identity.tenantId, propertyId).toReadinessResponse()
         }
     }
 
@@ -2053,156 +2029,6 @@ class PropertyManagementService(
         }
     }
 
-    private fun propertyReadiness(
-        tenantId: UUID,
-        propertyId: UUID,
-    ): PropertyReadinessResponse {
-        val missing = mutableListOf<String>()
-        val property = requireProperty(tenantId, propertyId, lock = false)
-
-        if (property.status in TERMINAL_PROPERTY_STATUSES) {
-            missing.add("Property must not be archived or terminated.")
-        }
-        if (property.name.isBlank()) {
-            missing.add("Property profile name is required.")
-        }
-
-        val buildingCount = count(
-            """
-            SELECT COUNT(*)
-            FROM buildings
-            WHERE tenant_id = ?
-              AND property_id = ?
-              AND deleted_at IS NULL
-            """.trimIndent(),
-            tenantId,
-            propertyId,
-        )
-        if (buildingCount == 0) {
-            missing.add("Property must have at least one building configured.")
-        }
-
-        val floorCount = count(
-            """
-            SELECT COUNT(*)
-            FROM floors f
-            JOIN buildings b ON b.id = f.building_id AND b.tenant_id = f.tenant_id
-            WHERE f.tenant_id = ?
-              AND b.property_id = ?
-              AND f.deleted_at IS NULL
-              AND b.deleted_at IS NULL
-            """.trimIndent(),
-            tenantId,
-            propertyId,
-        )
-        if (floorCount == 0) {
-            missing.add("Property must have at least one floor configured.")
-        }
-
-        val activeRoomTypeCount = count(
-            """
-            SELECT COUNT(*)
-            FROM room_types
-            WHERE tenant_id = ?
-              AND property_id = ?
-              AND deleted_at IS NULL
-              AND is_active = true
-            """.trimIndent(),
-            tenantId,
-            propertyId,
-        )
-        if (activeRoomTypeCount == 0) {
-            missing.add("Property must have at least one active room type configured.")
-        }
-
-        val activeRoomCount = count(
-            """
-            SELECT COUNT(*)
-            FROM rooms
-            WHERE tenant_id = ?
-              AND property_id = ?
-              AND deleted_at IS NULL
-              AND status IN ('vacant_clean', 'vacant_dirty', 'occupied')
-            """.trimIndent(),
-            tenantId,
-            propertyId,
-        )
-        if (activeRoomCount == 0) {
-            missing.add("Property must have at least one active room configured.")
-        }
-
-        val revenueCenterCount = count(
-            """
-            SELECT COUNT(*)
-            FROM revenue_centers
-            WHERE tenant_id = ?
-              AND property_id = ?
-              AND deleted_at IS NULL
-              AND is_active = true
-            """.trimIndent(),
-            tenantId,
-            propertyId,
-        )
-        if (revenueCenterCount == 0) {
-            missing.add("Property must have at least one active revenue center configured.")
-        }
-
-        if (!exists("SELECT EXISTS(SELECT 1 FROM tax_rates WHERE tenant_id = ? AND is_active = true)", tenantId)) {
-            missing.add("Property lacks active tax configuration records.")
-        }
-
-        val roomTypesWithoutRates = count(
-            """
-            SELECT COUNT(*)
-            FROM room_types
-            WHERE tenant_id = ?
-              AND property_id = ?
-              AND deleted_at IS NULL
-              AND is_active = true
-              AND base_price <= 0
-            """.trimIndent(),
-            tenantId,
-            propertyId,
-        )
-        if (roomTypesWithoutRates > 0) {
-            missing.add("All active room types must have positive base rates configured.")
-        }
-
-        REQUIRED_PROPERTY_MODULES.forEach { moduleId ->
-            if (!tenantModuleEnabled(tenantId, moduleId) || !propertyModuleEnabled(tenantId, propertyId, moduleId)) {
-                missing.add("Required module '$moduleId' must be enabled for the tenant and property.")
-            }
-        }
-
-        val verifiedBusinessContactExists = exists(
-            """
-            SELECT EXISTS(
-                SELECT 1
-                FROM tenant_contacts tc
-                JOIN contact_channels cc
-                  ON cc.tenant_id = tc.tenant_id
-                 AND cc.contact_id = tc.id
-                 AND cc.deleted_at IS NULL
-                 AND cc.is_active = true
-                 AND cc.verification_status = 'verified'
-                WHERE tc.tenant_id = ?
-                  AND tc.deleted_at IS NULL
-                  AND tc.status = 'active'
-            )
-            """.trimIndent(),
-            tenantId,
-        )
-        if (!verifiedBusinessContactExists) {
-            missing.add("At least one active verified business contact channel is required.")
-        }
-
-        return PropertyReadinessResponse(
-            propertyId = propertyId,
-            isReady = missing.isEmpty(),
-            missingRequirements = missing,
-        )
-    }
-
     private fun requireProperty(
         tenantId: UUID,
         propertyId: UUID,
@@ -2344,6 +2170,73 @@ class PropertyManagementService(
         }
     }
 
+    private fun insertDraftProperty(
+        identity: TenantIdentity,
+        request: CreatePropertyRequest,
+        reservationId: UUID,
+    ): UUID {
+        requireTenantCapacity(identity.tenantId, "limit.properties")
+        val propertyId = UUID.randomUUID()
+        try {
+            jdbcTemplate.update(
+                """
+                INSERT INTO properties (
+                    id, tenant_id, name, location, code, type, status,
+                    is_active, timezone, business_date_offset, business_date
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, false, ?, ?,
+                        ((now() AT TIME ZONE ?)::date + ?))
+                """.trimIndent(),
+                propertyId,
+                identity.tenantId,
+                request.name.normalizedRequired("name"),
+                request.location?.trimmedOrNull(),
+                request.code?.normalizedCode(),
+                request.type.normalizedRequired("type").uppercase(),
+                PROPERTY_STATUS_DRAFT,
+                request.timezone.validatedTimezone(),
+                request.businessDateOffset.validatedBusinessDateOffset(),
+                request.timezone.validatedTimezone(),
+                request.businessDateOffset.validatedBusinessDateOffset(),
+            )
+        } catch (ex: DuplicateKeyException) {
+            throw PropertyManagementConflictException("Property code is already in use")
+        }
+
+        tenantModuleConfigurationPort.enableConfiguredModule(
+            ConfigureTenantModuleCommand(
+                tenantId = identity.tenantId,
+                moduleId = PROPERTY_MODULE_ID,
+                source = "system",
+            ),
+        )
+        upsertPropertyModule(identity.tenantId, propertyId, PROPERTY_MODULE_ID, enabled = true)
+        propertyAccessBootstrapPort.ensurePropertyAdministrator(
+            EnsurePropertyAdministratorCommand(
+                tenantId = identity.tenantId,
+                propertyId = propertyId,
+                tenantUserId = identity.tenantUserId,
+            ),
+        )
+        goLiveEvaluator.ensureWorkflow(identity.tenantId, propertyId)
+        recordPropertySideEffects(
+            tenantId = identity.tenantId,
+            propertyId = propertyId,
+            action = "property.created",
+            eventType = "property.created",
+            aggregateType = "properties",
+            aggregateId = propertyId,
+            payload = mapOf(
+                "propertyId" to propertyId,
+                "name" to request.name.normalizedRequired("name"),
+                "code" to request.code?.normalizedCode(),
+                "status" to PROPERTY_STATUS_DRAFT,
+            ),
+            idempotencyKeyId = reservationId,
+        )
+        return propertyId
+    }
+
     private fun upsertPropertyModule(
         tenantId: UUID,
         propertyId: UUID,
@@ -2423,28 +2316,6 @@ class PropertyManagementService(
         moduleId: String,
     ): Boolean {
         return tenantModuleConfigurationPort.isEnabled(tenantId, moduleId)
-    }
-
-    private fun propertyModuleEnabled(
-        tenantId: UUID,
-        propertyId: UUID,
-        moduleId: String,
-    ): Boolean {
-        return exists(
-            """
-            SELECT EXISTS(
-                SELECT 1
-                FROM property_modules
-                WHERE tenant_id = ?
-                  AND property_id = ?
-                  AND module_id = ?
-                  AND is_enabled = true
-            )
-            """.trimIndent(),
-            tenantId,
-            propertyId,
-            moduleId,
-        )
     }
 
     private fun refreshPropertyRoomCount(
@@ -2550,6 +2421,7 @@ class PropertyManagementService(
             is PropertyModuleMutationReceipt -> receipt.propertyId
             is RoomStatusMutationReceipt -> receipt.roomId
             is PropertyReadinessResponse -> receipt.propertyId
+            is PropertyBootstrapResponse -> receipt.propertyId
             else -> null
         }
     }
@@ -2561,6 +2433,7 @@ class PropertyManagementService(
             is PropertyChildMutationReceipt -> copy(replayed = true) as T
             is PropertyModuleMutationReceipt -> copy(replayed = true) as T
             is RoomStatusMutationReceipt -> copy(replayed = true) as T
+            is PropertyBootstrapResponse -> copy(replayed = true) as T
             else -> this
         }
     }
@@ -2806,10 +2679,6 @@ class PropertyManagementService(
         private const val ROOM_STATUS_VACANT_CLEAN = "vacant_clean"
 
         private val UUID_ZERO = UUID.fromString("00000000-0000-0000-0000-000000000000")
-
-        private val REQUIRED_PROPERTY_MODULES = setOf(PROPERTY_MODULE_ID)
-
-        private val TERMINAL_PROPERTY_STATUSES = setOf(PROPERTY_STATUS_ARCHIVED, "terminated")
 
         private val REVENUE_CENTER_TYPES = setOf(
             "rooms",

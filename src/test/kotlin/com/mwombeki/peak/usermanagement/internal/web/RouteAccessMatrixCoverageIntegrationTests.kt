@@ -189,6 +189,16 @@ class RouteAccessMatrixCoverageIntegrationTests {
                 permissionCode = "procurement.view",
             ),
             RouteExpectation(
+                method = "GET",
+                path = "/api/v1/properties/$propertyId/pos-config/menu-items",
+                permissionCode = "pos.view",
+            ),
+            RouteExpectation(
+                method = "GET",
+                path = "/api/v1/properties/$propertyId/pos-config/menu-categories",
+                permissionCode = "pos.view",
+            ),
+            RouteExpectation(
                 method = "PUT",
                 path = "/api/v1/properties/$propertyId/purchase-orders/$purchaseOrderId",
                 permissionCode = "procurement.manage",
@@ -432,12 +442,22 @@ class RouteAccessMatrixCoverageIntegrationTests {
     private fun String.expectedGuardMode(): GuardMode {
         return when {
             this == "/api/v1/session" ||
-                    this == "/api/v1/platform/session" ->
+                    this == "/api/v1/platform/session" ||
+                    this == "/api/v1/staff/sessions/current" ->
                 GuardMode.AUTHENTICATED_IDENTITY
             startsWith("/api/v1/platform/") -> GuardMode.PLATFORM_PERMISSION
             startsWith("/api/v1/public/properties/") -> GuardMode.MODULE_ONLY
             startsWith("/api/v1/payments/webhooks/") -> GuardMode.PUBLIC_TOKEN
+            // Peak's own subscription callbacks. Separate from the payments webhooks
+            // above, which settle a property's guest payments against a folio; this one
+            // settles Peak's revenue into Peak's own merchant account, and the two must
+            // not share a route or a credential source.
+            startsWith("/api/v1/platform-billing/webhooks/") -> GuardMode.PUBLIC_TOKEN
+            startsWith("/api/v1/communication/webhooks/") -> GuardMode.PUBLIC_TOKEN
             this == "/api/v1/invitations/accept" -> GuardMode.PUBLIC_TOKEN
+            this == "/api/v1/staff/sessions" ||
+                    this == "/api/v1/staff/credentials/activate" ||
+                    startsWith("/api/v1/devices/") -> GuardMode.PUBLIC_TOKEN
             startsWith("/api/v1/tenants/") -> GuardMode.STAFF_PERMISSION
             startsWith("/api/v1/properties") -> GuardMode.STAFF_PERMISSION
             startsWith("/api/v1/communication") -> GuardMode.STAFF_PERMISSION
@@ -449,13 +469,24 @@ class RouteAccessMatrixCoverageIntegrationTests {
     private fun String.expectedRouteScope(method: RequestMethod): RouteScope {
         return when {
             this == "/api/v1/session" -> RouteScope.TENANT
+            this == "/api/v1/staff/sessions/current" -> RouteScope.TENANT
             this == "/api/v1/platform/session" -> RouteScope.PLATFORM
             startsWith("/api/v1/platform/") -> RouteScope.PLATFORM
             startsWith("/api/v1/public/properties/") -> RouteScope.PUBLIC_PROPERTY
             startsWith("/api/v1/payments/webhooks/") -> RouteScope.PUBLIC
+            // PUBLIC, never PUBLIC_PROPERTY: authorizePublicToken requires PUBLIC exactly
+            // and refuses a route carrying tenant or property variables. The wrong one
+            // satisfies the check constraint and then denies every callback at runtime.
+            startsWith("/api/v1/platform-billing/webhooks/") -> RouteScope.PUBLIC
+            startsWith("/api/v1/communication/webhooks/") -> RouteScope.PUBLIC
             this == "/api/v1/invitations/accept" -> RouteScope.PUBLIC
+            this == "/api/v1/staff/sessions" ||
+                    this == "/api/v1/staff/credentials/activate" ||
+                    startsWith("/api/v1/devices/") -> RouteScope.PUBLIC
             startsWith("/api/v1/tenants/") -> RouteScope.TENANT
             this == "/api/v1/properties" -> RouteScope.TENANT
+            // First hotel is a tenant act: no propertyId exists yet.
+            this == "/api/v1/properties/bootstrap" -> RouteScope.TENANT
             startsWith("/api/v1/properties/taxes") -> RouteScope.TENANT
             isTenantWideCatalogWrite(method) -> RouteScope.TENANT
             startsWith("/api/v1/properties/") -> RouteScope.PROPERTY

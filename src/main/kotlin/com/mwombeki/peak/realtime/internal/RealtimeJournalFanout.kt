@@ -25,6 +25,7 @@ class RealtimeJournalFanout(
     private val sseRegistry: SseRegistry,
     private val meterRegistry: MeterRegistry,
     private val fanoutExecutor: RealtimeFanoutExecutor,
+    private val destinationRouter: RealtimeDestinationRouter,
 ) {
     private val cursor = AtomicLong(0)
 
@@ -65,9 +66,10 @@ class RealtimeJournalFanout(
     }
 
     private fun deliver(event: StoredRealtimeEvent) {
-        val destination =
-            "/topic/tenants/${event.tenantId}/properties/${event.propertyId}/stream"
-        messagingTemplate.convertAndSend(destination, event.payload)
+        val envelope = RealtimeStreamService.envelope(event)
+        destinationRouter.destinations(event).forEach { destination ->
+            messagingTemplate.convertAndSend(destination, envelope)
+        }
         val emitters = sseRegistry.getEmitters(event.tenantId, event.propertyId)
         emitters.forEach { emitter ->
             try {
@@ -75,7 +77,7 @@ class RealtimeJournalFanout(
                     SseEmitter.event()
                         .id(event.sequenceId.toString())
                         .name(event.eventType)
-                        .data(event.payload),
+                        .data(envelope),
                 )
                 sseRegistry.recordDelivered(event.eventType)
             } catch (ex: Exception) {
@@ -92,6 +94,8 @@ class RealtimeJournalFanout(
             "peak.realtime.events.fanned_out",
             "eventType",
             event.eventType,
+            "destinations",
+            destinationRouter.destinations(event).size.toString(),
         ).increment()
     }
 

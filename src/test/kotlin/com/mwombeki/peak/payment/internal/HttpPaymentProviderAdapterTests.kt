@@ -1,5 +1,6 @@
 package com.mwombeki.peak.integrations.internal
 
+import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderCollectionCommand
 import java.math.BigDecimal
 import java.net.URI
@@ -40,7 +41,7 @@ class HttpPaymentProviderAdapterTests {
         )
 
         assertEquals("MM-123", result.providerReference)
-        assertEquals("pending", result.status)
+        assertEquals(ProviderPaymentStatus.PENDING, result.status)
         assertEquals(URI("https://gateway.example.test/v1/collections"), captured.endpoint)
         assertEquals("secret-token", captured.credential)
         assertEquals(transactionId.toString(), captured.idempotencyKey)

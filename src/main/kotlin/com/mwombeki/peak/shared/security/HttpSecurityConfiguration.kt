@@ -12,7 +12,13 @@ import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator
 import org.springframework.security.oauth2.jwt.JwtDecoder
 import org.springframework.security.oauth2.jwt.JwtValidators
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder
+import com.mwombeki.peak.shared.context.OperationalSessionAuthentication
+import com.mwombeki.peak.shared.context.OperationalSessionLookup
+import org.springframework.beans.factory.ObjectProvider
+import org.springframework.security.oauth2.server.resource.web.BearerTokenResolver
+import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver
 import org.springframework.security.web.SecurityFilterChain
+import org.springframework.security.web.access.intercept.AuthorizationFilter
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter
 import org.springframework.web.cors.CorsConfiguration
 import org.springframework.web.cors.CorsConfigurationSource
@@ -25,7 +31,22 @@ class HttpSecurityConfiguration(
     private val problemWriter: SecurityProblemWriter,
 ) {
     @Bean
-    fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
+    fun webSocketHeaderIdentityFilter(
+        requestContextProperties: com.mwombeki.peak.shared.context.RequestContextProperties,
+    ): WebSocketHeaderIdentityFilter = WebSocketHeaderIdentityFilter(requestContextProperties)
+
+    @Bean
+    fun operationalSessionAuthenticationFilter(
+        lookup: OperationalSessionLookup,
+    ): OperationalSessionAuthenticationFilter = OperationalSessionAuthenticationFilter(lookup)
+
+    @Bean
+    fun securityFilterChain(
+        http: HttpSecurity,
+        webSocketHeaderIdentityFilter: WebSocketHeaderIdentityFilter,
+        operationalSessionAuthenticationFilter: OperationalSessionAuthenticationFilter,
+        bearerTokenResolver: ObjectProvider<BearerTokenResolver>,
+    ): SecurityFilterChain {
         http
             .csrf { csrf -> csrf.disable() }
             .cors { }
@@ -35,6 +56,8 @@ class HttpSecurityConfiguration(
             .securityContext { securityContext ->
                 securityContext.requireExplicitSave(false)
             }
+            .addFilterBefore(operationalSessionAuthenticationFilter, AuthorizationFilter::class.java)
+            .addFilterBefore(webSocketHeaderIdentityFilter, AuthorizationFilter::class.java)
             .formLogin { formLogin -> formLogin.disable() }
             .httpBasic { httpBasic -> httpBasic.disable() }
             .logout { logout -> logout.disable() }
@@ -97,10 +120,36 @@ class HttpSecurityConfiguration(
         if (properties.jwt.enabled) {
             http.oauth2ResourceServer { resourceServer ->
                 resourceServer.jwt { }
+                bearerTokenResolver.ifAvailable { resolver ->
+                    resourceServer.bearerTokenResolver(resolver)
+                }
             }
         }
 
         return http.build()
+    }
+
+    /**
+     * `ops_` bearers are Peak operational sessions, not JWTs. If the resource
+     * server tried to decode them it would reject every PIN login the moment
+     * JWT is enabled in production.
+     */
+    @Bean
+    @ConditionalOnProperty(
+        prefix = "peak.security.http.jwt",
+        name = ["enabled"],
+        havingValue = "true",
+    )
+    fun operationalAwareBearerTokenResolver(): BearerTokenResolver {
+        val delegate = DefaultBearerTokenResolver()
+        return BearerTokenResolver { request ->
+            val token = delegate.resolve(request)
+            if (token != null && token.startsWith(OperationalSessionAuthentication.TOKEN_PREFIX)) {
+                null
+            } else {
+                token
+            }
+        }
     }
 
     @Bean

@@ -458,35 +458,24 @@ class PlatformCommercialControlService(
         )
     }
 
+    /**
+     * Delegates to `effective_tenant_entitlement` rather than resolving entitlements a
+     * second way.
+     *
+     * This method used to carry its own copy of the resolution SQL, and the two had
+     * drifted: the function knows about purchased product grants, synthesises `limit.*`
+     * from the plan's capacity columns, and is the version that
+     * `assert_tenant_entitlement_enabled` and `assert_tenant_capacity` actually enforce.
+     * A tenant could therefore be told here that a limit was unset while the database
+     * refused the write, or be shown as unentitled to something they had bought. One
+     * resolver, and it is the one the enforcement path uses.
+     */
     override fun effectiveEntitlement(tenantId: UUID, entitlementCode: String): EffectiveEntitlement {
         val code = entitlementCode.normalizedEntitlementCode()
         val row = jdbcTemplate.query(
             """
-            WITH current_subscription AS (
-                SELECT plan_id
-                FROM tenant_subscriptions
-                WHERE tenant_id = ?
-                  AND status IN ('trialing', 'active', 'past_due', 'paused')
-                ORDER BY created_at DESC LIMIT 1
-            ), effective_override AS (
-                SELECT is_enabled, entitlement_value, 'override'::text AS source
-                FROM tenant_entitlement_overrides
-                WHERE tenant_id = ? AND entitlement_code = ? AND revoked_at IS NULL
-                  AND starts_at <= now() AND (expires_at IS NULL OR expires_at > now())
-                ORDER BY starts_at DESC, created_at DESC LIMIT 1
-            ), plan_value AS (
-                SELECT entitlement.is_enabled, entitlement.entitlement_value,
-                       'plan'::text AS source
-                FROM current_subscription subscription
-                JOIN plan_entitlements entitlement ON entitlement.plan_id = subscription.plan_id
-                WHERE entitlement.entitlement_code = ?
-            )
             SELECT is_enabled, entitlement_value::text AS entitlement_value, source
-            FROM effective_override
-            UNION ALL
-            SELECT is_enabled, entitlement_value::text, source FROM plan_value
-            WHERE NOT EXISTS (SELECT 1 FROM effective_override)
-            LIMIT 1
+            FROM effective_tenant_entitlement(?, ?)
             """.trimIndent(),
             { rs, _ ->
                 EffectiveEntitlement(
@@ -494,7 +483,7 @@ class PlatformCommercialControlService(
                     jsonMap(rs.getString("entitlement_value")), rs.getString("source"), Instant.now(),
                 )
             },
-            tenantId, tenantId, code, code,
+            tenantId, code,
         ).singleOrNull()
         return row ?: EffectiveEntitlement(
             tenantId, code, enabled = false, value = emptyMap(), source = "none", resolvedAt = Instant.now(),

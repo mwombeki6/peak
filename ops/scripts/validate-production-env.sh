@@ -143,6 +143,9 @@ for name in \
   PEAK_PLATFORM_CORS_ALLOWED_ORIGINS \
   PEAK_PLATFORM_REALTIME_WEBSOCKET_ALLOWED_ORIGINS \
   PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_BASE_URL \
+  PEAK_COMMUNICATION_PROVIDERS_BEEM_API_KEY \
+  PEAK_COMMUNICATION_PROVIDERS_BEEM_SECRET_KEY \
+  PEAK_COMMUNICATION_PROVIDERS_BEEM_SOURCE_ADDR \
   PEAK_INVITATION_ACCEPTANCE_BASE_URL \
   PEAK_ENVELOPE_KEY_REFERENCE \
   PEAK_PAYMENT_PRODUCTION_APPROVED_PROVIDER_CODES \
@@ -238,8 +241,9 @@ require_distinct POSTGRES_APP_USER POSTGRES_PLATFORM_USER
 require_distinct POSTGRES_APP_USER POSTGRES_WORKER_USER
 require_distinct POSTGRES_PLATFORM_USER POSTGRES_WORKER_USER
 
-if [ "$(value_of PEAK_PAYMENT_PRODUCTION_APPROVED_PROVIDER_CODES)" != "clickpesa" ]; then
-  fail "PEAK_PAYMENT_PRODUCTION_APPROVED_PROVIDER_CODES must be exactly clickpesa"
+if [ "$(value_of PEAK_PAYMENT_PRODUCTION_APPROVED_PROVIDER_CODES)" != "snippe" ] && \
+   [ "$(value_of PEAK_PAYMENT_PRODUCTION_APPROVED_PROVIDER_CODES)" != "snippe,clickpesa" ]; then
+  fail "PEAK_PAYMENT_PRODUCTION_APPROVED_PROVIDER_CODES must include snippe as the guest rail"
 fi
 
 case ",$(value_of PEAK_FISCAL_PRODUCTION_APPROVED_PROVIDER_CODES)," in
@@ -249,8 +253,13 @@ case ",$(value_of PEAK_FISCAL_PRODUCTION_APPROVED_PROVIDER_CODES)," in
 esac
 
 case ",$(value_of PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS)," in
-  *,api.clickpesa.com,*) ;;
-  *) fail "PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS must include api.clickpesa.com" ;;
+  *,api.snippe.sh,*) ;;
+  *) fail "PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS must include api.snippe.sh" ;;
+esac
+
+case ",$(value_of PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS)," in
+  *,apisms.beem.africa,*) ;;
+  *) fail "PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS must include apisms.beem.africa" ;;
 esac
 
 guest_identity_hash_key="$(value_of PEAK_GUEST_IDENTITY_HASH_KEY)"
@@ -320,6 +329,7 @@ for name in \
   PEAK_ALLOW_TRUSTED_JWT_IDENTITY_CLAIMS \
   PEAK_COMMUNICATION_DELIVERY_LOCAL_PROVIDER_ENABLED \
   PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_ENABLED \
+  PEAK_COMMUNICATION_PROVIDERS_BEEM_ENABLED \
   PEAK_ACCEPTANCE_MODE \
   PEAK_PLATFORM_BOOTSTRAP_ENABLED \
   PEAK_PLATFORM_RECOVERY_ENABLED \
@@ -395,6 +405,46 @@ fi
 
 if [ "$(value_of PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_ENABLED)" != "true" ]; then
   fail "PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_ENABLED must be true in production"
+fi
+
+# Enabling an adapter is not the same as routing a channel to it. Without these, the
+# worker starts cleanly, reports healthy, and every invitation and password reset fails
+# in the outbox — discovered days later by a locked-out user, not by a dashboard.
+for channel in EMAIL SMS; do
+  var="PEAK_COMMUNICATION_ROUTING_${channel}"
+  if [ -z "$(value_of "$var")" ]; then
+    fail "$var must name the adapter that delivers ${channel} in production"
+  fi
+done
+
+if [ "$(value_of PEAK_COMMUNICATION_ROUTING_SMS)" != "beem" ]; then
+  fail "PEAK_COMMUNICATION_ROUTING_SMS must be beem"
+fi
+
+whatsapp_route="$(value_of PEAK_COMMUNICATION_ROUTING_WHATSAPP)"
+if [ "$whatsapp_route" = "local" ]; then
+  fail "PEAK_COMMUNICATION_ROUTING_WHATSAPP must not be local in production"
+fi
+if [ "$whatsapp_route" = "beem" ]; then
+  if [ -z "$(value_of PEAK_COMMUNICATION_PROVIDERS_BEEM_WHATSAPP_FROM)" ]; then
+    fail "PEAK_COMMUNICATION_PROVIDERS_BEEM_WHATSAPP_FROM is required when WhatsApp is routed to beem"
+  fi
+  callback="$(value_of PEAK_COMMUNICATION_PROVIDERS_BEEM_WHATSAPP_CALLBACK_URL)"
+  if [ -z "$callback" ]; then
+    fail "PEAK_COMMUNICATION_PROVIDERS_BEEM_WHATSAPP_CALLBACK_URL is required when WhatsApp is routed to beem"
+  fi
+  case "$callback" in
+    https://*) ;;
+    *) fail "PEAK_COMMUNICATION_PROVIDERS_BEEM_WHATSAPP_CALLBACK_URL must use https" ;;
+  esac
+  case ",$(value_of PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS)," in
+    *,apichatcore.beem.africa,*) ;;
+    *) fail "PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS must include apichatcore.beem.africa when WhatsApp is routed to beem" ;;
+  esac
+fi
+
+if [ "$(value_of PEAK_COMMUNICATION_PROVIDERS_BEEM_ENABLED)" != "true" ]; then
+  fail "PEAK_COMMUNICATION_PROVIDERS_BEEM_ENABLED must be true in production"
 fi
 
 if [ "$(value_of PEAK_REPORT_STORAGE_ENABLED)" != "true" ]; then

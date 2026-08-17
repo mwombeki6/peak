@@ -103,8 +103,18 @@ ops/scripts/deploy.sh
 - Keep `PEAK_ALLOW_HEADER_IDENTITY=false` in production.
 - Keep `PEAK_ALLOW_TRUSTED_JWT_IDENTITY_CLAIMS=false` in production.
 - Keep `PEAK_COMMUNICATION_DELIVERY_LOCAL_PROVIDER_ENABLED=false` in production.
+- Route worker SMS to Beem (`PEAK_COMMUNICATION_ROUTING_SMS=beem`) with an API
+  key, secret, and active Sender ID. Guest WhatsApp is optional: leave
+  `PEAK_COMMUNICATION_ROUTING_WHATSAPP` empty until a Beem WhatsApp from-number
+  exists. Routing it to `beem` also requires
+  `PEAK_COMMUNICATION_PROVIDERS_BEEM_WHATSAPP_FROM`, an HTTPS
+  `PEAK_COMMUNICATION_PROVIDERS_BEEM_WHATSAPP_CALLBACK_URL`, and
+  `apichatcore.beem.africa` on the outbound allowlist. The callback is a
+  delivery receipt only — Peak does not run an inbound WhatsApp chatbot.
+  Beem Moja session text only works inside a 24-hour customer-care window;
+  Peak does not invent a template-broadcast host.
 - Configure the worker HTTP communication gateway with an HTTPS base URL and a
-  secret API key. The provider contract is `POST /v1/messages`.
+  secret API key for email. The provider contract is `POST /v1/messages`.
 - Generate a random 32-byte envelope key, encode it as base64, store it in
   `PEAK_ENVELOPE_KEY_BASE64`, and keep
   `PEAK_ENVELOPE_KEY_REFERENCE=env:PEAK_ENVELOPE_KEY_BASE64`.
@@ -145,8 +155,9 @@ ops/scripts/deploy.sh
 - Enforce the same restriction at the host/network egress layer using the
   provider-published destination ranges. The application allowlist does not
   replace DNS and firewall controls.
-- Set `PEAK_PAYMENT_PRODUCTION_APPROVED_PROVIDER_CODES=clickpesa` only after the
+- Set `PEAK_PAYMENT_PRODUCTION_APPROVED_PROVIDER_CODES=snippe` only after the
   protected sandbox workflow passes and certification evidence is recorded.
+  ClickPesa may be listed alongside (`snippe,clickpesa`) but is not the guest rail.
 - Keep `PEAK_FISCAL_PRODUCTION_APPROVED_PROVIDER_CODES` empty until a TRA vendor
   adapter is selected and certified. Contract mocks and the signed simulator
   cannot run under the production profile.
@@ -198,6 +209,55 @@ versions require an explicit `pg_upgrade` or backup/restore procedure.
 Keep worker DB pool size greater than or equal to worker parallelism only when handlers require database access. Otherwise tune pool size to the database budget and provider latency.
 
 ## Backup And Restore Drill
+
+### Recovery order is not negotiable
+
+**PostgreSQL roles are cluster-level; a database dump is not.** `pg_dump` of one
+database emits the objects a role owns and no `CREATE ROLE` for the role itself.
+Restoring into a fresh cluster therefore fails on the first unknown owner and
+takes the rest of the recovery with it.
+
+Recover in this order:
+
+1. Provision the PostgreSQL cluster.
+2. **Create the roles** — `ops/scripts/bootstrap-db-roles.sh`, which applies
+   `role-bootstrap.sql`.
+3. Restore the database.
+4. Restore application secrets and configuration.
+5. Start Peak.
+
+Not "restore the database and hope the roles appear". This is not hypothetical:
+three SECURITY DEFINER owner roles created by migrations were once missing from
+`role-bootstrap.sql`, and the gap surfaced only when an acceptance drill
+attempted a real restore, twenty migrations after the fault was introduced.
+
+Two things keep it closed. `RestorableRoleBootstrapTests` asserts that every role
+any migration creates also exists in `role-bootstrap.sql`, with no exemptions —
+"roles that own something" would require predicting what a dump will reference,
+which is the judgement that failed. And the drill below proves it end to end.
+
+### Minimal drill
+
+```sh
+ops/testing/verify-db-backup-restore.sh
+```
+
+Needs only Podman or Docker and this repository. No Peak API, Redis, Keycloak,
+Caddy, or providers — deliberately, because CI and the full stack are exactly
+what you do not have when you are restoring from a backup.
+
+For each supported PostgreSQL version it migrates a fresh cluster to head, dumps
+it, restores into another fresh cluster, and checks the head, role count, table
+and function counts. It also runs a **negative control**: the same dump restored
+into a cluster with no roles must fail. Without that, a future change to how
+ownership is emitted could make the positive path pass for the wrong reason.
+
+Evidence lands in `build/evidence/db-restore/` — PostgreSQL version, migration
+head, dump SHA-256, role and object counts, restore stderr, timestamp.
+
+`PG_VERSIONS` overrides the matrix; `KEEP_EVIDENCE=1` retains the dumps.
+
+### Full drill
 
 Create a backup:
 

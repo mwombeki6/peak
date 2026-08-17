@@ -149,9 +149,40 @@ data class SettlePosOrderRequest(
     @field:NotBlank
     val paymentMethod: String,
     val folioId: UUID? = null,
+    /**
+     * In-house stay selected from [PosRoomChargeCandidateResponse]. Peak resolves the folio
+     * server-side so a PIN till never needs a folio UUID.
+     *
+     * Re-validated at post time: the stay must still be in-house, the room still assigned,
+     * and the folio still open. A candidate found before checkout must fail after it.
+     */
+    val stayId: UUID? = null,
+    /**
+     * The room the guest named, required for a room charge.
+     *
+     * A folio id on its own proves nothing about who is being charged, and a waiter never sees
+     * one — they hear "put it on 204" across a restaurant. This is the input a POS client
+     * actually has, and it is what Peak verifies against the folio's checked-in stay.
+     */
+    @field:Size(max = 20)
+    val roomNumber: String? = null,
     val providerAccountId: UUID? = null,
     @field:Size(max = 20)
     val phoneNumber: String? = null,
+)
+
+/**
+ * Minimal in-house match for posting F&B to a guest folio from a PIN till.
+ *
+ * Deliberately excludes folio, reservation, passport, phone, and email. Search is not a
+ * substitute for GET /rooms or GET /reservations.
+ */
+data class PosRoomChargeCandidateResponse(
+    val stayId: UUID,
+    val roomId: UUID,
+    val roomNumber: String,
+    val guestDisplayName: String,
+    val postingEligible: Boolean,
 )
 
 data class PosOrderResponse(
@@ -172,6 +203,7 @@ data class PosOrderResponse(
     val totalAmount: BigDecimal,
     val createdAt: Instant,
     val settledAt: Instant?,
+    val servedBy: UUID? = null,
     val items: List<PosOrderItemResponse>,
     val replayed: Boolean = false,
 )
@@ -219,6 +251,21 @@ data class CreatePosMenuItemRequest(
     val name: String,
     @field:DecimalMin(value = "0.01")
     val price: BigDecimal,
+)
+
+data class PosMenuCategoryResponse(
+    val id: UUID,
+    val outletId: UUID,
+    val name: String,
+)
+
+data class PosMenuItemResponse(
+    val id: UUID,
+    val categoryId: UUID,
+    val name: String,
+    val price: BigDecimal,
+    val taxRateId: UUID?,
+    val isAvailable: Boolean,
 )
 
 data class PosConfigurationResponse(

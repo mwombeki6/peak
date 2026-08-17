@@ -7,10 +7,14 @@ import com.mwombeki.peak.billing.api.BillingPort
 import com.mwombeki.peak.billing.api.ConfirmedPaymentRequest
 import com.mwombeki.peak.billing.api.ConfirmedPaymentRefundRequest
 import com.mwombeki.peak.billing.api.ConfirmedPaymentReversalRequest
+import com.mwombeki.peak.communication.api.GuestNotificationCommand
+import com.mwombeki.peak.communication.api.GuestNotificationPort
+import com.mwombeki.peak.communication.api.GuestNotificationPurposes
 import com.mwombeki.peak.payment.api.CashSessionResponse
 import com.mwombeki.peak.payment.api.CloseCashSessionRequest
 import com.mwombeki.peak.payment.api.CollectCashPaymentRequest
 import com.mwombeki.peak.payment.api.CollectPosCashPaymentRequest
+import com.mwombeki.peak.payment.api.CertifyPaymentProviderRequest
 import com.mwombeki.peak.payment.api.ConfigurePaymentProviderRequest
 import com.mwombeki.peak.payment.api.CreatePaymentReconciliationRequest
 import com.mwombeki.peak.payment.api.InitiateMobileMoneyRequest
@@ -40,6 +44,9 @@ import com.mwombeki.peak.reliability.api.IdempotencyReservation
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
+import com.mwombeki.peak.realtime.api.RealtimeEventRequest
+import com.mwombeki.peak.realtime.api.RealtimeEventTypes
+import com.mwombeki.peak.realtime.api.RealtimePort
 import com.mwombeki.peak.shared.context.TenantActor
 import com.mwombeki.peak.shared.context.TenantRequestContext
 import com.mwombeki.peak.shared.outbound.OutboundEndpointPolicy
@@ -52,6 +59,7 @@ import java.sql.Timestamp
 import java.time.LocalDate
 import java.util.UUID
 import io.micrometer.core.instrument.MeterRegistry
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.core.env.Environment
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.JdbcTemplate
@@ -67,15 +75,18 @@ class PaymentService(
     private val auditPort: AuditPort,
     private val outboxPort: OutboxPort,
     private val billingPort: BillingPort,
+    private val guestNotificationPort: GuestNotificationPort,
     private val transactionTemplate: TransactionTemplate,
     private val objectMapper: ObjectMapper,
     private val secretResolver: SecretReferenceResolver,
     private val outboundEndpointPolicy: OutboundEndpointPolicy,
     private val meterRegistry: MeterRegistry,
     private val environment: Environment,
+    private val realtime: ObjectProvider<RealtimePort>,
     adapters: List<PaymentProvider>,
 ) : PaymentPort, PaymentStatusPort {
     private val providerCodes = adapters.mapTo(mutableSetOf()) { it.providerCode }
+    private val adaptersByCode = adapters.associateBy { it.providerCode }
 
     override fun nightAuditSummary(
         tenantId: UUID,
@@ -489,12 +500,15 @@ class PaymentService(
                 request.folioId,
                 amount,
             )
-            requireProviderAccount(
+            val providerAccount = requireProviderAccount(
                 actor.tenantId,
                 propertyId,
                 request.providerAccountId,
                 lock = false,
             )
+            requireEligibleToCollect(providerAccount, amount, folio.currency)
+            val mobileNetwork = requireSupportedNetwork(providerAccount, request.mobileNetwork)
+            requireNoLiveCollection(actor.tenantId, request.folioId)
             val transactionId = UUID.randomUUID()
             val internalReference = paymentReference(transactionId)
             jdbcTemplate.update(
@@ -503,9 +517,10 @@ class PaymentService(
                     id, tenant_id, property_id, folio_id, provider_account_id,
                     initiated_by, idempotency_key_id, transaction_direction,
                     transaction_type, internal_reference, payer_identifier,
-                    amount, currency, status, expires_at, next_status_check_at
+                    mobile_network, amount, currency, status, expires_at,
+                    next_status_check_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'inbound', 'collection', ?, ?, ?, ?,
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'inbound', 'collection', ?, ?, ?, ?, ?,
                         'created', now() + interval '15 minutes',
                         now() + interval '15 seconds')
                 """.trimIndent(),
@@ -518,6 +533,7 @@ class PaymentService(
                 idempotencyKeyId,
                 internalReference,
                 request.phoneNumber.tanzanianE164(),
+                mobileNetwork,
                 amount,
                 folio.currency,
             )
@@ -552,6 +568,23 @@ class PaymentService(
                             ),
                         ),
                     )
+                    guestIdForFolio(actor.tenantId, propertyId, request.folioId)?.let { guestId ->
+                        guestNotificationPort.notifyIfReachable(
+                            GuestNotificationCommand(
+                                tenantId = actor.tenantId,
+                                propertyId = propertyId,
+                                guestId = guestId,
+                                purpose = GuestNotificationPurposes.PAYMENT_PROMPT,
+                                aggregateType = PAYMENT_TRANSACTIONS,
+                                aggregateId = transactionId,
+                                variables = mapOf(
+                                    "propertyName" to propertyName(actor.tenantId, propertyId),
+                                    "amount" to amount.toPlainString(),
+                                    "currency" to folio.currency,
+                                ),
+                            ),
+                        )
+                    }
                 }
         }
     }
@@ -727,12 +760,14 @@ class PaymentService(
             "POS payment tenant must match the active tenant context"
         }
         val amount = request.amount.positiveMoney("amount")
-        requireProviderAccount(
+        val providerAccount = requireProviderAccount(
             actor.tenantId,
             propertyId,
             request.providerAccountId,
             lock = false,
         )
+        requireEligibleToCollect(providerAccount, amount, "TZS")
+        val mobileNetwork = requireSupportedNetwork(providerAccount, request.mobileNetwork)
         val transactionId = UUID.randomUUID()
         val internalReference = paymentReference(transactionId)
         jdbcTemplate.update(
@@ -741,10 +776,10 @@ class PaymentService(
                 id, tenant_id, property_id, pos_order_id, provider_account_id,
                 initiated_by, idempotency_key_id, transaction_direction,
                 transaction_type, internal_reference, payer_identifier,
-                amount, currency, status, expires_at, next_status_check_at,
-                metadata
+                mobile_network, amount, currency, status, expires_at,
+                next_status_check_at, metadata
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'inbound', 'collection', ?, ?, ?,
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'inbound', 'collection', ?, ?, ?, ?,
                     'TZS', 'created', now() + interval '15 minutes',
                     now() + interval '15 seconds', ?::jsonb)
             """.trimIndent(),
@@ -757,6 +792,7 @@ class PaymentService(
             idempotencyKeyId,
             internalReference,
             request.phoneNumber.tanzanianE164(),
+            mobileNetwork,
             amount,
             objectMapper.writeValueAsString(mapOf("method" to "pos_mobile_money")),
         )
@@ -792,6 +828,26 @@ class PaymentService(
                         ),
                     ),
                 )
+            }
+            .also {
+                realtime.ifAvailable {
+                    it.broadcastRealtimeEvent(
+                        RealtimeEventRequest(
+                            tenantId = actor.tenantId,
+                            propertyId = propertyId,
+                            eventType = RealtimeEventTypes.PAYMENT_CREATED,
+                            aggregateType = RealtimeEventTypes.AGGREGATE_PAYMENT_TRANSACTION,
+                            aggregateId = transactionId,
+                            aggregateVersion = 0,
+                            payload = mapOf(
+                                "transactionId" to transactionId,
+                                "posOrderId" to request.posOrderId,
+                                "providerAccountId" to request.providerAccountId,
+                                "amount" to amount,
+                            ),
+                        ),
+                    )
+                }
             }
     }
 
@@ -1261,6 +1317,18 @@ class PaymentService(
                     "Sandbox payment accounts are forbidden in production"
                 }
             }
+            val certificationEvidence = if (
+                providerEnvironment == "production" ||
+                !request.sandboxEvidenceRef.isNullOrBlank()
+            ) {
+                SandboxCollectionEvidence.requireValid(
+                    request.sandboxEvidenceRef,
+                    providerCode,
+                    objectMapper,
+                )
+            } else {
+                null
+            }
             if (providerEnvironment == "production") {
                 require(
                     providerCode in environment.approvedProviderCodes(
@@ -1269,10 +1337,7 @@ class PaymentService(
                 ) {
                     "Payment provider is not approved for production"
                 }
-                require(
-                    request.sandboxCertifiedAt != null &&
-                            !request.sandboxEvidenceRef.isNullOrBlank(),
-                ) {
+                require(request.sandboxCertifiedAt != null && certificationEvidence != null) {
                     "Production provider accounts require sandbox certification evidence"
                 }
             }
@@ -1313,10 +1378,10 @@ class PaymentService(
                         webhook_secret_ref, client_id, api_key_secret_ref,
                         checksum_key_secret_ref, environment,
                         sandbox_certified_at, sandbox_evidence_ref,
-                        is_default, is_active
+                        is_default, is_active, lifecycle_status
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                            true)
+                            true, ?)
                     """.trimIndent(),
                     accountId,
                     actor.tenantId,
@@ -1333,8 +1398,9 @@ class PaymentService(
                     checksumKeySecretRef,
                     providerEnvironment,
                     request.sandboxCertifiedAt?.let(Timestamp::from),
-                    request.sandboxEvidenceRef.trimmedOrNull(),
+                    certificationEvidence,
                     request.isDefault,
+                    initialLifecycleStatus(request.sandboxCertifiedAt, certificationEvidence),
                 )
             } catch (ex: DuplicateKeyException) {
                 throw PaymentConflictException("Payment provider account name is already in use")
@@ -1352,6 +1418,211 @@ class PaymentService(
                             "providerCode" to providerCode,
                             "isDefault" to request.isDefault,
                         ),
+                        idempotencyKeyId = idempotencyKeyId,
+                    )
+                }
+        }
+    }
+
+    override fun verifyProvider(
+        propertyId: UUID,
+        providerAccountId: UUID,
+    ): PaymentProviderAccountResponse {
+        return mutate(
+            propertyId = propertyId,
+            operationType = "payments.provider.verify",
+            requestPayload = mapOf("providerAccountId" to providerAccountId),
+            resourceType = PAYMENT_PROVIDER_ACCOUNTS,
+            replayType = PaymentProviderAccountResponse::class.java,
+        ) { actor, idempotencyKeyId ->
+            val account = requireProviderAccount(
+                actor.tenantId, propertyId, providerAccountId, lock = true,
+            )
+            require(account.lifecycleStatus == "configured") {
+                "Only a configured account can be verified"
+            }
+            val secrets = jdbcTemplate.query(
+                """
+                SELECT api_key_secret_ref, checksum_key_secret_ref
+                FROM payment_provider_accounts
+                WHERE tenant_id = ? AND property_id = ? AND id = ?
+                """.trimIndent(),
+                { rs, _ -> rs.getString("api_key_secret_ref") to rs.getString("checksum_key_secret_ref") },
+                actor.tenantId, propertyId, providerAccountId,
+            ).single()
+            secretResolver.validate(secrets.first)
+            secretResolver.validate(secrets.second)
+            val updated = jdbcTemplate.update(
+                """
+                UPDATE payment_provider_accounts
+                SET lifecycle_status = 'verified', verified_at = now(), updated_at = now()
+                WHERE tenant_id = ? AND property_id = ? AND id = ?
+                  AND lifecycle_status = 'configured'
+                """.trimIndent(),
+                actor.tenantId, propertyId, providerAccountId,
+            )
+            require(updated == 1) { "Only a configured account can be verified" }
+            requireProviderAccount(actor.tenantId, propertyId, providerAccountId, lock = false)
+                .also {
+                    recordSideEffects(
+                        actor = actor,
+                        propertyId = propertyId,
+                        action = "payments.provider.verified",
+                        aggregateType = PAYMENT_PROVIDER_ACCOUNTS,
+                        aggregateId = providerAccountId,
+                        payload = mapOf("providerAccountId" to providerAccountId),
+                        idempotencyKeyId = idempotencyKeyId,
+                    )
+                }
+        }
+    }
+
+    override fun certifyProvider(
+        propertyId: UUID,
+        providerAccountId: UUID,
+        request: CertifyPaymentProviderRequest,
+    ): PaymentProviderAccountResponse {
+        return mutate(
+            propertyId = propertyId,
+            operationType = "payments.provider.certify",
+            requestPayload = request,
+            resourceType = PAYMENT_PROVIDER_ACCOUNTS,
+            replayType = PaymentProviderAccountResponse::class.java,
+        ) { actor, idempotencyKeyId ->
+            val account = requireProviderAccount(
+                actor.tenantId, propertyId, providerAccountId, lock = true,
+            )
+            val evidence = SandboxCollectionEvidence.requireValid(
+                request.sandboxEvidenceRef,
+                account.providerCode,
+                objectMapper,
+            )
+            val updated = jdbcTemplate.update(
+                """
+                UPDATE payment_provider_accounts
+                SET lifecycle_status = 'certified',
+                    sandbox_certified_at = ?,
+                    sandbox_evidence_ref = ?,
+                    updated_at = now()
+                WHERE tenant_id = ? AND property_id = ? AND id = ?
+                  AND lifecycle_status IN ('configured', 'verified')
+                """.trimIndent(),
+                Timestamp.from(request.sandboxCertifiedAt),
+                evidence,
+                actor.tenantId, propertyId, providerAccountId,
+            )
+            require(updated == 1) {
+                "Only a configured or verified account can be certified"
+            }
+            requireProviderAccount(actor.tenantId, propertyId, providerAccountId, lock = false)
+                .also {
+                    recordSideEffects(
+                        actor = actor,
+                        propertyId = propertyId,
+                        action = "payments.provider.certified",
+                        aggregateType = PAYMENT_PROVIDER_ACCOUNTS,
+                        aggregateId = providerAccountId,
+                        payload = mapOf("providerAccountId" to providerAccountId),
+                        idempotencyKeyId = idempotencyKeyId,
+                    )
+                }
+        }
+    }
+
+    override fun enableProvider(
+        propertyId: UUID,
+        providerAccountId: UUID,
+    ): PaymentProviderAccountResponse {
+        return mutate(
+            propertyId = propertyId,
+            operationType = "payments.provider.enable",
+            requestPayload = mapOf("providerAccountId" to providerAccountId),
+            resourceType = PAYMENT_PROVIDER_ACCOUNTS,
+            replayType = PaymentProviderAccountResponse::class.java,
+        ) { actor, idempotencyKeyId ->
+            val account = requireProviderAccount(
+                actor.tenantId, propertyId, providerAccountId, lock = true,
+            )
+            requireCatalogRailRecoverable(account.providerCode)
+            if (account.environment == "production") {
+                require(account.sandboxCertifiedAt != null) {
+                    "Production collection cannot be enabled without sandbox certification"
+                }
+                require(account.lifecycleStatus == "certified") {
+                    "Production collection can be enabled only from certified"
+                }
+                SandboxCollectionEvidence.requireValid(
+                    account.sandboxEvidenceRef,
+                    account.providerCode,
+                    objectMapper,
+                )
+            } else {
+                require(account.lifecycleStatus in setOf("verified", "certified")) {
+                    "Sandbox collection can be enabled only after verify or certify"
+                }
+            }
+            val updated = jdbcTemplate.update(
+                """
+                UPDATE payment_provider_accounts
+                SET lifecycle_status = 'enabled', enabled_at = now(), updated_at = now()
+                WHERE tenant_id = ? AND property_id = ? AND id = ?
+                  AND is_active = true
+                  AND lifecycle_status IN ('verified', 'certified')
+                """.trimIndent(),
+                actor.tenantId, propertyId, providerAccountId,
+            )
+            require(updated == 1) { "This provider account cannot be enabled for collection" }
+            requireProviderAccount(actor.tenantId, propertyId, providerAccountId, lock = false)
+                .also {
+                    recordSideEffects(
+                        actor = actor,
+                        propertyId = propertyId,
+                        action = "payments.provider.enabled",
+                        aggregateType = PAYMENT_PROVIDER_ACCOUNTS,
+                        aggregateId = providerAccountId,
+                        payload = mapOf("providerAccountId" to providerAccountId),
+                        idempotencyKeyId = idempotencyKeyId,
+                    )
+                }
+        }
+    }
+
+    override fun disableProvider(
+        propertyId: UUID,
+        providerAccountId: UUID,
+    ): PaymentProviderAccountResponse {
+        return mutate(
+            propertyId = propertyId,
+            operationType = "payments.provider.disable",
+            requestPayload = mapOf("providerAccountId" to providerAccountId),
+            resourceType = PAYMENT_PROVIDER_ACCOUNTS,
+            replayType = PaymentProviderAccountResponse::class.java,
+        ) { actor, idempotencyKeyId ->
+            requireProviderAccount(actor.tenantId, propertyId, providerAccountId, lock = true)
+            val updated = jdbcTemplate.update(
+                """
+                UPDATE payment_provider_accounts
+                SET lifecycle_status = CASE
+                        WHEN sandbox_certified_at IS NOT NULL THEN 'certified'
+                        ELSE 'verified'
+                    END,
+                    enabled_at = NULL,
+                    updated_at = now()
+                WHERE tenant_id = ? AND property_id = ? AND id = ?
+                  AND lifecycle_status = 'enabled'
+                """.trimIndent(),
+                actor.tenantId, propertyId, providerAccountId,
+            )
+            require(updated == 1) { "This provider account is not enabled" }
+            requireProviderAccount(actor.tenantId, propertyId, providerAccountId, lock = false)
+                .also {
+                    recordSideEffects(
+                        actor = actor,
+                        propertyId = propertyId,
+                        action = "payments.provider.disabled",
+                        aggregateType = PAYMENT_PROVIDER_ACCOUNTS,
+                        aggregateId = providerAccountId,
+                        payload = mapOf("providerAccountId" to providerAccountId),
                         idempotencyKeyId = idempotencyKeyId,
                     )
                 }
@@ -1870,6 +2141,39 @@ class PaymentService(
         return actor
     }
 
+    /**
+     * Refuses a second prompt for a bill that already has one waiting.
+     *
+     * `uq_payment_transactions_open_folio_collection` is what actually guarantees this; a
+     * concurrent pair of requests can both pass this check and one will lose at the index.
+     * This exists so the ordinary case — a receptionist pressing the button twice because the
+     * first push seemed slow — produces something they can act on rather than a constraint
+     * violation they cannot read.
+     */
+    private fun requireNoLiveCollection(tenantId: UUID, folioId: UUID) {
+        val live = jdbcTemplate.query(
+            """
+            SELECT internal_reference, payer_identifier
+            FROM payment_transactions
+            WHERE tenant_id = ?
+              AND folio_id = ?
+              AND transaction_direction = 'inbound'
+              AND transaction_type = 'collection'
+              AND status IN ('created', 'initiated', 'pending')
+            LIMIT 1
+            """.trimIndent(),
+            { rs, _ -> rs.getString("internal_reference") to rs.getString("payer_identifier") },
+            tenantId,
+            folioId,
+        ).firstOrNull() ?: return
+
+        throw PaymentRejectedException(
+            "A payment request is already waiting on this folio (${live.first}, sent to " +
+                "${live.second}). Wait for the guest to answer it, or let it expire, before " +
+                "sending another — two live prompts means the guest can pay twice.",
+        )
+    }
+
     private fun requirePayableFolio(
         tenantId: UUID,
         propertyId: UUID,
@@ -1911,6 +2215,44 @@ class PaymentService(
         return folio
     }
 
+    private fun guestIdForFolio(
+        tenantId: UUID,
+        propertyId: UUID,
+        folioId: UUID,
+    ): UUID? {
+        return jdbcTemplate.query(
+            """
+            SELECT r.primary_guest_id
+            FROM reservation_rooms rr
+            JOIN reservations r
+              ON r.tenant_id = rr.tenant_id
+             AND r.id = rr.reservation_id
+             AND r.deleted_at IS NULL
+            WHERE rr.tenant_id = ?
+              AND r.property_id = ?
+              AND rr.folio_id = ?
+            LIMIT 1
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("primary_guest_id", UUID::class.java) },
+            tenantId,
+            propertyId,
+            folioId,
+        ).firstOrNull()
+    }
+
+    private fun propertyName(tenantId: UUID, propertyId: UUID): String {
+        return jdbcTemplate.query(
+            """
+            SELECT name
+            FROM properties
+            WHERE tenant_id = ? AND id = ?
+            """.trimIndent(),
+            { rs, _ -> rs.getString("name") },
+            tenantId,
+            propertyId,
+        ).firstOrNull()?.trim().orEmpty()
+    }
+
     private fun requireCashSession(
         tenantId: UUID,
         propertyId: UUID,
@@ -1932,6 +2274,41 @@ class PaymentService(
             propertyId,
             cashSessionId,
         ).singleOrNull() ?: throw PaymentNotFoundException("Cash session was not found")
+    }
+
+    /**
+     * Refuses a collection whose provider needs a network it has not been given.
+     *
+     * Which providers need one is the adapter's business, not the caller's, so this asks
+     * rather than hardcoding a list of networks per provider — except for the fact that
+     * ClickPesa infers its own, which is why it is exempt.
+     *
+     * Deliberately not derived from the phone number. Tanzania has mobile number
+     * portability, so a prefix records the original allocation rather than the current
+     * operator, and guessing would route some payments to the wrong network. The failure
+     * would look to the hotel like a guest who did not pay.
+     */
+    private fun requireSupportedNetwork(
+        account: PaymentProviderAccountResponse,
+        requested: String?,
+    ): String? {
+        val network = requested?.trim()?.takeIf { it.isNotEmpty() }
+        // Asked of the adapter, not read from a list held here. A list would need editing
+        // for every new provider, and one missed off it fails in the worker — which is the
+        // failure this whole check exists to move forward.
+        if (adaptersByCode[account.providerCode]?.requiresMobileNetwork != true) {
+            return network
+        }
+
+        requireNotNull(network) {
+            "${account.providerName} needs to know which mobile network to send the prompt " +
+                "to. Choose one of ${SUPPORTED_MOBILE_NETWORKS.joinToString(", ")}."
+        }
+        return SUPPORTED_MOBILE_NETWORKS.firstOrNull { it.equals(network, ignoreCase = true) }
+            ?: throw PaymentRejectedException(
+                "$network is not a mobile network ${account.providerName} can push to. " +
+                    "Choose one of ${SUPPORTED_MOBILE_NETWORKS.joinToString(", ")}.",
+            )
     }
 
     private fun requireProviderAccount(
@@ -1958,6 +2335,99 @@ class PaymentService(
         ).singleOrNull() ?: throw PaymentNotFoundException(
             "Active payment provider account was not found",
         )
+    }
+
+    /**
+     * Configuring a provider stores credentials. It does not let the desk push USSD.
+     * Collection requires ENABLED on this property's account, and a catalog rail that
+     * can recover a lost callback. Amount limits are a fact about the rail, not about
+     * whether the hotel may try.
+     */
+    private fun requireEligibleToCollect(
+        account: PaymentProviderAccountResponse,
+        amount: BigDecimal,
+        currency: String,
+    ) {
+        if (account.lifecycleStatus != "enabled") {
+            throw PaymentRejectedException(
+                "Mobile money is not enabled for this property. Configuring a provider " +
+                    "is not the same as collecting guest payments.",
+            )
+        }
+        val rail = catalogRail(account.providerCode, currency)
+            ?: throw PaymentRejectedException(
+                "${account.providerName} has no recoverable mobile-money rail in the catalog",
+            )
+        if (!rail.enabled || !rail.supportsStatusQuery) {
+            throw PaymentRejectedException(
+                "${account.providerName} cannot collect guest payments: the rail is not " +
+                    "enabled or cannot recover a lost callback",
+            )
+        }
+        if (amount < rail.minAmount) {
+            throw PaymentRejectedException(
+                "Amount is below the ${account.providerName} mobile-money minimum",
+            )
+        }
+        if (rail.maxAmount != null && amount > rail.maxAmount) {
+            throw PaymentRejectedException(
+                "Amount is above the ${account.providerName} mobile-money ceiling",
+            )
+        }
+    }
+
+    private fun requireCatalogRailRecoverable(providerCode: String) {
+        val rail = catalogRail(providerCode, "TZS")
+            ?: throw PaymentRejectedException(
+                "No mobile-money rail exists in the catalog for $providerCode",
+            )
+        if (!rail.enabled || !rail.supportsStatusQuery) {
+            throw PaymentRejectedException(
+                "This rail cannot be enabled: Peak cannot recover a lost callback on it",
+            )
+        }
+    }
+
+    /**
+     * Snippe (and any provider that offers both a USSD push and a hosted page) has
+     * two catalog rows for one rail. [singleOrNull] would throw the moment that
+     * provider became eligible, which is the opposite of enabling it.
+     *
+     * Guest collection is a phone push, so a recoverable `direct_push` row wins
+     * when both exist. Amount limits then come from the row that would actually
+     * carry the money.
+     */
+    private fun catalogRail(providerCode: String, currency: String): CatalogRail? {
+        val rails = jdbcTemplate.query(
+            """
+            SELECT is_enabled, supports_status_query, min_amount, max_amount
+            FROM peak_payment_method_capabilities
+            WHERE provider = ? AND payment_method = 'mobile_money' AND currency = ?
+            ORDER BY CASE collection_flow WHEN 'direct_push' THEN 0 ELSE 1 END
+            """.trimIndent(),
+            { rs, _ ->
+                CatalogRail(
+                    enabled = rs.getBoolean("is_enabled"),
+                    supportsStatusQuery = rs.getBoolean("supports_status_query"),
+                    minAmount = rs.getBigDecimal("min_amount"),
+                    maxAmount = rs.getBigDecimal("max_amount"),
+                )
+            },
+            providerCode,
+            currency,
+        )
+        return rails.firstOrNull { it.enabled && it.supportsStatusQuery } ?: rails.firstOrNull()
+    }
+
+    private fun initialLifecycleStatus(
+        sandboxCertifiedAt: java.time.Instant?,
+        certificationEvidence: String?,
+    ): String {
+        return if (sandboxCertifiedAt != null && !certificationEvidence.isNullOrBlank()) {
+            "certified"
+        } else {
+            "configured"
+        }
     }
 
     private fun findTransaction(
@@ -2114,6 +2584,9 @@ class PaymentService(
             environment = rs.getString("environment"),
             sandboxCertifiedAt = rs.getTimestamp("sandbox_certified_at")
                 ?.toInstant(),
+            sandboxEvidenceRef = rs.getString("sandbox_evidence_ref"),
+            lifecycleStatus = rs.getString("lifecycle_status"),
+            eligibleForCollection = rs.getBoolean("eligible_for_collection"),
         )
     }
 
@@ -2245,6 +2718,13 @@ class PaymentService(
     )
 
     private companion object {
+        /**
+         * What the adapters accept. Constrained here so a typo is refused while the
+         * receptionist is still on the screen rather than by a provider later, and matched
+         * by a CHECK constraint so a second write path cannot bypass it.
+         */
+        val SUPPORTED_MOBILE_NETWORKS = listOf("Airtel", "Tigo", "Halopesa", "Azampesa", "Mpesa")
+
         const val CONTRACT_MOCK_PROVIDER = "contract_mock"
         const val HTTP_GATEWAY_PROVIDER = "http_gateway"
         const val CASH_SESSIONS = "cash_sessions"
@@ -2272,7 +2752,21 @@ class PaymentService(
             SELECT ppa.id, ppa.property_id, pp.provider_code,
                    pp.name AS provider_name, ppa.account_name, ppa.merchant_id,
                    ppa.client_id, ppa.wallet_number, ppa.is_default,
-                   ppa.is_active, ppa.environment, ppa.sandbox_certified_at
+                   ppa.is_active, ppa.environment, ppa.sandbox_certified_at,
+                   ppa.sandbox_evidence_ref, ppa.lifecycle_status,
+                   (
+                       ppa.is_active
+                       AND ppa.lifecycle_status = 'enabled'
+                       AND EXISTS (
+                           SELECT 1
+                           FROM peak_payment_method_capabilities c
+                           WHERE c.provider = pp.provider_code
+                             AND c.payment_method = 'mobile_money'
+                             AND c.currency = 'TZS'
+                             AND c.is_enabled
+                             AND c.supports_status_query
+                       )
+                   ) AS eligible_for_collection
             FROM payment_provider_accounts ppa
             JOIN payment_providers pp
               ON pp.tenant_id = ppa.tenant_id
@@ -2283,4 +2777,11 @@ class PaymentService(
         const val MIN_REFUND_REASON_LENGTH = 10
         const val MAX_REFUND_REASON_LENGTH = 500
     }
+
+    private data class CatalogRail(
+        val enabled: Boolean,
+        val supportsStatusQuery: Boolean,
+        val minAmount: BigDecimal,
+        val maxAmount: BigDecimal?,
+    )
 }

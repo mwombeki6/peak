@@ -16,6 +16,7 @@ import com.mwombeki.peak.tenantmanagement.api.TenantAdministrationPort
 import com.mwombeki.peak.tenantmanagement.api.TenantModuleCommand
 import com.mwombeki.peak.tenantmanagement.api.TenantModuleMutationReceipt
 import com.mwombeki.peak.tenantmanagement.api.TenantModuleSummary
+import com.mwombeki.peak.tenantmanagement.api.TenantOnboardingResponse
 import com.mwombeki.peak.tenantmanagement.api.TenantReadinessResponse
 import com.mwombeki.peak.usermanagement.api.TenantPermissionAccessPort
 import com.mwombeki.peak.usermanagement.api.TenantPermissionAccessRequest
@@ -37,6 +38,7 @@ class TenantAdministrationService(
     private val objectMapper: ObjectMapper,
     private val meterRegistry: MeterRegistry,
     private val readinessEvaluator: TenantOperationalReadinessEvaluator,
+    private val launchEvaluator: TenantLaunchEvaluator,
 ) : TenantAdministrationPort {
 
     override fun listTenantModules(tenantId: UUID): List<TenantModuleSummary> {
@@ -101,6 +103,15 @@ class TenantAdministrationService(
             transactionTemplate.execute {
                 requireTenantPermission(tenantId, TENANT_PROFILE_VIEW_PERMISSION)
                 readinessEvaluator.evaluate(tenantId)
+            },
+        )
+    }
+
+    override fun getTenantOnboarding(tenantId: UUID): TenantOnboardingResponse {
+        return requireNotNull(
+            transactionTemplate.execute {
+                requireTenantPermission(tenantId, TENANT_PROFILE_VIEW_PERMISSION)
+                launchEvaluator.evaluate(tenantId)
             },
         )
     }

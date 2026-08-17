@@ -3,6 +3,7 @@ package com.mwombeki.peak.payment.internal.web
 import com.mwombeki.peak.payment.api.CashSessionResponse
 import com.mwombeki.peak.payment.api.CloseCashSessionRequest
 import com.mwombeki.peak.payment.api.CollectCashPaymentRequest
+import com.mwombeki.peak.payment.api.CertifyPaymentProviderRequest
 import com.mwombeki.peak.payment.api.ConfigurePaymentProviderRequest
 import com.mwombeki.peak.payment.api.CreatePaymentReconciliationRequest
 import com.mwombeki.peak.payment.api.InitiateMobileMoneyRequest
@@ -111,6 +112,32 @@ class PaymentController(
         @PathVariable propertyId: UUID,
         @RequestBody request: ConfigurePaymentProviderRequest,
     ): PaymentProviderAccountResponse = paymentPort.configureProvider(propertyId, request)
+
+    @PostMapping("/provider-accounts/{providerAccountId}/verify")
+    fun verifyProvider(
+        @PathVariable propertyId: UUID,
+        @PathVariable providerAccountId: UUID,
+    ): PaymentProviderAccountResponse = paymentPort.verifyProvider(propertyId, providerAccountId)
+
+    @PostMapping("/provider-accounts/{providerAccountId}/certify")
+    fun certifyProvider(
+        @PathVariable propertyId: UUID,
+        @PathVariable providerAccountId: UUID,
+        @RequestBody request: CertifyPaymentProviderRequest,
+    ): PaymentProviderAccountResponse =
+        paymentPort.certifyProvider(propertyId, providerAccountId, request)
+
+    @PostMapping("/provider-accounts/{providerAccountId}/enable")
+    fun enableProvider(
+        @PathVariable propertyId: UUID,
+        @PathVariable providerAccountId: UUID,
+    ): PaymentProviderAccountResponse = paymentPort.enableProvider(propertyId, providerAccountId)
+
+    @PostMapping("/provider-accounts/{providerAccountId}/disable")
+    fun disableProvider(
+        @PathVariable propertyId: UUID,
+        @PathVariable providerAccountId: UUID,
+    ): PaymentProviderAccountResponse = paymentPort.disableProvider(propertyId, providerAccountId)
 
     @GetMapping("/provider-accounts")
     fun listProviderAccounts(

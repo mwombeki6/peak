@@ -45,6 +45,16 @@ The Communication Module provides infrastructure for multi-channel tenant notifi
 
 All mutating endpoints require `Idempotency-Key`. Replay returns the original resource id with `replayed=true`.
 
+### Guest WhatsApp
+| Method | Endpoint | Description | Roles |
+|--------|----------|-------------|-------|
+| POST | `/api/v1/properties/{propertyId}/guests/{guestId}/whatsapp-channel` | Front desk records a property guest WhatsApp number and stay-notice consent | `guests.manage` |
+| POST | `/api/v1/communication/webhooks/beem/whatsapp/{transactionId}/{signature}` | Beem Moja delivery receipt. HMAC is in the path Peak minted. Inbound chat bodies are discarded | public |
+
+Guest WhatsApp uses the existing contact, consent, template, and notification outbox tables. `tenant_contacts.origin_guest_id` keeps those rows out of the tenant ops contact list. Consent purposes are `guest_reservation`, `guest_folio`, `guest_payment_prompt`, and `guest_check_in`. Reservation create, check-in, and mobile-money initiate enqueue WhatsApp when the channel is verified, consent is active, and this deployment routes WhatsApp. Folio-open is not auto-notified (it shares the reservation transaction). Staff can still enqueue `guest_folio` through `/notifications`.
+
+WhatsApp is optional. Set `PEAK_COMMUNICATION_ROUTING_WHATSAPP=beem` only with a Beem from-number, HTTPS callback origin, and `apichatcore.beem.africa` on the outbound allowlist. Send is Beem Moja session text (`POST https://apichatcore.beem.africa/v1/chatapi`) inside a 24-hour window. Peak does not call an undocumented template-broadcast URL. The webhook updates delivery state only; it does not create reservations, payments, or a guest inbox.
+
 ## Outbox Pattern
 The module stages notifications through the shared `reliability::api` `OutboxPort`.
 1. **Producer**: `OutboxService` creates a typed `OutboxEventCommand` in the same transaction as the communication action.

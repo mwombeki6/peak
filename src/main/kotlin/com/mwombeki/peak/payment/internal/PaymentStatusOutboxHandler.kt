@@ -3,7 +3,9 @@ package com.mwombeki.peak.payment.internal
 import com.mwombeki.peak.billing.api.BillingPort
 import com.mwombeki.peak.billing.api.ConfirmedPaymentRequest
 import com.mwombeki.peak.payment.api.PaymentProvider
+import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderStatusQuery
+import com.mwombeki.peak.payment.api.StatusQueryablePaymentProvider
 import com.mwombeki.peak.reliability.api.ClaimedOutboxEvent
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventCommand
@@ -28,7 +30,7 @@ class PaymentStatusOutboxHandler(
     private val databaseSessionContext: DatabaseSessionContext,
     private val transactionTemplate: TransactionTemplate,
     private val secretResolver: SecretReferenceResolver,
-    private val billingPort: BillingPort,
+    private val confirmationService: GuestPaymentConfirmationService,
     private val outboxPort: OutboxPort,
     private val meterRegistry: MeterRegistry,
     private val clock: Clock,
@@ -78,15 +80,28 @@ class PaymentStatusOutboxHandler(
             }
             return
         }
+        // A rail with no way to ask cannot be polled, and saying so is the whole point of
+        // the separate interface. Reaching here means a payment was initiated on a provider
+        // that can only be told about, which the capability registry is supposed to prevent.
         val provider = providersByCode[work.providerCode]
             ?: error("No payment provider for ${work.providerCode}")
-        val result = provider.queryStatus(
+        val queryable = provider as? StatusQueryablePaymentProvider
+            ?: error(
+                "${work.providerCode} cannot be asked about a payment, so a lost callback " +
+                    "on this rail is unrecoverable and it must not have been enabled",
+            )
+        val result = queryable.queryStatus(
             ProviderStatusQuery(
                 internalReference = work.internalReference,
                 endpointUrl = work.endpointUrl,
                 clientId = work.clientId,
                 apiKey = secretResolver.resolve(work.apiKeySecretRef),
                 checksumKey = secretResolver.resolve(work.checksumKeySecretRef),
+                // Status endpoints are keyed on the reference the provider issued
+                // at create. Peak's own handle is not something they look up.
+                providerReference = work.providerReference,
+                collectionFlow = queryable.guestCollectionFlow,
+                providerAppName = work.providerAppName,
             ),
         )
         require(result.internalReference == work.internalReference) {
@@ -115,8 +130,11 @@ class PaymentStatusOutboxHandler(
         transactionTemplate.executeWithoutResult {
             databaseSessionContext.bind(identity)
             when (result.status) {
-                "posted" -> postPayment(tenantId, propertyId, work, result)
-                "failed" -> jdbcTemplate.update(
+                ProviderPaymentStatus.SUCCEEDED ->
+                    postPayment(tenantId, propertyId, work, result)
+                ProviderPaymentStatus.FAILED,
+                ProviderPaymentStatus.CANCELLED,
+                -> jdbcTemplate.update(
                     """
                     UPDATE payment_transactions
                     SET provider_status = ?,
@@ -136,12 +154,17 @@ class PaymentStatusOutboxHandler(
                     tenantId,
                     transactionId,
                 )
-                "pending", "initiated" -> scheduleNext(
+                // Not knowing is not failing. A word no adapter recognises, or an answer the
+                // provider could not give, means the payment is still in flight as far as Peak
+                // is concerned — so it is asked about again rather than declared dead. Writing
+                // 'failed' here is how a guest who did pay gets asked to pay a second time.
+                ProviderPaymentStatus.PENDING,
+                ProviderPaymentStatus.UNKNOWN,
+                -> scheduleNext(
                     event,
                     work,
                     result.providerStatus,
                 )
-                else -> error("Unsupported provider status ${result.status}")
             }
         }
         meterRegistry.counter(
@@ -149,66 +172,51 @@ class PaymentStatusOutboxHandler(
             "provider",
             work.providerCode,
             "result",
-            result.status,
+            result.status.name.lowercase(),
         ).increment()
     }
 
+    /**
+     * Builds an observation and hands it to the shared path, exactly as the callback does.
+     *
+     * This used to apply the payment itself, in a near-copy of the callback's version. The
+     * copies had drifted: no fee recorded here, a different idempotency key for the same
+     * folio posting, and a different set of columns cleared.
+     */
     private fun postPayment(
         tenantId: UUID,
         propertyId: UUID,
         work: StatusWork,
         result: com.mwombeki.peak.payment.api.ProviderStatusResult,
     ) {
-        val changed = jdbcTemplate.update(
-            """
-            UPDATE payment_transactions
-            SET provider_status = ?,
-                provider_reference = COALESCE(?, provider_reference),
-                status = 'posted',
-                posted_at = now(),
-                confirmed_at = now(),
-                last_status_check_at = now(),
-                next_status_check_at = NULL,
-                updated_at = now()
-            WHERE tenant_id = ?
-              AND id = ?
-              AND status IN ('created', 'initiated', 'pending')
-            """.trimIndent(),
-            result.providerStatus,
-            result.providerReference,
-            tenantId,
-            work.transactionId,
-        )
-        if (changed != 1) {
-            return
-        }
-        work.folioId?.let { folioId ->
-            val folioPaymentId = billingPort.postConfirmedPayment(
+        val applied = confirmationService.confirm(
+            ProviderPaymentObservation(
                 tenantId = tenantId,
                 propertyId = propertyId,
-                request = ConfirmedPaymentRequest(
-                    folioId = folioId,
-                    paymentMethod = "mobile_money",
-                    amount = work.amount,
-                    paymentTransactionId = work.transactionId,
-                    processedBy = work.initiatedBy,
-                    referenceNumber = result.providerReference
-                        ?: work.providerReference,
-                    idempotencyKey = "status:${work.transactionId}",
-                ),
-                idempotencyKeyId = null,
-            )
-            jdbcTemplate.update(
-                """
-                UPDATE payment_transactions
-                SET folio_payment_id = ?, updated_at = now()
-                WHERE tenant_id = ? AND id = ?
-                """.trimIndent(),
-                folioPaymentId,
-                tenantId,
-                work.transactionId,
-            )
+                transactionId = work.transactionId,
+                providerAccountId = work.providerAccountId,
+                internalReference = work.internalReference,
+                provider = work.providerCode,
+                status = ProviderPaymentObservation.CanonicalStatus.SUCCEEDED,
+                providerReference = result.providerReference ?: work.providerReference,
+                providerStatus = result.providerStatus,
+                // Peak's own figure, not the provider's. The webhook path compares the two
+                // before it gets here; a status query that disagreed would have to be
+                // reconciled rather than silently believed.
+                amount = work.amount,
+                currency = work.currency,
+                folioId = work.folioId,
+                posOrderId = work.posOrderId,
+                initiatedBy = work.initiatedBy,
+                source = ProviderPaymentObservation.ObservationSource.STATUS_QUERY,
+            ),
+        )
+        if (!applied) {
+            // Another source had already applied it — the ordinary outcome of a callback and
+            // a poll agreeing.
+            return
         }
+
         val payload = mapOf(
             "transactionId" to work.transactionId,
             "posOrderId" to work.posOrderId,
@@ -290,11 +298,13 @@ class PaymentStatusOutboxHandler(
         return jdbcTemplate.query(
             """
             SELECT pt.id, pt.tenant_id, pt.property_id, pt.folio_id,
-                   pt.pos_order_id, pt.initiated_by, pt.internal_reference,
+                   pt.pos_order_id, pt.initiated_by, pt.provider_account_id,
+                   pt.internal_reference,
                    pt.provider_reference, pt.amount, trim(pt.currency) AS currency,
                    pt.status, pt.expires_at, pp.provider_code, ppa.endpoint_url,
                    ppa.client_id, ppa.api_key_secret_ref,
-                   ppa.checksum_key_secret_ref
+                   ppa.checksum_key_secret_ref,
+                   ppa.provider_app_name
             FROM payment_transactions pt
             JOIN payment_provider_accounts ppa
               ON ppa.tenant_id = pt.tenant_id
@@ -317,6 +327,7 @@ class PaymentStatusOutboxHandler(
                     folioId = rs.getObject("folio_id", UUID::class.java),
                     posOrderId = rs.getObject("pos_order_id", UUID::class.java),
                     initiatedBy = rs.getObject("initiated_by", UUID::class.java),
+                    providerAccountId = rs.getObject("provider_account_id", UUID::class.java),
                     internalReference = rs.getString("internal_reference"),
                     providerReference = rs.getString("provider_reference"),
                     amount = rs.getBigDecimal("amount"),
@@ -330,6 +341,7 @@ class PaymentStatusOutboxHandler(
                     checksumKeySecretRef = rs.getString(
                         "checksum_key_secret_ref",
                     ),
+                    providerAppName = rs.getString("provider_app_name"),
                 )
             },
             tenantId,
@@ -349,6 +361,7 @@ class PaymentStatusOutboxHandler(
         val folioId: UUID?,
         val posOrderId: UUID?,
         val initiatedBy: UUID?,
+        val providerAccountId: UUID,
         val internalReference: String,
         val providerReference: String?,
         val amount: BigDecimal,
@@ -360,6 +373,7 @@ class PaymentStatusOutboxHandler(
         val clientId: String,
         val apiKeySecretRef: String,
         val checksumKeySecretRef: String,
+        val providerAppName: String?,
     )
 
     private companion object {

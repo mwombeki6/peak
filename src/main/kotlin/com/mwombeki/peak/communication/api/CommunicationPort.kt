@@ -3,6 +3,7 @@ package com.mwombeki.peak.communication.api
 import java.time.OffsetDateTime
 import java.time.LocalTime
 import java.util.UUID
+import org.springframework.modulith.NamedInterface
 
 data class EnqueueNotificationRequest(
     val propertyId: UUID? = null,
@@ -31,6 +32,54 @@ interface CommunicationPort {
     fun getDeliveryRequest(deliveryRequestId: UUID): DeliveryRequestResponse
     fun listDeliveryAttempts(deliveryRequestId: UUID): List<DeliveryAttemptResponse>
     fun retryDelivery(deliveryRequestId: UUID): DeliveryRetryReceipt
+    fun registerGuestWhatsAppChannel(
+        propertyId: UUID,
+        guestId: UUID,
+        request: RegisterGuestWhatsAppRequest,
+    ): GuestWhatsAppChannelReceipt
+}
+
+@NamedInterface("api")
+interface GuestNotificationPort {
+    /**
+     * Enqueue a property-guest notice on WhatsApp when the guest has a verified
+     * channel, active consent for [GuestNotificationCommand.purpose], and this
+     * deployment actually routes WhatsApp. Missing any of those is silence, not
+     * a failed hospitality command.
+     */
+    fun notifyIfReachable(command: GuestNotificationCommand): NotificationEnqueueReceipt?
+}
+
+@NamedInterface("api")
+data class GuestNotificationCommand(
+    val tenantId: UUID,
+    val propertyId: UUID,
+    val guestId: UUID,
+    val purpose: String,
+    val aggregateType: String,
+    val aggregateId: UUID,
+    val variables: Map<String, String> = emptyMap(),
+)
+
+data class RegisterGuestWhatsAppRequest(
+    val whatsapp: String,
+    val policyVersion: String,
+    val purposes: List<String> = GuestNotificationPurposes.ALL.toList(),
+)
+
+data class GuestWhatsAppChannelReceipt(
+    val guestId: UUID,
+    val contactId: UUID,
+    val channelId: UUID,
+    val replayed: Boolean,
+)
+
+object GuestNotificationPurposes {
+    const val RESERVATION = "guest_reservation"
+    const val FOLIO = "guest_folio"
+    const val PAYMENT_PROMPT = "guest_payment_prompt"
+    const val CHECK_IN = "guest_check_in"
+    val ALL = setOf(RESERVATION, FOLIO, PAYMENT_PROMPT, CHECK_IN)
 }
 
 data class CreateContactRequest(

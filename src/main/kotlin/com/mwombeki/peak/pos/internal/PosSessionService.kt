@@ -7,10 +7,14 @@ import com.mwombeki.peak.pos.api.PosConflictException
 import com.mwombeki.peak.pos.api.PosNotFoundException
 import com.mwombeki.peak.pos.api.PosSessionResponse
 import com.mwombeki.peak.pos.api.PosSessionSummaryResponse
+import com.mwombeki.peak.realtime.api.RealtimeEventRequest
+import com.mwombeki.peak.realtime.api.RealtimeEventTypes
+import com.mwombeki.peak.realtime.api.RealtimePort
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.sql.ResultSet
 import java.util.UUID
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
@@ -19,6 +23,7 @@ import org.springframework.stereotype.Service
 class PosSessionService(
     private val jdbcTemplate: JdbcTemplate,
     private val commandExecutor: PosCommandExecutor,
+    private val realtime: ObjectProvider<RealtimePort>,
 ) {
     fun openSession(
         propertyId: UUID,
@@ -86,6 +91,25 @@ class PosSessionService(
                         ),
                         idempotencyKeyId = idempotencyKeyId,
                     )
+                }
+                .also {
+                    realtime.ifAvailable {
+                        it.broadcastRealtimeEvent(
+                            RealtimeEventRequest(
+                                tenantId = actor.tenantId,
+                                propertyId = propertyId,
+                                outletId = request.outletId,
+                                eventType = RealtimeEventTypes.SESSION_OPENED,
+                                aggregateType = RealtimeEventTypes.AGGREGATE_POS_SESSION,
+                                aggregateId = sessionId,
+                                payload = mapOf(
+                                    "sessionId" to sessionId,
+                                    "outletId" to request.outletId,
+                                    "openingFloat" to openingFloat,
+                                ),
+                            ),
+                        )
+                    }
                 }
         }
     }
@@ -196,6 +220,32 @@ class PosSessionService(
                         idempotencyKeyId = idempotencyKeyId,
                     )
                 }
+                .also {
+                    realtime.ifAvailable {
+                        val eventType = if (nextStatus == "closed") {
+                            RealtimeEventTypes.SESSION_CLOSED
+                        } else {
+                            RealtimeEventTypes.SESSION_CLOSING
+                        }
+                        it.broadcastRealtimeEvent(
+                            RealtimeEventRequest(
+                                tenantId = actor.tenantId,
+                                propertyId = propertyId,
+                                outletId = session.outletId,
+                                eventType = eventType,
+                                aggregateType = RealtimeEventTypes.AGGREGATE_POS_SESSION,
+                                aggregateId = sessionId,
+                                payload = mapOf(
+                                    "sessionId" to sessionId,
+                                    "status" to nextStatus,
+                                    "expectedCash" to session.expectedCash,
+                                    "actualCash" to actualCash,
+                                    "variance" to variance,
+                                ),
+                            ),
+                        )
+                    }
+                }
         }
     }
 
@@ -263,6 +313,25 @@ class PosSessionService(
                         ),
                         idempotencyKeyId = idempotencyKeyId,
                     )
+                }
+                .also {
+                    realtime.ifAvailable {
+                        it.broadcastRealtimeEvent(
+                            RealtimeEventRequest(
+                                tenantId = actor.tenantId,
+                                propertyId = propertyId,
+                                outletId = session.outletId,
+                                eventType = RealtimeEventTypes.SESSION_CLOSED,
+                                aggregateType = RealtimeEventTypes.AGGREGATE_POS_SESSION,
+                                aggregateId = sessionId,
+                                payload = mapOf(
+                                    "sessionId" to sessionId,
+                                    "variance" to session.variance,
+                                    "approvedBy" to actor.tenantUserId,
+                                ),
+                            ),
+                        )
+                    }
                 }
         }
     }

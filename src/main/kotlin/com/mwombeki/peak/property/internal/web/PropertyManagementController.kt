@@ -14,12 +14,16 @@ import com.mwombeki.peak.property.api.CreateTaxRateRequest
 import com.mwombeki.peak.property.api.DepartmentResponse
 import com.mwombeki.peak.property.api.EnableModuleRequest
 import com.mwombeki.peak.property.api.FloorResponse
+import com.mwombeki.peak.property.api.PropertyActivationBlockedException
+import com.mwombeki.peak.property.api.PropertyActivationBlockedResponse
+import com.mwombeki.peak.property.api.PropertyBootstrapResponse
 import com.mwombeki.peak.property.api.PropertyChildMutationReceipt
 import com.mwombeki.peak.property.api.PropertyManagementConflictException
 import com.mwombeki.peak.property.api.PropertyManagementInProgressException
 import com.mwombeki.peak.property.api.PropertyManagementNotFoundException
 import com.mwombeki.peak.property.api.PropertyModuleMutationReceipt
 import com.mwombeki.peak.property.api.PropertyMutationReceipt
+import com.mwombeki.peak.property.api.PropertyOnboardingResponse
 import com.mwombeki.peak.property.api.PropertyPort
 import com.mwombeki.peak.property.api.PropertyReadinessResponse
 import com.mwombeki.peak.property.api.PropertyResponse
@@ -65,6 +69,13 @@ class PropertyManagementController(
         return propertyPort.createProperty(request)
     }
 
+    @PostMapping("/bootstrap")
+    fun bootstrapFirstProperty(
+        @RequestBody request: CreatePropertyRequest,
+    ): PropertyBootstrapResponse {
+        return propertyPort.bootstrapFirstProperty(request)
+    }
+
     @GetMapping
     fun listProperties(): List<PropertyResponse> {
         return propertyPort.listProperties()
@@ -96,8 +107,12 @@ class PropertyManagementController(
     @PostMapping("/{propertyId}/activate")
     fun activateProperty(
         @PathVariable propertyId: UUID,
-    ): PropertyReadinessResponse {
-        return propertyPort.activateProperty(propertyId)
+    ): ResponseEntity<*> {
+        return try {
+            ResponseEntity.ok(propertyPort.activateProperty(propertyId))
+        } catch (ex: PropertyActivationBlockedException) {
+            handleActivationBlocked(ex)
+        }
     }
 
     @PostMapping("/{propertyId}/suspend")
@@ -119,6 +134,13 @@ class PropertyManagementController(
         @PathVariable propertyId: UUID,
     ): PropertyReadinessResponse {
         return propertyPort.checkReadiness(propertyId)
+    }
+
+    @GetMapping("/{propertyId}/onboarding")
+    fun getOnboarding(
+        @PathVariable propertyId: UUID,
+    ): PropertyOnboardingResponse {
+        return propertyPort.getOnboarding(propertyId)
     }
 
     @PostMapping("/{propertyId}/buildings")
@@ -445,6 +467,19 @@ class PropertyManagementController(
     @ExceptionHandler(PropertyManagementNotFoundException::class)
     fun handleNotFound(ex: PropertyManagementNotFoundException): ResponseEntity<ProblemDetail> {
         return problem(HttpStatus.NOT_FOUND, "Property resource not found", ex.publicMessage())
+    }
+
+    @ExceptionHandler(PropertyActivationBlockedException::class)
+    fun handleActivationBlocked(ex: PropertyActivationBlockedException): ResponseEntity<PropertyActivationBlockedResponse> {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(
+            PropertyActivationBlockedResponse(
+                title = "Property is not ready to activate",
+                detail = ex.publicMessage(),
+                nextAction = ex.nextAction,
+                blockers = ex.blockers,
+                operatorBlocker = ex.operatorBlocker,
+            ),
+        )
     }
 
     @ExceptionHandler(PropertyManagementConflictException::class)

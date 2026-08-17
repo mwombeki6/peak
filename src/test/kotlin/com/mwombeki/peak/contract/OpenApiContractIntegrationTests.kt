@@ -54,6 +54,55 @@ class OpenApiContractIntegrationTests @Autowired constructor(
         )
 
         assertEffectiveSecurity(current)
+        assertPublishedTillRoutes(current)
+    }
+
+    private fun assertPublishedTillRoutes(document: JsonNode) {
+        val paths = document.path("paths")
+        val expected = mapOf(
+            "/api/v1/properties/{propertyId}/pos/room-charge-candidates" to "get",
+            "/api/v1/properties/{propertyId}/pos-config/menu-items" to "get",
+            "/api/v1/properties/{propertyId}/pos-config/menu-categories" to "get",
+            "/api/v1/devices/pairing-requests" to "post",
+            "/api/v1/devices/pairing-requests/{pairingRequestId}" to "get",
+            "/api/v1/tenants/{tenantId}/devices/pairing-approvals" to "post",
+            "/api/v1/tenants/{tenantId}/devices/{deviceId}/revoke" to "post",
+            "/api/v1/devices/challenges" to "post",
+            "/api/v1/staff/sessions" to "post",
+            "/api/v1/staff/sessions/current" to "delete",
+        )
+        expected.forEach { (path, method) ->
+            assertTrue(
+                paths.path(path).has(method),
+                "OpenAPI is missing $method $path",
+            )
+        }
+        val session = document.path("components").path("schemas")
+            .path("StaffSessionHttpResponse").path("properties")
+        listOf("tenantId", "userId", "outletId", "token", "sessionClass", "deviceId", "propertyId", "mode", "terminalName")
+            .forEach { field ->
+                assertTrue(session.has(field), "StaffSessionHttpResponse is missing $field")
+            }
+        val challenge = document.path("components").path("schemas")
+            .path("DeviceChallengeHttpResponse").path("properties")
+        listOf("challengeId", "nonce", "expiresAt").forEach { field ->
+            assertTrue(challenge.has(field), "DeviceChallengeHttpResponse is missing $field")
+        }
+        val pairingStatus = document.path("components").path("schemas")
+            .path("PairingStatusHttpResponse").path("properties")
+        assertTrue(pairingStatus.has("status"), "PairingStatusHttpResponse is missing status")
+        listOf("propertyId", "tenantId", "outletId").forEach { field ->
+            assertTrue(
+                !pairingStatus.has(field),
+                "PairingStatusHttpResponse must not publish $field",
+            )
+        }
+        val pairingRequest = document.path("components").path("schemas")
+            .path("PairingRequestHttpResponse").path("properties")
+        assertTrue(
+            pairingRequest.has("pairingRequestId"),
+            "PairingRequestHttpResponse is missing pairingRequestId",
+        )
     }
 
     private fun currentDocument(): JsonNode {
@@ -135,7 +184,13 @@ class OpenApiContractIntegrationTests @Autowired constructor(
             pathEntry.value.properties()
                 .filter { it.key in HTTP_METHODS }
                 .forEach { operation ->
-                    if (pathEntry.key != "/api/v1/payments/webhooks/clickpesa/{providerAccountId}") {
+                    if (isPublicWebhookPath(pathEntry.key)) {
+                        val security = operation.value.path("security")
+                        assertTrue(
+                            security.isArray && security.isEmpty,
+                            "${operation.key.uppercase()} ${pathEntry.key} must publish empty security",
+                        )
+                    } else {
                         val security = operation.value.path("security")
                         assertTrue(
                             security.isMissingNode || security.any { it.has("bearerAuth") },
@@ -151,5 +206,26 @@ class OpenApiContractIntegrationTests @Autowired constructor(
         val BASELINE: Path = Path.of("src/test/resources/contracts/openapi-v1.json")
         val BUILD_CONTRACT: Path = Path.of("build/contracts/openapi-v1.json")
         val HTTP_METHODS = setOf("get", "post", "put", "patch", "delete", "head", "options")
+
+        /**
+         * Mirrors `OpenApiConfiguration.isAnonymousPath`, and both mirror the
+         * `public_token` rows in `module_access_matrix`.
+         *
+         * Webhooks were the whole list while they were the whole truth. Device pairing
+         * added five operations that answer an unauthenticated caller by design — a till
+         * has no credential until a manager approves it — and this guard kept asserting
+         * they publish bearer security, which is the opposite of what they do.
+         */
+        fun isPublicWebhookPath(path: String): Boolean {
+            return path.startsWith("/api/v1/payments/webhooks/") ||
+                path.startsWith("/api/v1/platform-billing/webhooks/") ||
+                path.startsWith("/api/v1/communication/webhooks/") ||
+                path.startsWith("/api/v1/devices/pairing-requests") ||
+                path == "/api/v1/devices/challenges" ||
+                path == "/api/v1/staff/sessions" ||
+                path == "/api/v1/staff/credentials/activate" ||
+                path == "/api/v1/invitations/accept"
+        }
     }
 }
+

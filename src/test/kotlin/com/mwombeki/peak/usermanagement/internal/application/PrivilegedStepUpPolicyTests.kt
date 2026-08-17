@@ -4,7 +4,7 @@ import com.mwombeki.peak.shared.context.AssuranceLevel
 import com.mwombeki.peak.shared.context.AuthenticationAssurance
 import com.mwombeki.peak.shared.context.RequestContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
-import com.mwombeki.peak.shared.context.RequestContextProperties
+import com.mwombeki.peak.shared.security.StepUpProperties
 import com.mwombeki.peak.shared.context.RequestIdentity
 import java.time.Duration
 import java.time.Instant
@@ -42,8 +42,8 @@ class PrivilegedStepUpPolicyTests {
      * ceremony.
      */
     @Test
-    fun `carve-out is unreachable when header identity is disabled`() {
-        val policy = policy(allowHeaderIdentity = false)
+    fun `carve-out is unreachable when the runtime can produce evidence`() {
+        val policy = policy(assumeUnavailable = false)
 
         assertFalse(
             policy.isCeremonyEvidenceUnavailable(),
@@ -53,7 +53,7 @@ class PrivilegedStepUpPolicyTests {
 
     @Test
     fun `production posture rejects a request with no ceremony evidence`() {
-        val policy = policy(allowHeaderIdentity = false)
+        val policy = policy(assumeUnavailable = false)
         bind(AuthenticationAssurance.UNAUTHENTICATED)
 
         val failure = assertFailsWith<IllegalStateException> {
@@ -64,7 +64,7 @@ class PrivilegedStepUpPolicyTests {
 
     @Test
     fun `production posture rejects a second factor for a phishing resistant operation`() {
-        val policy = policy(allowHeaderIdentity = false)
+        val policy = policy(assumeUnavailable = false)
         bind(assurance(AssuranceLevel.MFA, Instant.now()))
 
         val failure = assertFailsWith<IllegalStateException> {
@@ -78,7 +78,7 @@ class PrivilegedStepUpPolicyTests {
 
     @Test
     fun `production posture rejects a stale ceremony`() {
-        val policy = policy(allowHeaderIdentity = false)
+        val policy = policy(assumeUnavailable = false)
         bind(
             assurance(
                 AssuranceLevel.PHISHING_RESISTANT,
@@ -97,7 +97,7 @@ class PrivilegedStepUpPolicyTests {
 
     @Test
     fun `production posture accepts a fresh phishing resistant ceremony`() {
-        val policy = policy(allowHeaderIdentity = false)
+        val policy = policy(assumeUnavailable = false)
         bind(assurance(AssuranceLevel.PHISHING_RESISTANT, Instant.now()))
 
         assertEquals(
@@ -109,15 +109,37 @@ class PrivilegedStepUpPolicyTests {
         )
     }
 
+    /**
+     * Header identity and step-up enforcement are now independent. This is the assertion that
+     * would have failed under the old coupling, and it is the reason for the change: an
+     * integration test can enable header identity — which every one of them does — and still
+     * prove that a step-up gate holds.
+     */
+    @Test
+    fun `header identity no longer disables step-up`() {
+        val policy = policy(assumeUnavailable = false)
+        bind(AuthenticationAssurance.UNAUTHENTICATED)
+
+        assertFalse(policy.isCeremonyEvidenceUnavailable())
+        assertFailsWith<IllegalStateException> {
+            policy.require(AssuranceLevel.MFA, Duration.ofMinutes(5)) {
+                IllegalStateException(it)
+            }
+        }
+    }
+
     // --------------------------------------------- non-production posture
 
     /**
-     * The relaxation is bounded to runtimes that cannot produce evidence at all,
-     * and it is the enabling of header identity that marks such a runtime.
+     * The relaxation is bounded to runtimes that say so by name.
+     *
+     * It used to be inferred from header identity, which meant enabling header identity for
+     * tests silently disabled every step-up gate in the suite — and no integration test could
+     * assert a denial, because the gate was never reached.
      */
     @Test
-    fun `carve-out applies only where header identity is enabled`() {
-        val policy = policy(allowHeaderIdentity = true)
+    fun `carve-out applies only where the runtime declares no ceremony evidence`() {
+        val policy = policy(assumeUnavailable = true)
         bind(AuthenticationAssurance.UNAUTHENTICATED)
 
         assertTrue(policy.isCeremonyEvidenceUnavailable())
@@ -138,7 +160,7 @@ class PrivilegedStepUpPolicyTests {
      */
     @Test
     fun `each caller keeps its own failure type from the shared rule`() {
-        val policy = policy(allowHeaderIdentity = false)
+        val policy = policy(assumeUnavailable = false)
         bind(AuthenticationAssurance.UNAUTHENTICATED)
 
         assertFailsWith<IllegalArgumentException> {
@@ -148,11 +170,9 @@ class PrivilegedStepUpPolicyTests {
         }
     }
 
-    private fun policy(allowHeaderIdentity: Boolean) = PrivilegedStepUpPolicy(
+    private fun policy(assumeUnavailable: Boolean) = PrivilegedStepUpPolicy(
         requestContextHolder = holder,
-        requestContextProperties = RequestContextProperties(
-            allowHeaderIdentity = allowHeaderIdentity,
-        ),
+        stepUpProperties = StepUpProperties(assumeUnavailable = assumeUnavailable),
     )
 
     private fun assurance(level: AssuranceLevel, authTime: Instant) = AuthenticationAssurance(

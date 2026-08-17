@@ -101,9 +101,9 @@ class OpenApiConfiguration {
                         }
                     }
 
-                    if (method.name.equals(HttpMethod.POST.name(), ignoreCase = true) &&
-                        path == CLICKPESA_WEBHOOK_PATH
-                    ) {
+                    // Not POST-only: the pairing status poll an unpaired till reads is a GET,
+                    // and it is as anonymous as the request that created the pairing.
+                    if (isAnonymousPath(path)) {
                         operation.security = emptyList()
                     }
 
@@ -126,9 +126,31 @@ class OpenApiConfiguration {
     private companion object {
         const val BEARER_AUTH = "bearerAuth"
         const val API_PROBLEM = "ApiProblem"
-        const val CLICKPESA_WEBHOOK_PATH =
-            "/api/v1/payments/webhooks/clickpesa/{providerAccountId}"
         val UNSAFE_METHODS = setOf("POST", "PUT", "PATCH", "DELETE")
+
+        /**
+         * Operations that accept an unauthenticated caller by design, and must therefore
+         * publish `security: []`.
+         *
+         * Keep this in step with the `public_token` rows in `module_access_matrix`; that
+         * table is the enforcement, this is only the advertisement. They drifted once and
+         * it was the penetration probe that noticed: five device and staff operations were
+         * declared as requiring authentication while answering anonymous callers, so
+         * "secured operation did not reject anonymous caller" fired against endpoints that
+         * are anonymous on purpose. A till has no credential until a manager approves it —
+         * pairing, the status poll, the device challenge, PIN login and credential
+         * activation all have to work before there is anything to authenticate with.
+         */
+        fun isAnonymousPath(path: String): Boolean {
+            return path.startsWith("/api/v1/payments/webhooks/") ||
+                path.startsWith("/api/v1/platform-billing/webhooks/") ||
+                path.startsWith("/api/v1/communication/webhooks/") ||
+                path.startsWith("/api/v1/devices/pairing-requests") ||
+                path == "/api/v1/devices/challenges" ||
+                path == "/api/v1/staff/sessions" ||
+                path == "/api/v1/staff/credentials/activate" ||
+                path == "/api/v1/invitations/accept"
+        }
 
         fun problemResponse(description: String): ApiResponse {
             return ApiResponse()

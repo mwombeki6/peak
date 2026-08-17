@@ -949,6 +949,7 @@ class BillingService(
         tenantId: UUID,
         propertyId: UUID,
         folioId: UUID,
+        expectedRoomNumber: String,
         request: PostChargeRequest,
         idempotencyKeyId: UUID,
     ): UUID {
@@ -957,6 +958,7 @@ class BillingService(
             "POS charge tenant must match the active tenant context"
         }
         tenantRequestContext.requirePropertyUsable(tenantId, propertyId, lock = false)
+        requireOccupiedRoomFolio(tenantId, propertyId, folioId, expectedRoomNumber)
         return postChargeInternal(
             actor = actor,
             propertyId = propertyId,
@@ -1760,6 +1762,63 @@ class BillingService(
         ).singleOrNull() ?: throw BillingNotFoundException(
             "Credit note was not found",
         )
+    }
+
+    /**
+     * The folio must belong to a guest checked into the room the caller named.
+     *
+     * `requireFolio` proves only that the folio is open. That is enough for a front-desk clerk
+     * looking at the guest in front of them; it is not enough for a POS charge, where the
+     * inputs are a UUID and a room number heard across a restaurant. Without this, any waiter
+     * holding any open folio's id could charge it, and the guest would discover it at checkout
+     * with nothing in the record explaining how it got there.
+     *
+     * The same check already guards the room-rate path through `reservationRoomForCharge`; it
+     * was simply never reached from POS.
+     */
+    private fun requireOccupiedRoomFolio(
+        tenantId: UUID,
+        propertyId: UUID,
+        folioId: UUID,
+        expectedRoomNumber: String,
+    ) {
+        val actual = jdbcTemplate.query(
+            """
+            SELECT rm.room_number
+            FROM folios f
+            JOIN reservation_rooms rr ON rr.reservation_id = f.reservation_id
+                                     AND rr.tenant_id = f.tenant_id
+            JOIN rooms rm ON rm.id = rr.room_id AND rm.tenant_id = rr.tenant_id
+            WHERE f.tenant_id = ?
+              AND f.property_id = ?
+              AND f.id = ?
+              AND f.deleted_at IS NULL
+              AND f.status = 'open'
+              AND rr.status = 'checked_in'
+              AND rr.room_id IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM stays s
+                  WHERE s.tenant_id = f.tenant_id
+                    AND s.reservation_id = f.reservation_id
+                    AND s.room_id = rr.room_id
+                    AND s.status <> 'checked_in'
+              )
+            """.trimIndent(),
+            { rs, _ -> rs.getString("room_number") },
+            tenantId,
+            propertyId,
+            folioId,
+        ).firstOrNull()
+            ?: throw BillingConflictException(
+                "This folio has no guest checked into a room, so it cannot take a room charge",
+            )
+
+        if (!actual.equals(expectedRoomNumber.trim(), ignoreCase = true)) {
+            throw BillingConflictException(
+                "That folio belongs to room $actual, not room ${expectedRoomNumber.trim()}",
+            )
+        }
     }
 
     private fun requireFolio(

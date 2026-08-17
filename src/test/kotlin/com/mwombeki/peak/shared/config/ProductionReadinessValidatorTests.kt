@@ -2,6 +2,7 @@ package com.mwombeki.peak.shared.config
 
 import com.mwombeki.peak.shared.context.RequestContextProperties
 import com.mwombeki.peak.shared.security.HttpSecurityProperties
+import com.mwombeki.peak.shared.security.StepUpProperties
 import com.mwombeki.peak.shared.secrets.SecretReferenceResolver
 import java.util.UUID
 import kotlin.test.Test
@@ -10,6 +11,29 @@ import kotlin.test.assertTrue
 import org.springframework.mock.env.MockEnvironment
 
 class ProductionReadinessValidatorTests {
+
+    /**
+     * Step-up enforcement used to be implied by `allow-header-identity`, which production
+     * already refuses. Separating them would have quietly removed that guarantee unless the
+     * new flag was refused on its own terms, so this asserts it directly.
+     */
+    @Test
+    fun rejectsAssumingCeremonyEvidenceIsUnavailableInProduction() {
+        val error = assertFailsWith<IllegalStateException> {
+            validator(
+                environment = prodEnvironment()
+                    .withProperty("spring.datasource.username", "peak_migrator")
+                    .withProperty("spring.datasource.password", "peak_migrator"),
+                stepUpProperties = StepUpProperties(assumeUnavailable = true),
+            ).afterSingletonsInstantiated()
+        }
+
+        assertTrue(
+            requireNotNull(error.message).contains("step-up.assume-unavailable must be false"),
+            "production must refuse a runtime that skips privileged ceremony checks: " +
+                error.message,
+        )
+    }
 
     @Test
     fun rejectsUnsafeProductionDefaults() {
@@ -132,6 +156,75 @@ class ProductionReadinessValidatorTests {
             requireNotNull(error.message)
                 .contains("communication.delivery.http-provider.base-url must use https"),
         )
+    }
+
+    @Test
+    fun rejectsWorkerRuntimeWhenSmsIsRoutedToBeemWithoutCredentials() {
+        val error = assertFailsWith<IllegalStateException> {
+            validator(
+                environment = secureProdEnvironment()
+                    .withProperty("spring.datasource.username", "peak_worker")
+                    .withProperty("spring.datasource.password", "not-local-secret")
+                    .withProperty("spring.flyway.enabled", "false")
+                    .withProperty("spring.main.web-application-type", "none")
+                    .withProperty("peak.reliability.outbox.worker.enabled", "true")
+                    .withProperty("peak.communication.providers.beem.api-key", "")
+                    .withProperty("peak.communication.providers.beem.secret-key", "")
+                    .withProperty("peak.communication.providers.beem.source-addr", ""),
+                runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.WORKER),
+                httpSecurityProperties = secureHttpProperties(),
+                requestContextProperties = secureRequestContextProperties(),
+            ).afterSingletonsInstantiated()
+        }
+
+        val message = requireNotNull(error.message)
+        assertTrue(message.contains("providers.beem.api-key"), message)
+        assertTrue(message.contains("providers.beem.secret-key"), message)
+        assertTrue(message.contains("providers.beem.source-addr"), message)
+    }
+
+    @Test
+    fun allowsWorkerRuntimeWhenWhatsAppStaysUnrouted() {
+        validator(
+            environment = secureProdEnvironment()
+                .withProperty("spring.datasource.username", "peak_worker")
+                .withProperty("spring.datasource.password", "not-local-secret")
+                .withProperty("spring.flyway.enabled", "false")
+                .withProperty("spring.main.web-application-type", "none")
+                .withProperty("peak.reliability.outbox.worker.enabled", "true"),
+            runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.WORKER),
+            httpSecurityProperties = secureHttpProperties(),
+            requestContextProperties = secureRequestContextProperties(),
+        ).afterSingletonsInstantiated()
+    }
+
+    @Test
+    fun rejectsWorkerRuntimeWhenWhatsAppIsRoutedToBeemWithoutAFromNumberOrCallback() {
+        val error = assertFailsWith<IllegalStateException> {
+            validator(
+                environment = secureProdEnvironment()
+                    .withProperty("spring.datasource.username", "peak_worker")
+                    .withProperty("spring.datasource.password", "not-local-secret")
+                    .withProperty("spring.flyway.enabled", "false")
+                    .withProperty("spring.main.web-application-type", "none")
+                    .withProperty("peak.reliability.outbox.worker.enabled", "true")
+                    .withProperty("peak.communication.routing.whatsapp", "beem")
+                    .withProperty("peak.communication.providers.beem.whatsapp-from", "")
+                    .withProperty("peak.communication.providers.beem.whatsapp-callback-url", "")
+                    .withProperty(
+                        "peak.security.outbound.allowed-provider-hosts",
+                        "apisms.beem.africa,payments.example.com",
+                    ),
+                runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.WORKER),
+                httpSecurityProperties = secureHttpProperties(),
+                requestContextProperties = secureRequestContextProperties(),
+            ).afterSingletonsInstantiated()
+        }
+
+        val message = requireNotNull(error.message)
+        assertTrue(message.contains("providers.beem.whatsapp-from"), message)
+        assertTrue(message.contains("providers.beem.whatsapp-callback-url"), message)
+        assertTrue(message.contains("apichatcore.beem.africa"), message)
     }
 
     @Test
@@ -339,12 +432,14 @@ class ProductionReadinessValidatorTests {
             allowHeaderIdentity = true,
             allowTrustedJwtIdentityClaims = true,
         ),
+        stepUpProperties: StepUpProperties = StepUpProperties(assumeUnavailable = false),
     ): ProductionReadinessValidator {
         return ProductionReadinessValidator(
             environment = environment,
             runtimeProperties = runtimeProperties,
             httpSecurityProperties = httpSecurityProperties,
             requestContextProperties = requestContextProperties,
+            stepUpProperties = stepUpProperties,
             secretReferenceResolver = SecretReferenceResolver(environment),
         )
     }
@@ -393,10 +488,13 @@ class ProductionReadinessValidatorTests {
                 "peak.communication.delivery.http-provider.base-url",
                 "https://communications.peak.example.com",
             )
-            .withProperty(
-                "peak.communication.delivery.http-provider.api-key",
-                "secure-communication-provider-key",
-            )
+            .withProperty("peak.communication.delivery.http-provider.api-key", "secure-communication-provider-key")
+            .withProperty("peak.communication.routing.email", "http-gateway")
+            .withProperty("peak.communication.routing.sms", "beem")
+            .withProperty("peak.communication.providers.beem.enabled", "true")
+            .withProperty("peak.communication.providers.beem.api-key", "beem-api-key")
+            .withProperty("peak.communication.providers.beem.secret-key", "beem-secret-key")
+            .withProperty("peak.communication.providers.beem.source-addr", "PEAK")
             .withProperty(
                 "peak.security.envelope.key-reference",
                 "env:PEAK_ENVELOPE_KEY",

@@ -9,7 +9,8 @@
                 "reservations::api",
                 "billing::api",
                 "fiscal::api",
-                "property::api"
+                "property::api",
+                "communications::api"
         }
 )
 package com.mwombeki.peak.frontdesk;

@@ -69,6 +69,97 @@ BEGIN
     ALTER ROLE pms_privileged_access_owner
       NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
   END IF;
+
+  -- Owners of the platform-billing SECURITY DEFINER functions. Same reasoning as
+  -- the three above: the functions are dumped with their owner, the owner is not,
+  -- and a restore into a fresh cluster fails on an unknown role. Their absence
+  -- here is what broke the acceptance restore drill, not anything in the
+  -- migrations that create them.
+  --
+  -- NOBYPASSRLS on all three is load-bearing. These roles own functions that read
+  -- across tenants by design; if they could bypass RLS as well, a definer function
+  -- would silently return every tenant's rows rather than the scope it resolved.
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_roles
+    WHERE rolname = 'pms_billing_restriction_owner'
+  ) THEN
+    CREATE ROLE pms_billing_restriction_owner
+      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+  ELSE
+    ALTER ROLE pms_billing_restriction_owner
+      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_roles
+    WHERE rolname = 'pms_platform_billing_scope_owner'
+  ) THEN
+    CREATE ROLE pms_platform_billing_scope_owner
+      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+  ELSE
+    ALTER ROLE pms_platform_billing_scope_owner
+      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_roles
+    WHERE rolname = 'pms_platform_billing_sweep_owner'
+  ) THEN
+    CREATE ROLE pms_platform_billing_sweep_owner
+      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+  ELSE
+    ALTER ROLE pms_platform_billing_sweep_owner
+      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_roles
+    WHERE rolname = 'pms_communication_webhook_scope_owner'
+  ) THEN
+    CREATE ROLE pms_communication_webhook_scope_owner
+      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+  ELSE
+    ALTER ROLE pms_communication_webhook_scope_owner
+      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+  END IF;
+
+  -- Owner of the device-pairing SECURITY DEFINER functions (V120). Pending
+  -- pairing rows have no tenant, so they cannot live under ordinary tenant RLS;
+  -- this role is what those functions run as. NOBYPASSRLS is load-bearing for
+  -- the same reason as the billing owners above.
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_roles
+    WHERE rolname = 'pms_device_pairing_owner'
+  ) THEN
+    CREATE ROLE pms_device_pairing_owner
+      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+  ELSE
+    ALTER ROLE pms_device_pairing_owner
+      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+  END IF;
+
+  -- Declared by V1 and referenced by nothing: no object is owned by them and no
+  -- grant names them. They are here so the rule can be stated without exceptions —
+  -- every role a migration creates exists before a restore — rather than as a list
+  -- someone has to keep deciding is still accurate.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'pms_owner'
+  ) THEN
+    CREATE ROLE pms_owner
+      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'pms_migrator'
+  ) THEN
+    CREATE ROLE pms_migrator
+      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOBYPASSRLS;
+  END IF;
 END;
 $$;
 

@@ -2,6 +2,7 @@ package com.mwombeki.peak.shared.config
 
 import com.mwombeki.peak.shared.context.RequestContextProperties
 import com.mwombeki.peak.shared.security.HttpSecurityProperties
+import com.mwombeki.peak.shared.security.StepUpProperties
 import com.mwombeki.peak.shared.secrets.SecretReferenceResolver
 import org.springframework.beans.factory.SmartInitializingSingleton
 import org.springframework.core.env.Environment
@@ -13,6 +14,7 @@ class ProductionReadinessValidator(
     private val runtimeProperties: PeakRuntimeProperties,
     private val httpSecurityProperties: HttpSecurityProperties,
     private val requestContextProperties: RequestContextProperties,
+    private val stepUpProperties: StepUpProperties,
     private val secretReferenceResolver: SecretReferenceResolver,
 ) : SmartInitializingSingleton {
 
@@ -39,6 +41,13 @@ class ProductionReadinessValidator(
             }
             requireTrue(!requestContextProperties.allowTrustedJwtIdentityClaims) {
                 "peak.security.request-context.allow-trusted-jwt-identity-claims must be false in prod"
+            }
+            // Its own switch since the flag above stopped implying it. Without this check the
+            // separation would have quietly removed a production guarantee rather than
+            // clarified it.
+            requireTrue(!stepUpProperties.assumeUnavailable) {
+                "peak.security.step-up.assume-unavailable must be false in prod; privileged " +
+                    "operations would proceed without a proven ceremony"
             }
             requireTrue(
                 environment.getProperty(
@@ -264,6 +273,15 @@ class ProductionReadinessValidator(
         }
 
         if (runtimeProperties.mode != PeakRuntimeMode.WORKER) {
+            if (runtimeProperties.mode == PeakRuntimeMode.API) {
+                val whatsappRoute = environment.getProperty("peak.communication.routing.whatsapp")
+                    .orEmpty().trim()
+                if (whatsappRoute == "beem") {
+                    requirePresent(environment.getProperty("peak.communication.providers.beem.secret-key")) {
+                        "peak.communication.providers.beem.secret-key is required on API when WhatsApp is routed to beem"
+                    }
+                }
+            }
             return
         }
 
@@ -290,6 +308,63 @@ class ProductionReadinessValidator(
         }
         requireTrue(apiKey != "change-me" && apiKey?.contains("CHANGE_ME") != true) {
             "peak.communication.delivery.http-provider.api-key must not use a placeholder"
+        }
+
+        val emailRoute = environment.getProperty("peak.communication.routing.email").orEmpty().trim()
+        val smsRoute = environment.getProperty("peak.communication.routing.sms").orEmpty().trim()
+        val whatsappRoute = environment.getProperty("peak.communication.routing.whatsapp")
+            .orEmpty().trim()
+        requirePresent(emailRoute) {
+            "peak.communication.routing.email must name the adapter that delivers email"
+        }
+        requirePresent(smsRoute) {
+            "peak.communication.routing.sms must name the adapter that delivers sms"
+        }
+        requireTrue(emailRoute != "local" && smsRoute != "local") {
+            "peak.communication.routing must not use the local provider in prod"
+        }
+        requireTrue(whatsappRoute.isBlank() || whatsappRoute != "local") {
+            "peak.communication.routing.whatsapp must not use the local provider in prod"
+        }
+
+        if (smsRoute == "beem" || whatsappRoute == "beem") {
+            val beemEnabled = environment.getProperty(
+                "peak.communication.providers.beem.enabled",
+                Boolean::class.java,
+                false,
+            )
+            requireTrue(beemEnabled) {
+                "peak.communication.providers.beem.enabled must be true when a channel is routed to beem"
+            }
+            requirePresent(environment.getProperty("peak.communication.providers.beem.api-key")) {
+                "peak.communication.providers.beem.api-key is required when Beem is routed"
+            }
+            requirePresent(environment.getProperty("peak.communication.providers.beem.secret-key")) {
+                "peak.communication.providers.beem.secret-key is required when Beem is routed"
+            }
+        }
+        if (smsRoute == "beem") {
+            requirePresent(environment.getProperty("peak.communication.providers.beem.source-addr")) {
+                "peak.communication.providers.beem.source-addr is required when SMS is routed to beem"
+            }
+        }
+        if (whatsappRoute == "beem") {
+            requirePresent(environment.getProperty("peak.communication.providers.beem.whatsapp-from")) {
+                "peak.communication.providers.beem.whatsapp-from is required when WhatsApp is routed to beem"
+            }
+            val callbackUrl = environment.getProperty(
+                "peak.communication.providers.beem.whatsapp-callback-url",
+            )
+            requirePresent(callbackUrl) {
+                "peak.communication.providers.beem.whatsapp-callback-url is required when WhatsApp is routed to beem"
+            }
+            requireTrue(callbackUrl?.startsWith("https://") == true || acceptanceProfile) {
+                "peak.communication.providers.beem.whatsapp-callback-url must use https in prod"
+            }
+            val hosts = configuredList("peak.security.outbound.allowed-provider-hosts")
+            requireTrue(hosts.any { it.equals(BEEM_WHATSAPP_HOST, ignoreCase = true) }) {
+                "peak.security.outbound.allowed-provider-hosts must include $BEEM_WHATSAPP_HOST when WhatsApp is routed to beem"
+            }
         }
     }
 
@@ -404,6 +479,7 @@ class ProductionReadinessValidator(
         const val WORKER_RUNTIME_USER = "peak_worker"
         const val WEB_APPLICATION_TYPE_NONE = "none"
         const val FORWARD_HEADERS_NATIVE = "native"
+        const val BEEM_WHATSAPP_HOST = "apichatcore.beem.africa"
         val OUTBOUND_HOST_PATTERN = Regex(
             "^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+" +
                     "[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$",

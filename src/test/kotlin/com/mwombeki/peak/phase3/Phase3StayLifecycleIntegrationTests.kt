@@ -587,7 +587,7 @@ class Phase3StayLifecycleIntegrationTests {
                 quantity, unit_price, subtotal, tax_rate, tax_amount, amount,
                 posted_by, status
             )
-            VALUES (?, ?, ?, ?, 'MISC', 'Payment workflow test', 1, 200, 200, 0, 0, 200, ?, 'POSTED')
+            VALUES (?, ?, ?, ?, 'MISC', 'Payment workflow test', 1, 200000, 200000, 0, 0, 200000, ?, 'POSTED')
             """.trimIndent(),
             chargeId,
             fixture.tenantId,
@@ -615,6 +615,48 @@ class Phase3StayLifecycleIntegrationTests {
                 }
             """.trimIndent(),
         )
+        // Storing credentials no longer means the desk may push USSD. A property account has
+        // to be certified against the sandbox and then explicitly enabled, so this walks the
+        // same three steps a real hotel does. Recording a payment that already happened out of
+        // band is deliberately not gated this way, which is why the manual reference below
+        // still works from `configured`.
+        mockMvc.perform(
+            post(
+                "/api/v1/properties/${fixture.propertyId}/payments/" +
+                    "provider-accounts/$providerAccountId/certify",
+            )
+                .secureJson(
+                    """
+                    {
+                      "sandboxCertifiedAt": "2026-08-15T12:00:00Z",
+                      "sandboxEvidenceRef": "{\"provider\":\"clickpesa\",\"collection_flow\":\"direct_push\",\"initiated_reference\":\"CP-SANDBOX-CERT-0001\",\"confirmed_status\":\"completed\",\"recovered_by_status_query\":true}"
+                    }
+                    """.trimIndent(),
+                )
+                .headersFor(
+                    fixture,
+                    "corr-provider-certify",
+                    "idem-provider-certify-${fixture.tenantId}",
+                ),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.lifecycleStatus").value("certified"))
+        mockMvc.perform(
+            post(
+                "/api/v1/properties/${fixture.propertyId}/payments/" +
+                    "provider-accounts/$providerAccountId/enable",
+            )
+                .secureJson("{}")
+                .headersFor(
+                    fixture,
+                    "corr-provider-enable",
+                    "idem-provider-enable-${fixture.tenantId}",
+                ),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.lifecycleStatus").value("enabled"))
+            .andExpect(jsonPath("$.eligibleForCollection").value(true))
+
         val manualTransactionId = postForId(
             fixture = fixture,
             path = "/api/v1/properties/${fixture.propertyId}/payments/mobile-money/manual-reference",
@@ -626,7 +668,7 @@ class Phase3StayLifecycleIntegrationTests {
                   "providerAccountId": "$providerAccountId",
                   "referenceNumber": "MANUAL-${fixture.tenantId.toString().take(12)}",
                   "phoneNumber": "+255712345678",
-                  "amount": 120.00
+                  "amount": 120000.00
                 }
             """.trimIndent(),
         )
@@ -644,7 +686,7 @@ class Phase3StayLifecycleIntegrationTests {
             path = "/api/v1/properties/${fixture.propertyId}/payments/cash-sessions",
             idempotencyKey = "idem-reversal-cash-session-${fixture.tenantId}",
             idField = "id",
-            json = """{"openingFloat": 100.00}""",
+            json = """{"openingFloat": 100000.00}""",
         )
         val cashTransactionId = postForId(
             fixture = fixture,
@@ -655,7 +697,7 @@ class Phase3StayLifecycleIntegrationTests {
                 {
                   "folioId": "$folioId",
                   "cashSessionId": "$cashSessionId",
-                  "amount": 80.00
+                  "amount": 80000.00
                 }
             """.trimIndent(),
         )
@@ -696,7 +738,7 @@ class Phase3StayLifecycleIntegrationTests {
             ),
         )
         kotlin.test.assertEquals(
-            java.math.BigDecimal("120.00"),
+            java.math.BigDecimal("120000.00"),
             jdbcTemplate.queryForObject(
                 "SELECT total_paid FROM folios WHERE id = ?",
                 java.math.BigDecimal::class.java,
@@ -704,7 +746,7 @@ class Phase3StayLifecycleIntegrationTests {
             ),
         )
         kotlin.test.assertEquals(
-            java.math.BigDecimal("100.00"),
+            java.math.BigDecimal("100000.00"),
             jdbcTemplate.queryForObject(
                 "SELECT expected_cash FROM cash_sessions WHERE id = ?",
                 java.math.BigDecimal::class.java,
@@ -722,7 +764,7 @@ class Phase3StayLifecycleIntegrationTests {
                   "folioId": "$folioId",
                   "providerAccountId": "$providerAccountId",
                   "phoneNumber": "+255712345678",
-                  "amount": 80.00
+                  "amount": 80000.00
                 }
             """.trimIndent(),
         )
@@ -751,7 +793,7 @@ class Phase3StayLifecycleIntegrationTests {
         kotlin.test.assertEquals("pending", gatewayTransaction["status"])
         val providerTimestamp = Instant.now().toString()
         val canonicalWebhookPayload = """
-            {"data":{"clientId":"MERCHANT-001","collectedAmount":"80.00","collectedCurrency":"TZS","id":"$clickPesaTransactionId","orderReference":"${gatewayTransaction["internal_reference"]}","status":"SUCCESS","updatedAt":"$providerTimestamp"},"event":"PAYMENT RECEIVED"}
+            {"data":{"clientId":"MERCHANT-001","collectedAmount":"80000.00","collectedCurrency":"TZS","id":"$clickPesaTransactionId","orderReference":"${gatewayTransaction["internal_reference"]}","status":"SUCCESS","updatedAt":"$providerTimestamp"},"event":"PAYMENT RECEIVED"}
         """.trimIndent()
         val checksum = hmacSha256Hex(
             secret = "webhook-test-secret",
@@ -764,7 +806,7 @@ class Phase3StayLifecycleIntegrationTests {
                 "id": "$clickPesaTransactionId",
                 "status": "SUCCESS",
                 "orderReference": "${gatewayTransaction["internal_reference"]}",
-                "collectedAmount": "80.00",
+                "collectedAmount": "80000.00",
                 "collectedCurrency": "TZS",
                 "updatedAt": "$providerTimestamp",
                 "clientId": "MERCHANT-001"
@@ -794,7 +836,7 @@ class Phase3StayLifecycleIntegrationTests {
                 .andExpect(jsonPath("$.replayed").value(attempt == 1))
         }
         kotlin.test.assertEquals(
-            java.math.BigDecimal("200.00"),
+            java.math.BigDecimal("200000.00"),
             jdbcTemplate.queryForObject(
                 "SELECT total_paid FROM folios WHERE id = ?",
                 java.math.BigDecimal::class.java,
@@ -829,7 +871,7 @@ class Phase3StayLifecycleIntegrationTests {
                     {
                       "providerReference": "$clickPesaTransactionId",
                       "itemDate": "$providerTimestamp",
-                      "providerAmount": 80.00
+                      "providerAmount": 80000.00
                     }
                   ]
                 }
@@ -917,7 +959,7 @@ class Phase3StayLifecycleIntegrationTests {
                 .secureJson(
                     """
                     {
-                      "amount": 30.00,
+                      "amount": 30000.00,
                       "reason": "Guest was charged for a service that was not delivered",
                       "providerEvidence": "CP-REFUND-PARTIAL-${fixture.tenantId}"
                     }
@@ -936,7 +978,7 @@ class Phase3StayLifecycleIntegrationTests {
         kotlin.test.assertEquals(
             mapOf(
                 "status" to "partially_refunded",
-                "refunded_amount" to java.math.BigDecimal("30.00"),
+                "refunded_amount" to java.math.BigDecimal("30000.00"),
             ),
             jdbcTemplate.queryForMap(
                 """
@@ -957,7 +999,7 @@ class Phase3StayLifecycleIntegrationTests {
                 .secureJson(
                     """
                     {
-                      "amount": 51.00,
+                      "amount": 51000.00,
                       "reason": "This amount exceeds the remaining refundable balance",
                       "providerEvidence": "CP-REFUND-EXCESS-${fixture.tenantId}"
                     }
@@ -979,7 +1021,7 @@ class Phase3StayLifecycleIntegrationTests {
                 .secureJson(
                     """
                     {
-                      "amount": 50.00,
+                      "amount": 50000.00,
                       "reason": "Refund the remaining mobile money collection balance",
                       "providerEvidence": "CP-REFUND-FULL-${fixture.tenantId}"
                     }
@@ -996,7 +1038,7 @@ class Phase3StayLifecycleIntegrationTests {
         kotlin.test.assertEquals(
             mapOf(
                 "status" to "refunded",
-                "refunded_amount" to java.math.BigDecimal("80.00"),
+                "refunded_amount" to java.math.BigDecimal("80000.00"),
             ),
             jdbcTemplate.queryForMap(
                 """

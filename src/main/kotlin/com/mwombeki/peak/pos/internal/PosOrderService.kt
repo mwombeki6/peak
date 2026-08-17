@@ -12,11 +12,16 @@ import com.mwombeki.peak.pos.api.PosNotFoundException
 import com.mwombeki.peak.pos.api.PosOrderItemResponse
 import com.mwombeki.peak.pos.api.PosOrderResponse
 import com.mwombeki.peak.pos.api.SettlePosOrderRequest
+import com.mwombeki.peak.realtime.api.RealtimeEventRequest
+import com.mwombeki.peak.realtime.api.RealtimeEventTypes
+import com.mwombeki.peak.realtime.api.RealtimePort
+import com.mwombeki.peak.shared.context.RequestContextHolder
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.sql.ResultSet
 import java.util.Locale
 import java.util.UUID
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import tools.jackson.databind.ObjectMapper
@@ -28,6 +33,9 @@ class PosOrderService(
     private val billingPort: BillingPort,
     private val paymentPort: PaymentPort,
     private val objectMapper: ObjectMapper,
+    private val realtime: ObjectProvider<RealtimePort>,
+    private val requestContextHolder: RequestContextHolder,
+    private val roomCharge: PosRoomChargeService,
 ) {
     fun createOrder(
         propertyId: UUID,
@@ -46,7 +54,6 @@ class PosOrderService(
                 actor.tenantId,
                 propertyId,
                 request.sessionId,
-                actor.tenantUserId,
             )
             val orderType = request.orderType.normalizedOrderType()
             val orderId = UUID.randomUUID()
@@ -89,6 +96,28 @@ class PosOrderService(
                         ),
                         idempotencyKeyId = idempotencyKeyId,
                     )
+                }
+                .also {
+                    realtime.ifAvailable {
+                        it.broadcastRealtimeEvent(
+                            RealtimeEventRequest(
+                                tenantId = actor.tenantId,
+                                propertyId = propertyId,
+                                outletId = session.outletId,
+                                eventType = RealtimeEventTypes.POS_ORDER_CREATED,
+                                aggregateType = RealtimeEventTypes.AGGREGATE_POS_ORDER,
+                                aggregateId = orderId,
+                                aggregateVersion = 0,
+                                payload = mapOf(
+                                    "orderId" to orderId,
+                                    "orderNumber" to orderNumber,
+                                    "sessionId" to request.sessionId,
+                                    "orderType" to orderType,
+                                    "tableNumber" to request.tableNumber.normalizedOptional(),
+                                ),
+                            ),
+                        )
+                    }
                 }
         }
     }
@@ -166,6 +195,28 @@ class PosOrderService(
                         idempotencyKeyId = idempotencyKeyId,
                     )
                 }
+                .also {
+                    realtime.ifAvailable {
+                        it.broadcastRealtimeEvent(
+                            RealtimeEventRequest(
+                                tenantId = actor.tenantId,
+                                propertyId = propertyId,
+                                outletId = order.outletId,
+                                eventType = RealtimeEventTypes.POS_ORDER_UPDATED,
+                                aggregateType = RealtimeEventTypes.AGGREGATE_POS_ORDER,
+                                aggregateId = orderId,
+                                aggregateVersion = currentOrderVersion(actor.tenantId, orderId),
+                                payload = mapOf(
+                                    "orderId" to orderId,
+                                    "itemId" to itemId,
+                                    "menuItemId" to menuItem.id,
+                                    "quantity" to quantity,
+                                    "totalPrice" to amounts.total,
+                                ),
+                            ),
+                        )
+                    }
+                }
         }
     }
 
@@ -198,6 +249,7 @@ class PosOrderService(
                 "cash" -> {
                     require(
                         request.folioId == null &&
+                                request.stayId == null &&
                                 request.providerAccountId == null &&
                                 request.phoneNumber == null,
                     ) {
@@ -236,7 +288,7 @@ class PosOrderService(
                 "pos.order.settled"
             }
             requireOrder(actor.tenantId, propertyId, orderId, lock = false)
-                .also {
+                .also { settled ->
                     commandExecutor.recordSideEffects(
                         actor = actor,
                         propertyId = propertyId,
@@ -247,13 +299,37 @@ class PosOrderService(
                             "orderId" to orderId,
                             "orderNumber" to order.orderNumber,
                             "settlementMethod" to method,
-                            "settlementStatus" to it.settlementStatus,
+                            "settlementStatus" to settled.settlementStatus,
                             "paymentTransactionId" to paymentTransactionId,
                             "folioId" to request.folioId,
                             "amount" to order.totalAmount,
                         ),
                         idempotencyKeyId = idempotencyKeyId,
                     )
+                }
+                .also { settled ->
+                    realtime.ifAvailable {
+                        it.broadcastRealtimeEvent(
+                            RealtimeEventRequest(
+                                tenantId = actor.tenantId,
+                                propertyId = propertyId,
+                                outletId = order.outletId,
+                                eventType = action,
+                                aggregateType = RealtimeEventTypes.AGGREGATE_POS_ORDER,
+                                aggregateId = orderId,
+                                aggregateVersion = currentOrderVersion(actor.tenantId, orderId),
+                                payload = mapOf(
+                                    "orderId" to orderId,
+                                    "orderNumber" to order.orderNumber,
+                                    "settlementMethod" to method,
+                                    "settlementStatus" to settled.settlementStatus,
+                                    "paymentTransactionId" to paymentTransactionId,
+                                    "folioId" to request.folioId,
+                                    "amount" to order.totalAmount,
+                                ),
+                            ),
+                        )
+                    }
                 }
         }
     }
@@ -331,7 +407,7 @@ class PosOrderService(
         request: SettlePosOrderRequest,
         idempotencyKeyId: UUID,
     ): UUID {
-        require(request.folioId == null) {
+        require(request.folioId == null && request.stayId == null) {
             "folioId is allowed only for room_charge settlement"
         }
         val providerAccountId = requireNotNull(request.providerAccountId) {
@@ -385,8 +461,27 @@ class PosOrderService(
         require(request.providerAccountId == null && request.phoneNumber == null) {
             "Provider details are allowed only for mobile_money settlement"
         }
-        val folioId = requireNotNull(request.folioId) {
-            "folioId is required for room_charge settlement"
+        val roomNumber: String
+        val folioId: UUID
+        if (request.stayId != null) {
+            val target = roomCharge.requireEligibleStay(
+                tenantId = tenantId,
+                propertyId = propertyId,
+                stayId = request.stayId,
+                expectedRoomNumber = request.roomNumber,
+                expectedFolioId = request.folioId,
+            )
+            folioId = target.folioId
+            roomNumber = request.roomNumber?.trim()?.takeIf { it.isNotEmpty() } ?: target.roomNumber
+        } else {
+            folioId = requireNotNull(request.folioId) {
+                "folioId is required for room_charge settlement"
+            }
+            roomNumber = request.roomNumber?.trim().orEmpty()
+            require(roomNumber.isNotEmpty()) {
+                "A room charge must name the room. A folio id on its own does not prove the guest " +
+                    "being charged is the guest who ordered."
+            }
         }
         val effectiveTaxRate = if (order.taxAmount == BigDecimal.ZERO) {
             BigDecimal.ZERO
@@ -397,6 +492,7 @@ class PosOrderService(
             tenantId = tenantId,
             propertyId = propertyId,
             folioId = folioId,
+            expectedRoomNumber = roomNumber,
             request = PostChargeRequest(
                 chargeType = "F&B",
                 description = "POS order ${order.orderNumber}",
@@ -437,9 +533,8 @@ class PosOrderService(
         tenantId: UUID,
         propertyId: UUID,
         sessionId: UUID,
-        cashierId: UUID,
     ): PosSessionSnapshot {
-        return jdbcTemplate.query(
+        val snapshot = jdbcTemplate.query(
             """
             SELECT ps.outlet_id, o.revenue_center_id
             FROM pos_sessions ps
@@ -449,7 +544,6 @@ class PosOrderService(
             WHERE ps.tenant_id = ?
               AND o.property_id = ?
               AND ps.id = ?
-              AND ps.cashier_id = ?
               AND ps.status = 'open'
               AND o.is_active = true
               AND o.deleted_at IS NULL
@@ -464,10 +558,14 @@ class PosOrderService(
             tenantId,
             propertyId,
             sessionId,
-            cashierId,
         ).singleOrNull() ?: throw PosNotFoundException(
-            "Open POS session for the current cashier was not found",
+            "Open POS session was not found",
         )
+        val boundOutletId = requestContextHolder.current().boundOutletId
+        if (boundOutletId != null && snapshot.outletId != boundOutletId) {
+            throw PosNotFoundException("Open POS session was not found")
+        }
+        return snapshot
     }
 
     private fun requireMenuItem(
@@ -513,6 +611,15 @@ class PosOrderService(
         )
     }
 
+    private fun currentOrderVersion(tenantId: UUID, orderId: UUID): Long {
+        return jdbcTemplate.queryForObject(
+            "SELECT version FROM pos_orders WHERE tenant_id = ? AND id = ?",
+            Long::class.java,
+            tenantId,
+            orderId,
+        ) ?: 0L
+    }
+
     private fun requireOrder(
         tenantId: UUID,
         propertyId: UUID,
@@ -526,7 +633,7 @@ class PosOrderService(
                    po.order_number, po.order_type, po.table_number, po.status,
                    po.settlement_status, po.settlement_method, po.folio_id,
                    po.payment_transaction_id, po.subtotal, po.tax_amount,
-                   po.total_amount, po.created_at, po.settled_at
+                   po.total_amount, po.created_at, po.settled_at, po.served_by
             FROM pos_orders po
             WHERE po.tenant_id = ?
               AND po.property_id = ?
@@ -653,6 +760,7 @@ class PosOrderService(
             totalAmount = rs.getBigDecimal("total_amount").money(),
             createdAt = rs.getTimestamp("created_at").toInstant(),
             settledAt = rs.getTimestamp("settled_at")?.toInstant(),
+            servedBy = rs.getObject("served_by", UUID::class.java),
             items = items,
         )
     }

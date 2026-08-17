@@ -61,6 +61,37 @@ wait_http() {
   done
 }
 
+# Readiness the harness establishes for itself, rather than asking the container
+# runtime to establish it.
+#
+# The compose file gates keycloak behind `depends_on: keycloak-db:
+# condition: service_healthy`, which is correct for a deployment. It relies on the
+# runtime executing healthchecks, and podman schedules those through systemd
+# timers. On the CI runner they never ran: postgres sat at "(starting)" for nine
+# minutes while its own log said "ready to accept connections", and a check that
+# had run and failed would have gone unhealthy inside two minutes. So compose
+# waited on a condition nothing was ever going to satisfy.
+#
+# Polling pg_isready directly is the same question asked without an intermediary,
+# and it behaves identically whether or not the runtime runs healthchecks.
+wait_pg() {
+  local service="$1"
+  local user="$2"
+  local database="$3"
+  local attempts="${4:-90}"
+  local count=1
+  until "${compose[@]}" exec -T "$service" pg_isready -U "$user" -d "$database" >/dev/null 2>&1; do
+    if (( count >= attempts )); then
+      echo "Timed out waiting for $service to accept connections" >&2
+      "${compose[@]}" ps >&2 || true
+      "${compose[@]}" logs --tail 50 "$service" >&2 || true
+      exit 1
+    fi
+    count=$((count + 1))
+    sleep 2
+  done
+}
+
 API_BODY=""
 api() {
   local method="$1"
@@ -217,7 +248,39 @@ if [[ "$RESET" == "true" ]]; then
 fi
 
 "$ROOT_DIR/ops/scripts/validate-production-env.sh" "$ENV_FILE"
-"${compose[@]}" up -d postgres keycloak-db keycloak
+
+# keycloak declares `depends_on: keycloak-db: condition: service_healthy`, and
+# podman-compose waits on that with no deadline of its own. When the database never
+# reports healthy this command blocks forever rather than failing: on the first CI run
+# that reached it, it printed the postgres and keycloak-db container ids and then sat
+# silent for 65 minutes until the whole job was cancelled. A cancelled job is worse than
+# a failed one — it reports no error, uploads no evidence, and reads as an infrastructure
+# blip rather than a defect.
+#
+# The bound is generous because the images may still be pulling. The logs are what turns
+# the next occurrence into a diagnosis instead of a repeat of the same silence; the wait
+# below already reports its own timeout, so this only covers the compose call itself.
+#
+# Started with --no-deps and gated by wait_pg rather than by the compose condition, for
+# the reason wait_pg documents: the health condition is right for a deployment but is
+# only as reliable as the runtime's healthcheck scheduling, and on CI that scheduling
+# does not happen. Ordering is preserved — the database is accepting connections before
+# keycloak is asked to start — it is simply this script asserting it.
+if ! timeout 600 "${compose[@]}" up -d --no-deps postgres keycloak-db; then
+  echo "Bringing up postgres and keycloak-db failed or timed out." >&2
+  "${compose[@]}" ps >&2 || true
+  "${compose[@]}" logs --tail 100 postgres keycloak-db >&2 || true
+  exit 1
+fi
+wait_pg postgres "$POSTGRES_MIGRATOR_USER" "$POSTGRES_DB"
+wait_pg keycloak-db "$KEYCLOAK_DB_USER" "$KEYCLOAK_DB"
+
+if ! timeout 600 "${compose[@]}" up -d --no-deps keycloak; then
+  echo "Bringing up keycloak failed or timed out." >&2
+  "${compose[@]}" ps >&2 || true
+  "${compose[@]}" logs --tail 100 keycloak >&2 || true
+  exit 1
+fi
 wait_http "$KEYCLOAK_URL/realms/$PLATFORM_REALM/.well-known/openid-configuration"
 wait_http "$KEYCLOAK_URL/realms/$HOSPITALITY_REALM/.well-known/openid-configuration"
 

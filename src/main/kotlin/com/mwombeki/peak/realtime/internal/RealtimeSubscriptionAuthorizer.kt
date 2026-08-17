@@ -2,12 +2,22 @@ package com.mwombeki.peak.realtime.internal
 
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.shared.context.SessionClass
 import java.util.UUID
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
 import org.springframework.transaction.support.TransactionTemplate
 
+/**
+ * Server-side subscription authorization. A client must never subscribe to another tenant's,
+ * property's, or outlet's stream merely by knowing an id — the realtime layer is not a side
+ * door around application authorization.
+ *
+ * Every scoped destination is resolved against the database inside the subscriber's own
+ * session context (RLS-bound), so an id that does not belong to the authenticated tenant
+ * resolves to nothing rather than leaking.
+ */
 @Component
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 class RealtimeSubscriptionAuthorizer(
@@ -19,6 +29,7 @@ class RealtimeSubscriptionAuthorizer(
         identity: RequestIdentity,
         tenantId: UUID,
         propertyId: UUID,
+        sessionClass: SessionClass = SessionClass.STRONG,
     ): Boolean {
         if (identity !is RequestIdentity.Tenant || identity.tenantId != tenantId) {
             return false
@@ -26,7 +37,7 @@ class RealtimeSubscriptionAuthorizer(
 
         return transactionTemplate.execute {
             databaseSessionContext.bind(identity)
-            jdbcTemplate.queryForObject(
+            val allowed = jdbcTemplate.queryForObject(
                 "SELECT can_access_module(?, ?, ?, ?, ?)",
                 Boolean::class.java,
                 identity.tenantUserId,
@@ -35,8 +46,128 @@ class RealtimeSubscriptionAuthorizer(
                 REALTIME_MODULE_ID,
                 REALTIME_STREAM_PERMISSION,
             ) == true
+            if (!allowed) {
+                return@execute false
+            }
+            val required = jdbcTemplate.query(
+                "SELECT minimum_session_class FROM permission_catalog WHERE code = ?",
+                { rs, _ -> rs.getString("minimum_session_class") },
+                REALTIME_STREAM_PERMISSION,
+            ).firstOrNull()
+                ?.let(SessionClass::fromPolicy)
+                ?: SessionClass.STRONG
+            sessionClass.satisfies(required)
+        } == true
+    }
+
+    fun canSubscribeDestination(
+        identity: RequestIdentity,
+        target: RealtimeSubscriptionTarget,
+        sessionClass: SessionClass = SessionClass.STRONG,
+        boundPropertyId: UUID? = null,
+        boundOutletId: UUID? = null,
+    ): Boolean {
+        if (identity !is RequestIdentity.Tenant) {
+            return false
+        }
+
+        val scope = resolveScope(identity, target) ?: return false
+        if (identity.tenantId != scope.tenantId) {
+            return false
+        }
+        if (boundPropertyId != null && scope.propertyId != boundPropertyId) {
+            return false
+        }
+        if (boundOutletId != null && scope.outletId != null && scope.outletId != boundOutletId) {
+            return false
+        }
+        return canSubscribe(identity, scope.tenantId, scope.propertyId, sessionClass)
+    }
+
+    /** Resolves a scoped destination to its owning tenant/property, RLS-bound. */
+    private fun resolveScope(
+        identity: RequestIdentity.Tenant,
+        target: RealtimeSubscriptionTarget,
+    ): TenantPropertyScope? = transactionTemplate.execute {
+        databaseSessionContext.bind(identity)
+        when (target) {
+            is RealtimeSubscriptionTarget.PropertyStream -> {
+                if (target.tenantId != identity.tenantId) {
+                    return@execute null
+                }
+                TenantPropertyScope(target.tenantId, target.propertyId, outletId = null)
+            }
+            is RealtimeSubscriptionTarget.PropertyOperations -> {
+                val propertyId = jdbcTemplate.query(
+                    "SELECT id FROM properties WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL",
+                    { rs, _ -> rs.getObject("id", UUID::class.java) },
+                    identity.tenantId,
+                    target.propertyId,
+                ).firstOrNull() ?: return@execute null
+                TenantPropertyScope(identity.tenantId, propertyId, outletId = null)
+            }
+            is RealtimeSubscriptionTarget.Outlet -> {
+                val row = jdbcTemplate.query(
+                    """
+                    SELECT tenant_id, property_id FROM outlets
+                    WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL
+                    """.trimIndent(),
+                    { rs, _ ->
+                        TenantPropertyScope(
+                            rs.getObject("tenant_id", UUID::class.java),
+                            rs.getObject("property_id", UUID::class.java),
+                            outletId = target.outletId,
+                        )
+                    },
+                    identity.tenantId,
+                    target.outletId,
+                )
+                row.singleOrNull()
+            }
+            is RealtimeSubscriptionTarget.Order -> {
+                val row = jdbcTemplate.query(
+                    """
+                    SELECT tenant_id, property_id, outlet_id FROM pos_orders
+                    WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL
+                    """.trimIndent(),
+                    { rs, _ ->
+                        TenantPropertyScope(
+                            rs.getObject("tenant_id", UUID::class.java),
+                            rs.getObject("property_id", UUID::class.java),
+                            outletId = rs.getObject("outlet_id", UUID::class.java),
+                        )
+                    },
+                    identity.tenantId,
+                    target.orderId,
+                )
+                row.singleOrNull()
+            }
+            is RealtimeSubscriptionTarget.Payment -> {
+                val row = jdbcTemplate.query(
+                    """
+                    SELECT tenant_id, property_id FROM payment_transactions
+                    WHERE tenant_id = ? AND id = ?
+                    """.trimIndent(),
+                    { rs, _ ->
+                        TenantPropertyScope(
+                            rs.getObject("tenant_id", UUID::class.java),
+                            rs.getObject("property_id", UUID::class.java),
+                            outletId = null,
+                        )
+                    },
+                    identity.tenantId,
+                    target.paymentTransactionId,
+                )
+                row.singleOrNull()
+            }
         }
     }
+
+    private data class TenantPropertyScope(
+        val tenantId: UUID,
+        val propertyId: UUID,
+        val outletId: UUID?,
+    )
 
     private companion object {
         const val REALTIME_MODULE_ID = "realtime"

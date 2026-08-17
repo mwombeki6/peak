@@ -10,6 +10,7 @@ import com.mwombeki.peak.payment.api.PaymentNotFoundException
 import com.mwombeki.peak.payment.api.PaymentRejectedException
 import com.mwombeki.peak.payment.api.PaymentProvider
 import com.mwombeki.peak.payment.api.PaymentStatus
+import com.mwombeki.peak.payment.api.ProviderPaymentStatus
 import com.mwombeki.peak.payment.api.ProviderWebhookNotification
 import com.mwombeki.peak.payment.api.PaymentWebhookPort
 import com.mwombeki.peak.payment.api.PaymentWebhookReceipt
@@ -46,7 +47,7 @@ class PaymentWebhookService(
     private val requestContextHolder: RequestContextHolder,
     private val transactionTemplate: TransactionTemplate,
     private val secretResolver: SecretReferenceResolver,
-    private val billingPort: BillingPort,
+    private val confirmationService: GuestPaymentConfirmationService,
     private val auditPort: AuditPort,
     private val outboxPort: OutboxPort,
     private val objectMapper: ObjectMapper,
@@ -60,10 +61,12 @@ class PaymentWebhookService(
     override fun receive(
         providerAccountId: UUID,
         payload: String,
+        headers: Map<String, String>,
     ): PaymentWebhookReceipt {
         meterRegistry.counter("peak.payment.webhook.received").increment()
         return try {
             receiveValidated(
+                headers,
                 providerAccountId,
                 payload,
             ).also { receipt ->
@@ -88,6 +91,7 @@ class PaymentWebhookService(
     }
 
     private fun receiveValidated(
+        headers: Map<String, String>,
         providerAccountId: UUID,
         payload: String,
     ): PaymentWebhookReceipt {
@@ -103,12 +107,18 @@ class PaymentWebhookService(
                 require(scope.active) {
                     "Payment provider account is inactive"
                 }
-                require(scope.providerCode == CLICKPESA_PROVIDER) {
-                    "Only ClickPesa callbacks are accepted by this endpoint"
-                }
+                // Any provider with a registered adapter, not ClickPesa alone. The gate
+                // used to name one provider, which meant no second guest rail could ever
+                // confirm a payment however complete its adapter was — a hotel connected to
+                // anything else would watch collections sit pending until they were swept.
+                //
+                // The adapter is still what verifies; an account whose provider has none is
+                // refused, because an unverifiable callback is an anonymous HTTP client
+                // asserting it has paid a hotel.
                 val adapter = adaptersByCode[scope.providerCode]
                     ?: throw PaymentRejectedException(
-                        "Payment provider callback is not supported",
+                        "No adapter is registered for ${scope.providerCode}, so its " +
+                            "callbacks cannot be verified",
                     )
                 val notification = try {
                     adapter.verifyAndParseWebhook(
@@ -118,18 +128,22 @@ class PaymentWebhookService(
                         ),
                         checksumRequired = environment.activeProfiles
                             .contains("prod"),
+                        // Some providers sign in a header rather than in the body; one that
+                        // signs in the body ignores these.
+                        headers = headers,
                     )
                 } catch (ex: IllegalArgumentException) {
                     throw PaymentRejectedException(
-                        ex.message ?: "ClickPesa callback was rejected",
+                        ex.message ?: "${scope.providerCode} callback was rejected",
                     )
                 }
                 validateNotification(notification)
                 require(
-                    notification.clientId == null ||
-                            notification.clientId == scope.clientId,
+                    notification.merchantIdentity == null ||
+                        notification.merchantIdentity == scope.clientId,
                 ) {
-                    "ClickPesa callback client identity does not match account"
+                    "${scope.providerCode} callback names a different merchant than the " +
+                        "account it was sent to"
                 }
                 notification.providerTimestamp?.let { providerTimestamp ->
                     require(
@@ -138,7 +152,8 @@ class PaymentWebhookService(
                             clock.instant(),
                         ).abs() <= MAX_WEBHOOK_AGE,
                     ) {
-                        "ClickPesa callback is outside the accepted replay window"
+                        "${scope.providerCode} callback is outside the accepted " +
+                            "replay window"
                     }
                 }
 
@@ -231,7 +246,7 @@ class PaymentWebhookService(
         require(transaction.propertyId == scope.propertyId) {
             "Payment callback property does not match provider account"
         }
-        if (notification.status == "posted") {
+        if (notification.status == ProviderPaymentStatus.SUCCEEDED) {
             require(transaction.amount.money() == notification.amount.money()) {
                 "Payment callback amount does not match transaction"
             }
@@ -257,14 +272,15 @@ class PaymentWebhookService(
         }
 
         val resultStatus = when (notification.status) {
-            "posted" -> confirmPayment(
+            ProviderPaymentStatus.SUCCEEDED -> confirmPayment(
                 scope = scope,
+                providerAccountId = providerAccountId,
                 eventId = eventId,
                 transaction = transaction,
                 notification = notification,
             )
 
-            "failed" -> {
+            ProviderPaymentStatus.FAILED, ProviderPaymentStatus.CANCELLED -> {
                 jdbcTemplate.update(
                     """
                     UPDATE payment_transactions
@@ -286,12 +302,29 @@ class PaymentWebhookService(
                 "failed"
             }
 
-            else -> throw PaymentRejectedException(
-                "Provider callback status is unsupported",
-            )
+            // A callback that does not settle the question is not an error and must not be
+            // treated as one: the transaction stays in flight and the status query still runs.
+            // Rejecting here would make a provider's progress notification look like an
+            // attack, and 'unknown' would strand a payment the provider may yet confirm.
+            ProviderPaymentStatus.PENDING, ProviderPaymentStatus.UNKNOWN -> null
         }
 
         markEvent(eventId, scope.tenantId, "processed", null)
+
+        // A progress notification is recorded and published to nobody. POS and platform
+        // consumers subscribe to outcomes; PosPaymentOutboxHandler.supports() accepts only
+        // payment.transaction.posted and .failed, so publishing a 'pending' event to POS
+        // would find no handler, throw NoOutboxEventHandlerException, retry and dead-letter —
+        // turning a routine callback into an operational alert.
+        if (resultStatus == null) {
+            return PaymentWebhookReceipt(
+                providerEventId = notification.eventKey,
+                transactionId = transaction.id,
+                status = PaymentStatus.fromDatabase(transaction.status),
+                replayed = false,
+            )
+        }
+
         val payload = mapOf(
             "transactionId" to transaction.id,
             "providerAccountId" to providerAccountId,
@@ -351,7 +384,7 @@ class PaymentWebhookService(
         try {
             transactionTemplate.executeWithoutResult {
                 val scope = resolveScope(providerAccountId)
-                if (!scope.active || scope.providerCode != CLICKPESA_PROVIDER) {
+                if (!scope.active) {
                     return@executeWithoutResult
                 }
                 val adapter = adaptersByCode[scope.providerCode]
@@ -426,65 +459,44 @@ class PaymentWebhookService(
         )
     }
 
+    /**
+     * Builds an observation and hands it to the shared path.
+     *
+     * The callback used to apply the payment itself, in a method the status query had its own
+     * near-copy of. They had already drifted — fee recorded on one side only, the status
+     * sweep cleared on the other, different idempotency keys for the same folio posting.
+     */
     private fun confirmPayment(
         scope: WebhookScope,
+        providerAccountId: UUID,
         eventId: UUID,
         transaction: WebhookTransaction,
         notification: ProviderWebhookNotification,
     ): String {
         val propertyId = transaction.propertyId
             ?: throw PaymentConflictException("Payment transaction has no property")
-        require((transaction.folioId == null) != (transaction.posOrderId == null)) {
-            "Payment transaction must target exactly one folio or POS order"
-        }
-        jdbcTemplate.update(
-            """
-            UPDATE payment_transactions
-            SET webhook_event_id = ?,
-                provider_reference = ?,
-                fee_amount = ?,
-                provider_status = ?,
-                status = 'posted',
-                posted_at = now(),
-                confirmed_at = now(),
-                updated_at = now()
-            WHERE tenant_id = ?
-              AND id = ?
-              AND status IN ('created', 'initiated', 'pending')
-            """.trimIndent(),
-            eventId,
-            notification.providerReference,
-            notification.feeAmount.money(),
-            notification.status,
-            scope.tenantId,
-            transaction.id,
-        )
-        transaction.folioId?.let { folioId ->
-            val folioPaymentId = billingPort.postConfirmedPayment(
+
+        confirmationService.confirm(
+            ProviderPaymentObservation(
                 tenantId = scope.tenantId,
                 propertyId = propertyId,
-                request = ConfirmedPaymentRequest(
-                    folioId = folioId,
-                    paymentMethod = "mobile_money",
-                    amount = notification.amount.money(),
-                    paymentTransactionId = transaction.id,
-                    processedBy = transaction.initiatedBy,
-                    referenceNumber = notification.providerReference,
-                    idempotencyKey = eventId.toString(),
-                ),
-                idempotencyKeyId = null,
-            )
-            jdbcTemplate.update(
-                """
-                UPDATE payment_transactions
-                SET folio_payment_id = ?, updated_at = now()
-                WHERE tenant_id = ? AND id = ?
-                """.trimIndent(),
-                folioPaymentId,
-                scope.tenantId,
-                transaction.id,
-            )
-        }
+                transactionId = transaction.id,
+                providerAccountId = providerAccountId,
+                internalReference = notification.internalReference,
+                provider = scope.providerCode,
+                status = ProviderPaymentObservation.CanonicalStatus.SUCCEEDED,
+                providerReference = notification.providerReference,
+                providerStatus = notification.providerStatus,
+                amount = notification.amount.money(),
+                currency = notification.currency,
+                feeAmount = notification.feeAmount.money(),
+                folioId = transaction.folioId,
+                posOrderId = transaction.posOrderId,
+                initiatedBy = transaction.initiatedBy,
+                source = ProviderPaymentObservation.ObservationSource.WEBHOOK,
+                webhookEventId = eventId,
+            ),
+        )
         return "posted"
     }
 
@@ -579,16 +591,18 @@ class PaymentWebhookService(
         require(notification.providerReference.length in 3..200) {
             "Provider callback reference is invalid"
         }
-        require(notification.eventType in setOf("PAYMENT RECEIVED", "PAYMENT FAILED")) {
-            "Provider callback event type is unsupported"
-        }
-        require(notification.status in setOf("posted", "failed")) {
-            "Provider callback status is unsupported"
-        }
+        // Deliberately no check on eventType. It used to be required to be one of ClickPesa's
+        // two event names, which meant every Snippe and AzamPay callback was rejected here —
+        // after its signature had verified correctly — and a hotel on either rail watched its
+        // collections sit pending forever. Event names are one vocabulary per provider;
+        // reducing them to an outcome is the adapter's job, and `status` is that outcome.
         require(
-            (notification.status == "posted" && notification.amount > BigDecimal.ZERO) ||
-                    (notification.status == "failed" && notification.amount >= BigDecimal.ZERO),
+            notification.status != ProviderPaymentStatus.SUCCEEDED ||
+                notification.amount > BigDecimal.ZERO,
         ) {
+            "Provider callback reports a successful payment of ${notification.amount}"
+        }
+        require(notification.amount >= BigDecimal.ZERO) {
             "Provider callback amount is invalid"
         }
         require(notification.feeAmount >= BigDecimal.ZERO) {
@@ -634,7 +648,6 @@ class PaymentWebhookService(
     )
 
     private companion object {
-        const val CLICKPESA_PROVIDER = "clickpesa"
         const val MAX_PAYLOAD_BYTES = 64 * 1024
         val MAX_WEBHOOK_AGE: Duration = Duration.ofMinutes(5)
         val INTERNAL_REFERENCE = Regex("PEAK-[A-F0-9]{20}")

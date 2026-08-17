@@ -4,6 +4,8 @@ import com.mwombeki.peak.pos.api.CreatePosMenuCategoryRequest
 import com.mwombeki.peak.pos.api.CreatePosMenuItemRequest
 import com.mwombeki.peak.pos.api.CreatePosOutletRequest
 import com.mwombeki.peak.pos.api.PosConfigurationResponse
+import com.mwombeki.peak.pos.api.PosMenuCategoryResponse
+import com.mwombeki.peak.pos.api.PosMenuItemResponse
 import com.mwombeki.peak.pos.api.PosNotFoundException
 import java.math.RoundingMode
 import java.util.UUID
@@ -154,6 +156,78 @@ class PosConfigurationService(
                 request.name.required("name"),
                 price,
                 request.taxRateId,
+            )
+        }
+    }
+
+    fun listMenuCategories(
+        propertyId: UUID,
+        outletId: UUID,
+    ): List<PosMenuCategoryResponse> {
+        return commandExecutor.read(propertyId) { actor ->
+            requireOutlet(actor.tenantId, propertyId, outletId)
+            jdbcTemplate.query(
+                """
+                SELECT mc.id, mc.outlet_id, mc.name
+                FROM menu_categories mc
+                JOIN outlets o
+                  ON o.tenant_id = mc.tenant_id
+                 AND o.id = mc.outlet_id
+                WHERE mc.tenant_id = ?
+                  AND o.property_id = ?
+                  AND mc.outlet_id = ?
+                ORDER BY mc.name, mc.id
+                """.trimIndent(),
+                { rs, _ ->
+                    PosMenuCategoryResponse(
+                        id = rs.getObject("id", UUID::class.java),
+                        outletId = rs.getObject("outlet_id", UUID::class.java),
+                        name = rs.getString("name"),
+                    )
+                },
+                actor.tenantId,
+                propertyId,
+                outletId,
+            )
+        }
+    }
+
+    fun listMenuItems(
+        propertyId: UUID,
+        outletId: UUID,
+    ): List<PosMenuItemResponse> {
+        return commandExecutor.read(propertyId) { actor ->
+            requireOutlet(actor.tenantId, propertyId, outletId)
+            jdbcTemplate.query(
+                """
+                SELECT mi.id, mi.category_id, mi.name, mi.price,
+                       mi.tax_rate_id, mi.is_available
+                FROM menu_items mi
+                JOIN menu_categories mc
+                  ON mc.tenant_id = mi.tenant_id
+                 AND mc.id = mi.category_id
+                JOIN outlets o
+                  ON o.tenant_id = mc.tenant_id
+                 AND o.id = mc.outlet_id
+                WHERE mi.tenant_id = ?
+                  AND o.property_id = ?
+                  AND mc.outlet_id = ?
+                  AND mi.deleted_at IS NULL
+                ORDER BY mi.name, mi.id
+                """.trimIndent(),
+                { rs, _ ->
+                    PosMenuItemResponse(
+                        id = rs.getObject("id", UUID::class.java),
+                        categoryId = rs.getObject("category_id", UUID::class.java),
+                        name = rs.getString("name"),
+                        price = rs.getBigDecimal("price").setScale(2, RoundingMode.HALF_UP),
+                        taxRateId = rs.getObject("tax_rate_id", UUID::class.java),
+                        isAvailable = rs.getBoolean("is_available"),
+                    )
+                },
+                actor.tenantId,
+                propertyId,
+                outletId,
             )
         }
     }

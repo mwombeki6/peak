@@ -3,6 +3,9 @@ package com.mwombeki.peak.pos.internal
 import com.mwombeki.peak.audit.api.AuditPort
 import com.mwombeki.peak.audit.api.AuditResource
 import com.mwombeki.peak.audit.api.TenantAuditEvent
+import com.mwombeki.peak.realtime.api.RealtimeEventRequest
+import com.mwombeki.peak.realtime.api.RealtimeEventTypes
+import com.mwombeki.peak.realtime.api.RealtimePort
 import com.mwombeki.peak.reliability.api.ClaimedOutboxEvent
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventCommand
@@ -15,6 +18,7 @@ import io.micrometer.core.instrument.MeterRegistry
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.util.UUID
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
 import org.springframework.transaction.support.TransactionTemplate
@@ -28,6 +32,7 @@ class PosPaymentOutboxHandler(
     private val auditPort: AuditPort,
     private val outboxPort: OutboxPort,
     private val meterRegistry: MeterRegistry,
+    private val realtime: ObjectProvider<RealtimePort>,
 ) : OutboxEventHandler {
     override val destination = OutboxDestination.POS
 
@@ -90,6 +95,31 @@ class PosPaymentOutboxHandler(
                             after = payload,
                         ),
                     )
+                    realtime.ifAvailable {
+                        it.broadcastRealtimeEvent(
+                            RealtimeEventRequest(
+                                tenantId = tenantId,
+                                propertyId = propertyId,
+                                outletId = settlement.outletId,
+                                eventType = if (status == "posted") {
+                                    RealtimeEventTypes.POS_ORDER_SETTLED
+                                } else {
+                                    RealtimeEventTypes.POS_ORDER_UPDATED
+                                },
+                                aggregateType = RealtimeEventTypes.AGGREGATE_POS_ORDER,
+                                aggregateId = settlement.orderId,
+                                aggregateVersion = jdbcTemplate.queryForObject(
+                                    "SELECT version FROM pos_orders " +
+                                        "WHERE tenant_id = ? AND property_id = ? AND id = ?",
+                                    Long::class.java,
+                                    tenantId,
+                                    propertyId,
+                                    settlement.orderId,
+                                ),
+                                payload = payload,
+                            ),
+                        )
+                    }
                     outboxPort.enqueue(
                         OutboxEventCommand(
                             aggregateType = POS_ORDERS,
@@ -193,7 +223,7 @@ class PosPaymentOutboxHandler(
         return jdbcTemplate.query(
             """
             SELECT po.id AS order_id, po.status AS order_status,
-                   po.settlement_status, po.total_amount,
+                   po.settlement_status, po.total_amount, po.outlet_id,
                    pt.id AS transaction_id, pt.status AS payment_status,
                    pt.amount
             FROM payment_transactions pt
@@ -216,6 +246,7 @@ class PosPaymentOutboxHandler(
                     orderStatus = rs.getString("order_status"),
                     settlementStatus = rs.getString("settlement_status"),
                     orderTotal = rs.getBigDecimal("total_amount"),
+                    outletId = rs.getObject("outlet_id", UUID::class.java),
                     transactionId = rs.getObject("transaction_id", UUID::class.java),
                     paymentStatus = rs.getString("payment_status"),
                     paymentAmount = rs.getBigDecimal("amount"),
@@ -237,6 +268,7 @@ class PosPaymentOutboxHandler(
         val orderStatus: String,
         val settlementStatus: String,
         val orderTotal: BigDecimal,
+        val outletId: UUID?,
         val transactionId: UUID,
         val paymentStatus: String,
         val paymentAmount: BigDecimal,

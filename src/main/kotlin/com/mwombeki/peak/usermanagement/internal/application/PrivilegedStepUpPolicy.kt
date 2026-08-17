@@ -2,7 +2,7 @@ package com.mwombeki.peak.usermanagement.internal.application
 
 import com.mwombeki.peak.shared.context.AssuranceLevel
 import com.mwombeki.peak.shared.context.RequestContextHolder
-import com.mwombeki.peak.shared.context.RequestContextProperties
+import com.mwombeki.peak.shared.security.StepUpProperties
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -22,7 +22,7 @@ import org.springframework.stereotype.Component
 @Component
 class PrivilegedStepUpPolicy(
     private val requestContextHolder: RequestContextHolder,
-    private val requestContextProperties: RequestContextProperties,
+    private val stepUpProperties: StepUpProperties,
     private val clock: Clock = Clock.systemUTC(),
 ) {
     /**
@@ -62,18 +62,20 @@ class PrivilegedStepUpPolicy(
     /**
      * True when the runtime cannot produce ceremony evidence at all.
      *
-     * Trusted header identity carries no token, so a strict gate would make
-     * privileged operations impossible in local and controlled runtimes. This
-     * is safe only because a runtime enabling header identity has already
-     * declared itself non-production: `ProductionReadinessValidator` fails
-     * startup when `peak.security.request-context.allow-header-identity` is
-     * true under `prod`.
+     * A runtime without an identity provider carries no token, so a strict gate would make
+     * privileged operations impossible locally. Safe only because the runtime has declared
+     * itself non-production: `ProductionReadinessValidator` refuses to start `prod` with this
+     * enabled.
      *
-     * That coupling is asserted by `PrivilegedStepUpPolicyTests` together with
-     * the production validator's own rejection test, so relaxing the production
-     * rule breaks a test that names this dependency rather than silently
-     * opening a bypass.
+     * This was previously inferred from `allow-header-identity`, which meant one boolean
+     * governed two unrelated questions — may a caller assert its own identity, and is step-up
+     * enforced. The cost was not theoretical: every integration test runs with header identity
+     * on, so every step-up gate was skipped, and no integration test anywhere could assert a
+     * step-up denial. The policy's own unit tests proved the rule in isolation; nothing proved
+     * it was wired into the services that depend on it.
+     *
+     * Separating them lets an integration test turn enforcement on and check the wiring, which
+     * is the only way to find out that a gate was never called.
      */
-    fun isCeremonyEvidenceUnavailable(): Boolean =
-        requestContextProperties.allowHeaderIdentity
+    fun isCeremonyEvidenceUnavailable(): Boolean = stepUpProperties.assumeUnavailable
 }

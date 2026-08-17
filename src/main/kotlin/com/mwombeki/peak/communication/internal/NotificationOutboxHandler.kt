@@ -62,7 +62,7 @@ class NotificationDeliveryProcessor(
     private val databaseSessionContext: DatabaseSessionContext,
     private val transactionTemplate: TransactionTemplate,
     private val objectMapper: ObjectMapper,
-    private val providers: List<NotificationDeliveryProvider>,
+    private val router: NotificationProviderRouter,
     private val meterRegistry: ObjectProvider<MeterRegistry>,
     private val secretEnvelopeService: SecretEnvelopeService,
     private val invitationProperties: InvitationDeliveryProperties,
@@ -78,7 +78,10 @@ class NotificationDeliveryProcessor(
             markPolicyBlocked(tenantId, event, pendingPayload.channel)
             throw ex
         }
-        val provider = providers.firstOrNull { it.supports(payload.channel) }
+        // Configuration decides this, not bean ordering. A null here means the channel was
+        // never configured for this deployment; a channel configured against a missing or
+        // unsuitable adapter cannot reach this point, because the router refuses to start.
+        val provider = router.routeFor(payload.channel)
         val providerCode = provider?.providerCode ?: "unavailable"
         val work = startAttempt(
             tenantId = tenantId,
@@ -88,7 +91,10 @@ class NotificationDeliveryProcessor(
         )
 
         if (provider == null) {
-            val ex = IllegalStateException("No communication provider registered for ${payload.channel}")
+            val ex = IllegalStateException(
+                "Channel ${payload.channel} is not configured for delivery in this " +
+                    "deployment. Configured: ${router.configuredChannels().sorted()}",
+            )
             finishFailed(tenantId, event, work, ex)
             throw ex
         }
@@ -106,7 +112,7 @@ class NotificationDeliveryProcessor(
                     content = payload.content,
                 ),
             )
-            finishDelivered(tenantId, event, work, result)
+            finishAccepted(tenantId, event, work, result)
         } catch (ex: Exception) {
             finishFailed(tenantId, event, work, ex)
             throw ex
@@ -234,6 +240,67 @@ class NotificationDeliveryProcessor(
             event.maxAttempts,
         )
         return deliveryRequestId
+    }
+
+    private fun finishAccepted(
+        tenantId: UUID,
+        event: ClaimedOutboxEvent,
+        work: DeliveryWork,
+        result: NotificationDeliveryResult,
+    ) {
+        if (result.awaitingReceipt) {
+            finishSubmitted(tenantId, event, work, result)
+            return
+        }
+        finishDelivered(tenantId, event, work, result)
+    }
+
+    private fun finishSubmitted(
+        tenantId: UUID,
+        event: ClaimedOutboxEvent,
+        work: DeliveryWork,
+        result: NotificationDeliveryResult,
+    ) {
+        transactionTemplate.executeWithoutResult {
+            bindTenant(tenantId)
+            jdbcTemplate.update(
+                """
+                UPDATE communication_delivery_attempts
+                SET provider_message_id = ?,
+                    error_message = NULL
+                WHERE tenant_id = ?
+                  AND delivery_request_id = ?
+                  AND outbox_event_id = ?
+                  AND attempt_number = ?
+                """.trimIndent(),
+                result.providerMessageId,
+                tenantId,
+                work.deliveryRequestId,
+                event.id,
+                event.attemptCount,
+            )
+            jdbcTemplate.update(
+                """
+                UPDATE communication_delivery_requests
+                SET status = 'sending',
+                    attempt_count = GREATEST(attempt_count, ?),
+                    failed_at = NULL,
+                    last_error = NULL,
+                    updated_at = now()
+                WHERE id = ? AND tenant_id = ?
+                """.trimIndent(),
+                event.attemptCount,
+                work.deliveryRequestId,
+                tenantId,
+            )
+        }
+        logger.info(
+            "Submitted communication request {} outboxEventId={} channel={} provider={} awaitingReceipt=true",
+            work.deliveryRequestId,
+            event.id,
+            work.channel,
+            work.provider,
+        )
     }
 
     private fun finishDelivered(
@@ -370,6 +437,41 @@ class NotificationDeliveryProcessor(
     @Suppress("UNCHECKED_CAST")
     private fun ClaimedOutboxEvent.notificationPayload(): PendingNotificationPayload {
         val payload = objectMapper.readValue(this.payload, Map::class.java) as Map<String, Any?>
+        if (eventType == STAFF_ACTIVATION_EVENT) {
+            val userId = requireNotNull(aggregateId) {
+                "Staff activation aggregate id is required"
+            }
+            val secretEnvelope = payload["secretEnvelope"]?.toString()?.normalizedRequired("secretEnvelope")
+                ?: throw IllegalArgumentException("Staff activation secret envelope is required")
+            val secret = secretEnvelopeService.decrypt(
+                envelope = secretEnvelope,
+                associatedData = userId.toString(),
+            )
+            val staffNumber = payload["staffNumber"]?.toString()?.normalizedRequired("staffNumber")
+                ?: throw IllegalArgumentException("Staff number is required")
+            val fullName = payload["fullName"]?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+                ?: "Peak staff"
+            val expiresAt = payload["expiresAt"]?.toString()?.normalizedRequired("expiresAt")
+                ?: throw IllegalArgumentException("Staff activation expiry is required")
+            return PendingNotificationPayload(
+                channel = "sms",
+                recipient = payload["phoneNumber"]?.toString()?.normalizedRequired("phoneNumber"),
+                contactChannelId = null,
+                purpose = null,
+                subject = null,
+                content = buildString {
+                    append("Hello ")
+                    append(fullName)
+                    append(". Your Peak staff number is ")
+                    append(staffNumber)
+                    append(". Activation code: ")
+                    append(secret)
+                    append(". Expires ")
+                    append(expiresAt)
+                    append(".")
+                },
+            )
+        }
         if (eventType == INVITATION_EVENT) {
             val invitationId = requireNotNull(aggregateId) {
                 "Invitation aggregate id is required"
@@ -586,7 +688,12 @@ class NotificationDeliveryProcessor(
         private val ALLOWED_CHANNELS = setOf("email", "sms", "whatsapp", "voice_phone")
         private const val CHANNEL_VERIFICATION_EVENT = "communication.channel.verification.requested"
         private const val INVITATION_EVENT = "tenant.user.invited"
-        private val DIRECT_RECIPIENT_EVENTS = setOf(CHANNEL_VERIFICATION_EVENT, INVITATION_EVENT)
+        private const val STAFF_ACTIVATION_EVENT = "staff.credential.activation.issued"
+        private val DIRECT_RECIPIENT_EVENTS = setOf(
+            CHANNEL_VERIFICATION_EVENT,
+            INVITATION_EVENT,
+            STAFF_ACTIVATION_EVENT,
+        )
         private const val POLICY_BLOCKED_MESSAGE =
             "Delivery blocked because the contact channel or consent is no longer active"
         private const val MAX_ERROR_MESSAGE_LENGTH = 1000
@@ -614,6 +721,7 @@ data class NotificationDeliveryCommand(
 
 data class NotificationDeliveryResult(
     val providerMessageId: String,
+    val awaitingReceipt: Boolean = false,
 )
 
 @Component

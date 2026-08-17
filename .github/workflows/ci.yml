@@ -117,7 +117,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        postgres: ["16.14", "18.4"]
+        # Production is pinned to postgres:18.4 by digest in
+        # ops/production/compose.yaml, so that is the version the gate proves. A
+        # second leg ran 16.14, which tested a version nothing deploys and spent a
+        # whole job on every push. verify-db-backup-restore.sh still honours
+        # PG_VERSIONS, so an operator restoring into an older managed cluster can
+        # still ask for it by name.
+        postgres: ["18.4"]
     env:
       PEAK_TEST_POSTGRES_IMAGE: postgres:${{ matrix.postgres }}
     steps:
@@ -216,6 +222,8 @@ jobs:
             -e 's|^KEYCLOAK_SMTP_PASSWORD=.*|KEYCLOAK_SMTP_PASSWORD=ci-keycloak-smtp-password-1234|' \
             -e 's|^KEYCLOAK_RECONCILER_SECRET=.*|KEYCLOAK_RECONCILER_SECRET=ci-keycloak-reconciler-secret-1234|' \
             -e 's|^PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=.*|PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=ci-communication-key-1234|' \
+            -e 's|^PEAK_COMMUNICATION_PROVIDERS_BEEM_API_KEY=.*|PEAK_COMMUNICATION_PROVIDERS_BEEM_API_KEY=ci-beem-api-key-1234|' \
+            -e 's|^PEAK_COMMUNICATION_PROVIDERS_BEEM_SECRET_KEY=.*|PEAK_COMMUNICATION_PROVIDERS_BEEM_SECRET_KEY=ci-beem-secret-key-1234|' \
             -e 's|^PEAK_ENVELOPE_KEY_BASE64=.*|PEAK_ENVELOPE_KEY_BASE64=cGVhay1jaS1lbnZlbG9wZS1rZXktMzItYnl0ZXMhISE=|' \
             -e 's|^PEAK_PAYMENT_GATEWAY_CREDENTIAL=.*|PEAK_PAYMENT_GATEWAY_CREDENTIAL=ci-payment-credential-1234|' \
             -e 's|^PEAK_PAYMENT_WEBHOOK_SECRET=.*|PEAK_PAYMENT_WEBHOOK_SECRET=ci-webhook-secret-1234|' \
@@ -291,6 +299,24 @@ jobs:
   acceptance:
     name: Adversarial real-hotel acceptance and load
     runs-on: ubuntu-latest
+    # The only job here that brings up a full stack, and so the only one that can hang
+    # rather than fail. It did, on the first run that ever reached it, for 65 minutes.
+    # The other long-running workflows already bound themselves this way.
+    #
+    # Raised from 45 once the stack actually started. The bound was chosen to catch a
+    # hang, not measured against the work: the first healthy run reached
+    # tenant-property-foundation, stay-finance-foundation and core-hospitality inside
+    # six minutes and then spent the rest of its budget in the load, penetration and
+    # chaos stages, which now drive 939 probes across 416 operations at 800 requests
+    # and 24 concurrent. It was cancelled at 45m41s with nothing wrong.
+    #
+    # Back down to 45 now that chaos recovery and the restore drill run in the weekly
+    # soak instead. Those two stages were the only ones that killed running services or
+    # built a second stack, they were where all three hangs occurred, and neither
+    # answers a question a pull request can change. What is left — five role journeys,
+    # security, penetration, close reporting and a light load profile — is the part
+    # that a code change can actually break.
+    timeout-minutes: 45
     needs: [unit-integration, operations, container-security]
     steps:
       - uses: actions/checkout@v6
@@ -331,6 +357,8 @@ jobs:
             -e 's|^KEYCLOAK_SMTP_PASSWORD=.*|KEYCLOAK_SMTP_PASSWORD=acceptance-keycloak-smtp-password|' \
             -e 's|^KEYCLOAK_RECONCILER_SECRET=.*|KEYCLOAK_RECONCILER_SECRET=acceptance-reconciler-secret|' \
             -e 's|^PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=.*|PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=acceptance-communication-key|' \
+            -e 's|^PEAK_COMMUNICATION_PROVIDERS_BEEM_API_KEY=.*|PEAK_COMMUNICATION_PROVIDERS_BEEM_API_KEY=acceptance-beem-api-key|' \
+            -e 's|^PEAK_COMMUNICATION_PROVIDERS_BEEM_SECRET_KEY=.*|PEAK_COMMUNICATION_PROVIDERS_BEEM_SECRET_KEY=acceptance-beem-secret-key|' \
             -e 's|^PEAK_ENVELOPE_KEY_BASE64=.*|PEAK_ENVELOPE_KEY_BASE64=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=|' \
             -e 's|^PEAK_PAYMENT_GATEWAY_CREDENTIAL=.*|PEAK_PAYMENT_GATEWAY_CREDENTIAL=acceptance-payment-credential|' \
             -e 's|^PEAK_PAYMENT_WEBHOOK_SECRET=.*|PEAK_PAYMENT_WEBHOOK_SECRET=acceptance-webhook-secret|' \
@@ -342,6 +370,13 @@ jobs:
             -e 's|^PEAK_REPORT_STORAGE_SECRET_KEY=.*|PEAK_REPORT_STORAGE_SECRET_KEY=acceptance-report-secret-key|' \
             "$RUNNER_TEMP/peak-acceptance.env"
       - name: Run multi-role adversarial hotel journey
+        # Bounded well under the job ceiling so a hang becomes a diagnosis instead of a
+        # cancellation. Three separate hangs have now been found in this stage, each in a
+        # different unguarded podman exec, and every one cost the full ninety minutes and
+        # printed nothing: the job could only ever report "cancelled", which says where it
+        # stopped and nothing about why. Failing at 45 leaves the evidence upload and the
+        # teardown below room to run and report what was actually stuck.
+        timeout-minutes: 30
         env:
           COMPOSE_PROJECT_NAME: peak-acceptance-ci
           ENV_FILE: ${{ runner.temp }}/peak-acceptance.env
@@ -351,8 +386,19 @@ jobs:
           REAL_HOTEL_OTHER_PASSWORD: Acceptance-CI-Other-2026
           REAL_HOTEL_STAFF_PASSWORD: Acceptance-CI-Staff-2026
           REAL_HOTEL_ROOT_PASSWORD: Acceptance-CI-Root-2026
-          REAL_HOTEL_LOAD_REQUESTS: "800"
-          REAL_HOTEL_LOAD_CONCURRENCY: "24"
+          # Enough load to prove the write and read paths hold under concurrency, not
+          # enough to turn a merge gate into an hour of queueing. resilience-soak.yml
+          # already owns throughput: 100000 requests, weekly, with a two-hour budget and
+          # a runner doing nothing else. Asking this job for 800/24 as well bought no
+          # coverage the soak does not dwarf, and cost the gate its usefulness.
+          #
+          # Measured, not guessed. Every functional stage — five journeys, security
+          # acceptance, penetration, close reporting, chaos recovery — finished seven
+          # minutes into the last run. The remaining eighty-three went to load and
+          # probes, and the job was cancelled at its ceiling with nothing wrong. This
+          # profile is the one verified end to end locally: exit 0, eleven of eleven.
+          REAL_HOTEL_LOAD_REQUESTS: "200"
+          REAL_HOTEL_LOAD_CONCURRENCY: "8"
         run: ops/testing/run-real-hotel-acceptance.sh
       - name: Upload acceptance evidence
         if: always()

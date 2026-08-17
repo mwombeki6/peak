@@ -238,11 +238,53 @@ class PropertyManagementIntegrationTests {
         mockMvc.perform(
             get("/api/v1/properties/$propertyId/readiness")
                 .secure(true)
+                .headersFor(fixture, "corr-property-readiness-inventory"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.isReady").value(false))
+            .andExpect(jsonPath("$.collectionEnabled").value(false))
+            .andExpect(jsonPath("$.blockers[*].code", hasItem("strong_manager")))
+            .andExpect(jsonPath("$.blockers[*].code", org.hamcrest.Matchers.not(hasItem("guest_rail_configured"))))
+            .andExpect(jsonPath("$.nextAction.step").value("strong_manager"))
+            .andExpect(jsonPath("$.nextAction.path").exists())
+            .andExpect(jsonPath("$.blockers[*].code", org.hamcrest.Matchers.not(hasItem("whatsapp"))))
+            .andExpect(jsonPath("$.blockers[*].code", org.hamcrest.Matchers.not(hasItem("fiscal"))))
+            .andExpect(jsonPath("$.blockers[*].code", org.hamcrest.Matchers.not(hasItem("nida"))))
+
+        mockMvc.perform(
+            get("/api/v1/properties/$propertyId/onboarding")
+                .secure(true)
+                .headersFor(fixture, "corr-property-onboarding-inventory"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.isReady").value(false))
+            .andExpect(jsonPath("$.steps[?(@.key == 'frontline_path')].status", hasItem("skipped")))
+            .andExpect(jsonPath("$.steps[?(@.key == 'sms_routable')].status", hasItem("skipped")))
+            .andExpect(jsonPath("$.collectionEnabled").value(false))
+
+        mockMvc.perform(
+            post("/api/v1/properties/$propertyId/activate")
+                .secure(true)
+                .headersFor(fixture, "corr-property-activate-blocked", "idem-property-activate-blocked-${fixture.tenantId}"),
+        )
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.nextAction.step").value("strong_manager"))
+            .andExpect(jsonPath("$.nextAction.method").value("POST"))
+            .andExpect(jsonPath("$.nextAction.path").exists())
+            .andExpect(jsonPath("$.blockers[*].code", hasItem("strong_manager")))
+
+        linkStrongIdentity(fixture)
+
+        mockMvc.perform(
+            get("/api/v1/properties/$propertyId/readiness")
+                .secure(true)
                 .headersFor(fixture, "corr-property-readiness-ready"),
         )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.isReady").value(true))
             .andExpect(jsonPath("$.missingRequirements", hasSize<Any>(0)))
+            .andExpect(jsonPath("$.collectionEnabled").value(false))
+            .andExpect(jsonPath("$.workflowStatus").value("ready"))
 
         mockMvc.perform(
             post("/api/v1/properties/$propertyId/activate")
@@ -251,6 +293,8 @@ class PropertyManagementIntegrationTests {
         )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.isReady").value(true))
+            .andExpect(jsonPath("$.collectionEnabled").value(false))
+            .andExpect(jsonPath("$.workflowStatus").value("activated"))
 
         mockMvc.perform(
             get("/api/v1/properties/$propertyId")
@@ -282,6 +326,19 @@ class PropertyManagementIntegrationTests {
         assertEquals(1, outboxCount(fixture.tenantId, "property.activated", propertyId))
         assertTrue(propertyRoleAssigned(fixture.tenantId, fixture.tenantUserId, propertyId))
         assertEquals(floorId, requireFloorId(fixture.tenantId, buildingId, 1))
+        assertEquals(
+            0,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT count(*)
+                FROM payment_provider_accounts
+                WHERE tenant_id = ? AND property_id = ?
+                """.trimIndent(),
+                Int::class.java,
+                fixture.tenantId,
+                propertyId,
+            ),
+        )
     }
 
     @Test
@@ -628,6 +685,23 @@ class PropertyManagementIntegrationTests {
                 buildingId,
                 floorNumber,
             ),
+        )
+    }
+
+    private fun linkStrongIdentity(fixture: PropertyFixture) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO identity_links (
+                id, identity_mode, provider, issuer, subject, tenant_id, user_id, email
+            )
+            VALUES (?, 'tenant', 'oidc', ?, ?, ?, ?, ?)
+            """.trimIndent(),
+            UUID.randomUUID(),
+            "https://auth.peak.test/realms/peak",
+            fixture.tenantUserId.toString(),
+            fixture.tenantId,
+            fixture.tenantUserId,
+            "property-admin-${fixture.tenantId}@example.com",
         )
     }
 

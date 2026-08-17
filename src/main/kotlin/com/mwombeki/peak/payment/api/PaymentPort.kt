@@ -53,6 +53,27 @@ interface PaymentPort {
         request: ConfigurePaymentProviderRequest,
     ): PaymentProviderAccountResponse
 
+    fun verifyProvider(
+        propertyId: UUID,
+        providerAccountId: UUID,
+    ): PaymentProviderAccountResponse
+
+    fun certifyProvider(
+        propertyId: UUID,
+        providerAccountId: UUID,
+        request: CertifyPaymentProviderRequest,
+    ): PaymentProviderAccountResponse
+
+    fun enableProvider(
+        propertyId: UUID,
+        providerAccountId: UUID,
+    ): PaymentProviderAccountResponse
+
+    fun disableProvider(
+        propertyId: UUID,
+        providerAccountId: UUID,
+    ): PaymentProviderAccountResponse
+
     fun listProviderAccounts(propertyId: UUID): List<PaymentProviderAccountResponse>
     fun createReconciliation(
         propertyId: UUID,
@@ -79,9 +100,14 @@ interface PaymentPort {
 
 @NamedInterface("api")
 interface PaymentWebhookPort {
+    /**
+     * @param headers the callback's HTTP headers, for a provider that signs in one rather
+     *   than in the body. A provider that signs in the body ignores them.
+     */
     fun receive(
         providerAccountId: UUID,
         payload: String,
+        headers: Map<String, String> = emptyMap(),
     ): PaymentWebhookReceipt
 }
 

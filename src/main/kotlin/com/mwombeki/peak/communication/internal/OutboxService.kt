@@ -20,6 +20,11 @@ import com.mwombeki.peak.communication.api.DeliveryRequestResponse
 import com.mwombeki.peak.communication.api.DeliveryRetryReceipt
 import com.mwombeki.peak.communication.api.EnqueueNotificationRequest
 import com.mwombeki.peak.communication.api.NotificationEnqueueReceipt
+import com.mwombeki.peak.communication.api.GuestNotificationCommand
+import com.mwombeki.peak.communication.api.GuestNotificationPort
+import com.mwombeki.peak.communication.api.GuestNotificationPurposes
+import com.mwombeki.peak.communication.api.GuestWhatsAppChannelReceipt
+import com.mwombeki.peak.communication.api.RegisterGuestWhatsAppRequest
 import com.mwombeki.peak.communication.api.RecordCommunicationConsentRequest
 import com.mwombeki.peak.communication.api.AssignContactRoleRequest
 import com.mwombeki.peak.communication.api.TemplateMutationReceipt
@@ -52,7 +57,8 @@ class OutboxService(
     private val auditPort: AuditPort,
     private val outboxPort: OutboxPort,
     private val objectMapper: ObjectMapper,
-) : CommunicationPort {
+    private val router: NotificationProviderRouter,
+) : CommunicationPort, GuestNotificationPort {
 
     @Transactional
     override fun enqueue(request: EnqueueNotificationRequest): NotificationEnqueueReceipt {
@@ -222,6 +228,7 @@ class OutboxService(
             SELECT id, full_name, job_title, status, is_primary_contact
             FROM tenant_contacts
             WHERE tenant_id = ? AND deleted_at IS NULL
+              AND origin_guest_id IS NULL
             ORDER BY full_name
             """.trimIndent(),
             { rs, _ ->
@@ -927,6 +934,155 @@ class OutboxService(
         }
     }
 
+    @Transactional
+    override fun registerGuestWhatsAppChannel(
+        propertyId: UUID,
+        guestId: UUID,
+        request: RegisterGuestWhatsAppRequest,
+    ): GuestWhatsAppChannelReceipt {
+        val tenantId = bindTenantContext()
+        val actorId = currentTenantUserId()
+        val whatsapp = request.whatsapp.normalizedRequired("whatsapp")
+        val policyVersion = request.policyVersion.normalizedRequired("policyVersion")
+        val purposes = request.purposes
+            .map { it.normalizedCode("purpose") }
+            .ifEmpty { GuestNotificationPurposes.ALL.toList() }
+        require(purposes.isNotEmpty() && purposes.all { it in GuestNotificationPurposes.ALL }) {
+            "Unsupported guest communication purpose."
+        }
+        requirePropertyBelongsToTenant(tenantId, propertyId)
+        val guest = requireGuestAtProperty(tenantId, propertyId, guestId)
+
+        return withIdempotency(
+            operationType = "communication.guest.whatsapp.register",
+            requestPayload = mapOf(
+                "propertyId" to propertyId,
+                "guestId" to guestId,
+                "whatsapp" to whatsapp,
+                "policyVersion" to policyVersion,
+                "purposes" to purposes,
+            ),
+            resourceType = "contact_channels",
+            replayType = GuestWhatsAppChannelReceipt::class.java,
+        ) { idempotencyKeyId ->
+            val contactId = findOrCreateGuestContact(
+                tenantId = tenantId,
+                guestId = guestId,
+                fullName = guest.fullName,
+            )
+            val channelId = upsertGuestWhatsAppChannel(
+                tenantId = tenantId,
+                contactId = contactId,
+                whatsapp = whatsapp,
+            )
+            purposes.forEach { purpose ->
+                insertGuestConsent(
+                    tenantId = tenantId,
+                    contactId = contactId,
+                    channelId = channelId,
+                    purpose = purpose,
+                    policyVersion = policyVersion,
+                    actorId = actorId,
+                )
+            }
+            recordCommunicationSideEffects(
+                tenantId = tenantId,
+                action = "communication.guest.whatsapp.registered",
+                resourceType = "contact_channels",
+                resourceId = channelId,
+                payload = mapOf(
+                    "propertyId" to propertyId,
+                    "guestId" to guestId,
+                    "contactId" to contactId,
+                    "channelId" to channelId,
+                    "purposes" to purposes,
+                ),
+                idempotencyKeyId = idempotencyKeyId,
+            )
+            GuestWhatsAppChannelReceipt(
+                guestId = guestId,
+                contactId = contactId,
+                channelId = channelId,
+                replayed = false,
+            )
+        }
+    }
+
+    @Transactional
+    override fun notifyIfReachable(command: GuestNotificationCommand): NotificationEnqueueReceipt? {
+        if ("whatsapp" !in router.configuredChannels()) {
+            return null
+        }
+        val purpose = command.purpose.normalizedCode("purpose")
+        require(purpose in GuestNotificationPurposes.ALL) {
+            "Unsupported guest communication purpose."
+        }
+        bindGuestNotificationIdentity(command.tenantId)
+        val channel = guestWhatsAppChannel(
+            tenantId = command.tenantId,
+            guestId = command.guestId,
+            purpose = purpose,
+        ) ?: return null
+        val content = renderGuestNotice(purpose, command.variables)
+        val eventId = outboxPort.enqueue(
+            OutboxEventCommand(
+                aggregateType = command.aggregateType,
+                aggregateId = command.aggregateId,
+                eventType = "communication.notification.whatsapp",
+                destination = OutboxDestination.NOTIFICATION,
+                tenantId = command.tenantId,
+                propertyId = command.propertyId,
+                payload = mapOf(
+                    "channel" to "whatsapp",
+                    "contactChannelId" to channel.id,
+                    "purpose" to purpose,
+                    "content" to content,
+                ),
+                priority = 4,
+            ),
+        )
+        val deliveryRequestId = insertDeliveryRequest(
+            tenantId = command.tenantId,
+            propertyId = command.propertyId,
+            originalOutboxEventId = eventId,
+            currentOutboxEventId = eventId,
+            channel = "whatsapp",
+            recipient = channel.address,
+            subject = null,
+            content = content,
+        )
+        auditPort.recordTenantEvent(
+            TenantAuditEvent(
+                tenantId = command.tenantId,
+                action = "communication.guest.notification.enqueued",
+                resource = AuditResource("outbox_events", eventId),
+                after = mapOf(
+                    "eventId" to eventId,
+                    "propertyId" to command.propertyId,
+                    "guestId" to command.guestId,
+                    "purpose" to purpose,
+                    "channel" to "whatsapp",
+                    "contactChannelId" to channel.id,
+                    "recipientFingerprint" to sha256Hex(channel.address),
+                ),
+            ),
+        )
+        return NotificationEnqueueReceipt(
+            eventId = eventId,
+            deliveryRequestId = deliveryRequestId,
+            replayed = false,
+        )
+    }
+
+    private fun bindGuestNotificationIdentity(tenantId: UUID) {
+        val identity = requestContextHolder.currentOrNull()?.identity
+        if (identity is RequestIdentity.Tenant && identity.tenantId == tenantId) {
+            databaseSessionContext.bind(identity)
+        } else {
+            databaseSessionContext.bind(RequestIdentity.Public(tenantId = tenantId))
+        }
+    }
+
     private fun bindTenantContext(): UUID {
         val identity = requestContextHolder.current().identity
         require(identity is RequestIdentity.Tenant) {
@@ -1447,6 +1603,7 @@ class OutboxService(
             is DeliveryRetryReceipt -> copy(replayed = true)
             is ContactRoleMutationReceipt -> copy(replayed = true)
             is CommunicationConsentReceipt -> copy(replayed = true)
+            is GuestWhatsAppChannelReceipt -> copy(replayed = true)
             else -> this
         } as T
     }
@@ -1461,6 +1618,7 @@ class OutboxService(
             is DeliveryRetryReceipt -> deliveryRequestId
             is ContactRoleMutationReceipt -> roleAssignmentId
             is CommunicationConsentReceipt -> consentId
+            is GuestWhatsAppChannelReceipt -> channelId
             else -> null
         }
     }
@@ -1500,6 +1658,288 @@ class OutboxService(
             left.toByteArray(Charsets.UTF_8),
             right.toByteArray(Charsets.UTF_8),
         )
+    }
+
+    private data class GuestIdentity(
+        val fullName: String,
+    )
+
+    private data class GuestChannel(
+        val id: UUID,
+        val address: String,
+    )
+
+    private fun requireGuestAtProperty(
+        tenantId: UUID,
+        propertyId: UUID,
+        guestId: UUID,
+    ): GuestIdentity {
+        return jdbcTemplate.query(
+            """
+            SELECT COALESCE(
+                       NULLIF(btrim(full_name), ''),
+                       NULLIF(btrim(concat_ws(' ', first_name, last_name)), ''),
+                       'Guest'
+                   ) AS full_name
+            FROM guests
+            WHERE tenant_id = ?
+              AND id = ?
+              AND deleted_at IS NULL
+              AND (
+                    origin_property_id = ?
+                    OR EXISTS (
+                        SELECT 1
+                        FROM reservation_guests rg
+                        JOIN reservations r
+                          ON r.tenant_id = rg.tenant_id
+                         AND r.id = rg.reservation_id
+                         AND r.deleted_at IS NULL
+                        WHERE rg.tenant_id = guests.tenant_id
+                          AND rg.guest_id = guests.id
+                          AND r.property_id = ?
+                    )
+                  )
+            """.trimIndent(),
+            { rs, _ -> GuestIdentity(fullName = rs.getString("full_name")) },
+            tenantId,
+            guestId,
+            propertyId,
+            propertyId,
+        ).firstOrNull() ?: throw NoSuchElementException("Guest was not found at this property.")
+    }
+
+    private fun findOrCreateGuestContact(
+        tenantId: UUID,
+        guestId: UUID,
+        fullName: String,
+    ): UUID {
+        val existing = jdbcTemplate.query(
+            """
+            SELECT id
+            FROM tenant_contacts
+            WHERE tenant_id = ?
+              AND origin_guest_id = ?
+              AND deleted_at IS NULL
+            FOR UPDATE
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("id", UUID::class.java) },
+            tenantId,
+            guestId,
+        ).firstOrNull()
+        if (existing != null) {
+            return existing
+        }
+        val contactId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_contacts (id, tenant_id, full_name, status, origin_guest_id)
+            VALUES (?, ?, ?, 'active', ?)
+            """.trimIndent(),
+            contactId,
+            tenantId,
+            fullName,
+            guestId,
+        )
+        return contactId
+    }
+
+    private fun upsertGuestWhatsAppChannel(
+        tenantId: UUID,
+        contactId: UUID,
+        whatsapp: String,
+    ): UUID {
+        val existing = jdbcTemplate.query(
+            """
+            SELECT id
+            FROM contact_channels
+            WHERE tenant_id = ?
+              AND contact_id = ?
+              AND channel_type = 'whatsapp'
+              AND deleted_at IS NULL
+              AND is_active = true
+            FOR UPDATE
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("id", UUID::class.java) },
+            tenantId,
+            contactId,
+        ).firstOrNull()
+        if (existing != null) {
+            jdbcTemplate.update(
+                """
+                UPDATE contact_channels
+                SET address = ?,
+                    verification_status = 'verified',
+                    verified_at = now(),
+                    is_active = true,
+                    updated_at = now()
+                WHERE id = ? AND tenant_id = ?
+                """.trimIndent(),
+                whatsapp,
+                existing,
+                tenantId,
+            )
+            return existing
+        }
+        val channelId = UUID.randomUUID()
+        jdbcTemplate.update(
+            """
+            INSERT INTO contact_channels (
+                id,
+                tenant_id,
+                contact_id,
+                channel_type,
+                address,
+                normalized_address,
+                is_primary,
+                verification_status,
+                verified_at,
+                is_active
+            )
+            VALUES (?, ?, ?, 'whatsapp', ?, ?, true, 'verified', now(), true)
+            """.trimIndent(),
+            channelId,
+            tenantId,
+            contactId,
+            whatsapp,
+            whatsapp.trim().lowercase(),
+        )
+        return channelId
+    }
+
+    private fun insertGuestConsent(
+        tenantId: UUID,
+        contactId: UUID,
+        channelId: UUID,
+        purpose: String,
+        policyVersion: String,
+        actorId: UUID,
+    ) {
+        val latestActive = jdbcTemplate.queryForObject(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM (
+                    SELECT DISTINCT ON (purpose)
+                           status
+                    FROM communication_consents
+                    WHERE tenant_id = ?
+                      AND contact_id = ?
+                      AND contact_channel_id = ?
+                      AND purpose = ?
+                    ORDER BY purpose, captured_at DESC, created_at DESC, id DESC
+                ) latest
+                WHERE status = 'active'
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            tenantId,
+            contactId,
+            channelId,
+            purpose,
+        ) == true
+        if (latestActive) {
+            return
+        }
+        jdbcTemplate.update(
+            """
+            INSERT INTO communication_consents (
+                tenant_id,
+                contact_id,
+                contact_channel_id,
+                purpose,
+                status,
+                policy_version,
+                capture_source,
+                captured_by,
+                evidence_metadata
+            )
+            VALUES (?, ?, ?, ?, 'active', ?, 'api', ?, '{"source":"front_desk_guest_whatsapp"}'::jsonb)
+            """.trimIndent(),
+            tenantId,
+            contactId,
+            channelId,
+            purpose,
+            policyVersion,
+            actorId,
+        )
+    }
+
+    private fun guestWhatsAppChannel(
+        tenantId: UUID,
+        guestId: UUID,
+        purpose: String,
+    ): GuestChannel? {
+        return jdbcTemplate.query(
+            """
+            SELECT cc.id, cc.address
+            FROM tenant_contacts tc
+            JOIN contact_channels cc
+              ON cc.tenant_id = tc.tenant_id
+             AND cc.contact_id = tc.id
+             AND cc.channel_type = 'whatsapp'
+             AND cc.is_active = true
+             AND cc.verification_status = 'verified'
+             AND cc.deleted_at IS NULL
+            WHERE tc.tenant_id = ?
+              AND tc.origin_guest_id = ?
+              AND tc.status = 'active'
+              AND tc.deleted_at IS NULL
+              AND contact_channel_can_receive(
+                    cc.tenant_id,
+                    cc.contact_id,
+                    cc.id,
+                    ?
+                  )
+            """.trimIndent(),
+            { rs, _ ->
+                GuestChannel(
+                    id = rs.getObject("id", UUID::class.java),
+                    address = rs.getString("address"),
+                )
+            },
+            tenantId,
+            guestId,
+            purpose,
+        ).firstOrNull()
+    }
+
+    private fun renderGuestNotice(purpose: String, variables: Map<String, String>): String {
+        val property = variables["propertyName"]?.trim().orEmpty().ifEmpty { "the hotel" }
+        return when (purpose) {
+            GuestNotificationPurposes.RESERVATION -> buildString {
+                append("Your booking at ")
+                append(property)
+                append(" is confirmed")
+                variables["confirmationNumber"]?.trim()?.takeIf { it.isNotEmpty() }?.let {
+                    append(". Confirmation ")
+                    append(it)
+                }
+                variables["checkInDate"]?.trim()?.takeIf { it.isNotEmpty() }?.let {
+                    append(". Check-in ")
+                    append(it)
+                }
+                append(".")
+            }
+            GuestNotificationPurposes.FOLIO -> "A folio is open for your stay at $property."
+            GuestNotificationPurposes.PAYMENT_PROMPT -> buildString {
+                append("Please pay")
+                val amount = variables["amount"]?.trim().orEmpty()
+                val currency = variables["currency"]?.trim().orEmpty()
+                if (amount.isNotEmpty()) {
+                    append(" ")
+                    if (currency.isNotEmpty()) {
+                        append(currency)
+                        append(" ")
+                    }
+                    append(amount)
+                }
+                append(" for your stay at ")
+                append(property)
+                append(".")
+            }
+            GuestNotificationPurposes.CHECK_IN -> "Welcome to $property. You are checked in."
+            else -> error("Unsupported guest communication purpose.")
+        }
     }
 
     private data class ContactChannelInfo(
@@ -1545,6 +1985,10 @@ class OutboxService(
             "security_notifications",
             "service_notifications",
             "marketing",
+            "guest_reservation",
+            "guest_folio",
+            "guest_payment_prompt",
+            "guest_check_in",
         )
         private val TEMPLATE_VARIABLE = Regex("""\{\{([A-Za-z][A-Za-z0-9_.]*)}}""")
         private val TEMPLATE_VARIABLE_NAME = Regex("""[A-Za-z][A-Za-z0-9_.]*""")

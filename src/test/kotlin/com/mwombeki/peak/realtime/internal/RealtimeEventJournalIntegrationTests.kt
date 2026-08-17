@@ -22,6 +22,9 @@ class RealtimeEventJournalIntegrationTests {
     @Autowired
     private lateinit var jdbcTemplate: JdbcTemplate
 
+    @Autowired
+    private lateinit var transactionTemplate: org.springframework.transaction.support.TransactionTemplate
+
     @Test
     fun persistsOrderedEventsForCrossNodePollingAndScopedResume() {
         val fixture = insertFixture()
@@ -126,6 +129,139 @@ class RealtimeEventJournalIntegrationTests {
         assertEquals(
             "vacant_clean",
             (mirrored.payload["data"] as Map<*, *>)["status"],
+        )
+    }
+
+    @Test
+    fun `rolled back business transaction leaves no journal event behind`() {
+        val fixture = insertFixture()
+        val before = journal.latestSequence()
+        assertFailsWith<IllegalStateException> {
+            transactionTemplate.execute {
+                journal.append(
+                    tenantId = fixture.tenantId,
+                    propertyId = fixture.propertyId,
+                    eventType = "pos.session.opened",
+                    payload = mapOf("sessionId" to UUID.randomUUID()),
+                )
+                throw IllegalStateException("boom")
+            }
+        }
+        assertEquals(
+            emptyList(),
+            journal.replayAfter(
+                fixture.tenantId,
+                fixture.propertyId,
+                before.toString(),
+            ),
+            "A committed-event stream must never announce state that was rolled back",
+        )
+    }
+
+    @Test
+    fun `skips mirroring for canonical pos and payment broadcast families`() {
+        val fixture = insertFixture()
+        val before = journal.latestSequence()
+        val aggregateId = UUID.randomUUID()
+        listOf("pos.order.created", "pos.kitchen_ticket.ready", "pos.session.opened", "payment.succeeded")
+            .forEachIndexed { index, eventType ->
+                jdbcTemplate.update(
+                    """
+                    INSERT INTO outbox_events (
+                        id, tenant_id, property_id, aggregate_type, aggregate_id,
+                        event_type, destination, payload, correlation_id
+                    )
+                    VALUES (?, ?, ?, 'pos_order', ?, ?, 'platform', ?::jsonb, ?)
+                    """.trimIndent(),
+                    UUID.randomUUID(),
+                    fixture.tenantId,
+                    fixture.propertyId,
+                    aggregateId,
+                    eventType,
+                    """{"aggregateId":"$aggregateId"}""",
+                    "mirror-skip-$index",
+                )
+            }
+
+        assertEquals(
+            emptyList(),
+            journal.replayAfter(
+                fixture.tenantId,
+                fixture.propertyId,
+                before.toString(),
+            ),
+            "Canonically broadcast events must reach subscribers once, in the canonical envelope",
+        )
+    }
+
+    @Test
+    fun `property replay uses the scoped sequence index`() {
+        val fixture = insertFixture()
+        val indexName = jdbcTemplate.queryForObject(
+            """
+            SELECT indexname
+            FROM pg_indexes
+            WHERE tablename = 'realtime_event_journal'
+              AND indexname = 'idx_realtime_event_journal_scope_sequence'
+            """.trimIndent(),
+            String::class.java,
+        )
+        assertEquals("idx_realtime_event_journal_scope_sequence", indexName)
+
+        val other = insertProperty(fixture.tenantId)
+        jdbcTemplate.update(
+            """
+            INSERT INTO realtime_event_journal (
+                tenant_id, property_id, event_type, payload, expires_at
+            )
+            SELECT ?, ?, 'property.room.updated', '{}'::jsonb, now() + interval '1 day'
+            FROM generate_series(1, 20000) AS g
+            """.trimIndent(),
+            fixture.tenantId,
+            other,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO realtime_event_journal (
+                tenant_id, property_id, event_type, payload, expires_at
+            )
+            SELECT ?, ?, 'property.room.updated', '{}'::jsonb, now() + interval '1 day'
+            FROM generate_series(1, 500) AS g
+            """.trimIndent(),
+            fixture.tenantId,
+            fixture.propertyId,
+        )
+        jdbcTemplate.execute("ANALYZE realtime_event_journal")
+
+        val plan = requireNotNull(
+            jdbcTemplate.queryForObject(
+                """
+                EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+                SELECT sequence_id
+                FROM realtime_event_journal
+                WHERE tenant_id = ?
+                  AND property_id = ?
+                  AND sequence_id > 0
+                  AND expires_at > now()
+                ORDER BY sequence_id
+                LIMIT 200
+                """.trimIndent(),
+                String::class.java,
+                fixture.tenantId,
+                fixture.propertyId,
+            ),
+        )
+
+        assertTrue(
+            plan.contains("idx_realtime_event_journal_scope_sequence"),
+            "Replay must use idx_realtime_event_journal_scope_sequence, plan=$plan",
+        )
+        assertTrue(
+            !Regex(
+                "\\\"Node Type\\\"\\s*:\\s*\\\"Seq Scan\\\"[^}]*" +
+                    "\\\"Relation Name\\\"\\s*:\\s*\\\"realtime_event_journal\\\"",
+            ).containsMatchIn(plan),
+            "Replay must not seq-scan realtime_event_journal, plan=$plan",
         )
     }
 

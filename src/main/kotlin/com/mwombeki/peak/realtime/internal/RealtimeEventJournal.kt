@@ -34,9 +34,40 @@ class RealtimeEventJournal(
         propertyId: UUID,
         eventType: String,
         payload: Map<String, Any?>,
+    ): StoredRealtimeEvent = append(
+        tenantId = tenantId,
+        propertyId = propertyId,
+        outletId = null,
+        eventType = eventType,
+        schemaVersion = 1,
+        aggregateType = null,
+        aggregateId = null,
+        aggregateVersion = null,
+        payload = payload,
+    )
+
+    fun append(
+        tenantId: UUID,
+        propertyId: UUID,
+        outletId: UUID?,
+        eventType: String,
+        schemaVersion: Int,
+        aggregateType: String?,
+        aggregateId: UUID?,
+        aggregateVersion: Long?,
+        payload: Map<String, Any?>,
     ): StoredRealtimeEvent {
         require(EVENT_TYPE.matches(eventType)) {
             "Realtime event type is invalid"
+        }
+        require(schemaVersion >= 1) {
+            "Realtime event schema version must be at least 1"
+        }
+        require((aggregateType == null) == (aggregateId == null)) {
+            "Realtime aggregate type and id must be provided together"
+        }
+        require(aggregateVersion == null || aggregateVersion >= 0) {
+            "Realtime aggregate version must be non-negative"
         }
         val serialized = objectMapper.writeValueAsString(payload)
         require(serialized.toByteArray(Charsets.UTF_8).size <= MAX_PAYLOAD_BYTES) {
@@ -45,14 +76,21 @@ class RealtimeEventJournal(
         return jdbcTemplate.query(
             """
             SELECT sequence_id, event_id, tenant_id, property_id,
-                   event_type, payload::text AS payload, created_at
-            FROM append_realtime_event(?, ?, ?, ?::jsonb)
+                   event_type, payload::text AS payload, created_at,
+                   schema_version, aggregate_type, aggregate_id,
+                   aggregate_version, outlet_id
+            FROM append_realtime_event(?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?)
             """.trimIndent(),
             ::mapEvent,
             tenantId,
             propertyId,
             eventType,
             serialized,
+            outletId,
+            schemaVersion,
+            aggregateType,
+            aggregateId,
+            aggregateVersion,
         ).single().also {
             meterRegistry.counter(
                 "peak.realtime.journal.events.appended",
@@ -73,7 +111,9 @@ class RealtimeEventJournal(
         return jdbcTemplate.query(
             """
             SELECT sequence_id, event_id, tenant_id, property_id,
-                   event_type, payload::text AS payload, created_at
+                   event_type, payload::text AS payload, created_at,
+                   schema_version, aggregate_type, aggregate_id,
+                   aggregate_version, outlet_id
             FROM poll_realtime_events(?, ?)
             """.trimIndent(),
             ::mapEvent,
@@ -95,17 +135,35 @@ class RealtimeEventJournal(
         }
         val sequenceId = lastEventId.toLongOrNull()
             ?: throw IllegalArgumentException("Last-Event-ID must be a numeric realtime sequence.")
+        return replayPage(tenantId, propertyId, sequenceId, properties.replayLimit)
+    }
+
+    /**
+     * Paged replay for REST backfill: every committed event strictly after the cursor,
+     * ascending, capped at [limit] (clamped to the journal's configured replay limit).
+     */
+    fun replayPage(
+        tenantId: UUID,
+        propertyId: UUID,
+        afterSequence: Long,
+        limit: Int,
+    ): List<StoredRealtimeEvent> {
+        require(afterSequence >= 0) {
+            "Realtime replay cursor must be non-negative"
+        }
         return jdbcTemplate.query(
             """
             SELECT sequence_id, event_id, tenant_id, property_id,
-                   event_type, payload::text AS payload, created_at
+                   event_type, payload::text AS payload, created_at,
+                   schema_version, aggregate_type, aggregate_id,
+                   aggregate_version, outlet_id
             FROM replay_realtime_events(?, ?, ?, ?)
             """.trimIndent(),
             ::mapEvent,
             tenantId,
             propertyId,
-            sequenceId,
-            properties.replayLimit,
+            afterSequence,
+            limit.coerceIn(1, properties.replayLimit),
         ).also { events ->
             meterRegistry.counter("peak.realtime.journal.events.replayed")
                 .increment(events.size.toDouble())
@@ -138,6 +196,11 @@ class RealtimeEventJournal(
             payload = objectMapper.readValue(rs.getString("payload"), Map::class.java)
                     as Map<String, Any?>,
             createdAt = rs.getTimestamp("created_at").toInstant(),
+            schemaVersion = rs.getInt("schema_version"),
+            aggregateType = rs.getString("aggregate_type"),
+            aggregateId = rs.getObject("aggregate_id", UUID::class.java),
+            aggregateVersion = rs.getObject("aggregate_version") as Long?,
+            outletId = rs.getObject("outlet_id", UUID::class.java),
         )
     }
 
@@ -156,4 +219,9 @@ data class StoredRealtimeEvent(
     val eventType: String,
     val payload: Map<String, Any?>,
     val createdAt: Instant,
+    val schemaVersion: Int = 1,
+    val aggregateType: String? = null,
+    val aggregateId: UUID? = null,
+    val aggregateVersion: Long? = null,
+    val outletId: UUID? = null,
 )
