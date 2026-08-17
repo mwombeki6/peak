@@ -52,6 +52,8 @@ device_pairing_requests,usermanagement,active,usermanagement::api-or-internal-ow
 document_sequences,billing,active,billing::api-or-internal-owner
 edge_sync_events,deferred,dormant,no-runtime-writes
 employees,deferred,dormant,no-runtime-writes
+ephemeral_rate_limit_counters,shared,active,shared::api-or-internal-owner
+ephemeral_state_entries,shared,active,shared::api-or-internal-owner
 event_booking_items,deferred,dormant,no-runtime-writes
 event_bookings,deferred,dormant,no-runtime-writes
 event_packages,deferred,dormant,no-runtime-writes

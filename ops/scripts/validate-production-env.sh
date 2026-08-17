@@ -135,6 +135,11 @@ for name in \
   KEYCLOAK_SMTP_HOST \
   KEYCLOAK_SMTP_PORT \
   KEYCLOAK_SMTP_USER \
+  VALKEY_MAXMEMORY \
+  VALKEY_MAXMEMORY_POLICY \
+  PEAK_VALKEY_HOST \
+  PEAK_VALKEY_PORT \
+  PEAK_VALKEY_TIMEOUT \
   PEAK_SECURITY_JWT_ISSUER_URI \
   PEAK_PLATFORM_JWT_ISSUER_URI \
   PEAK_SECURITY_JWT_AUDIENCE \
@@ -187,7 +192,8 @@ for name in \
   KEYCLOAK_HTTP_MAX_QUEUED_REQUESTS \
   KEYCLOAK_DB_POOL_INITIAL_SIZE \
   KEYCLOAK_DB_POOL_MAX_SIZE \
-  KEYCLOAK_SMTP_PORT
+  KEYCLOAK_SMTP_PORT \
+  PEAK_VALKEY_PORT
 do
   require_positive_int "$name"
 done
@@ -224,7 +230,8 @@ for name in \
   PEAK_CLICKPESA_CHECKSUM_KEY \
   PEAK_FISCAL_GATEWAY_CREDENTIAL \
   PEAK_GUEST_IDENTITY_HASH_KEY \
-  PEAK_REPORT_STORAGE_SECRET_KEY
+  PEAK_REPORT_STORAGE_SECRET_KEY \
+  VALKEY_PASSWORD
 do
   require_secret "$name"
 done
@@ -336,10 +343,50 @@ for name in \
   PEAK_OTLP_METRICS_EXPORT_ENABLED \
   PEAK_OTLP_LOGGING_EXPORT_ENABLED \
   PEAK_OTLP_TRACING_EXPORT_ENABLED \
-  PEAK_REPORT_STORAGE_ENABLED
+  PEAK_REPORT_STORAGE_ENABLED \
+  PEAK_VALKEY_ENABLED
 do
   require_boolean "$name"
 done
+
+# --- Shared ephemeral store -------------------------------------------------
+# Valkey holds no durable truth, so none of this protects data. It protects the
+# host and the limiter.
+#
+# The acceptance and soak harnesses bring services up one at a time by name and
+# never start valkey, so they are allowed to run with it switched off. A real
+# deployment is not: with it off, every limiter falls to PostgreSQL permanently,
+# which works but was never the design.
+if [ "$(value_of PEAK_ACCEPTANCE_MODE)" != "true" ] && \
+   [ "$(value_of PEAK_VALKEY_ENABLED)" != "true" ]; then
+  fail "PEAK_VALKEY_ENABLED must be true in production"
+fi
+
+# An unbounded Valkey shares a host with PostgreSQL and will be the process the
+# kernel chooses to kill. A leading zero is refused with the rest because Valkey
+# reads maxmemory 0 as no limit at all, which is the setting this is here to stop.
+if ! printf '%s' "$(value_of VALKEY_MAXMEMORY)" |
+  grep -Eq '^[1-9][0-9]*([kKmMgG][bB]?)$'
+then
+  fail "VALKEY_MAXMEMORY must be an explicit non-zero size such as 256mb"
+fi
+
+# noeviction turns a full cache into refused writes, which here means staff who
+# cannot sign in because a rate-limit counter had nowhere to go.
+if [ "$(value_of VALKEY_MAXMEMORY_POLICY)" = "noeviction" ]; then
+  fail "VALKEY_MAXMEMORY_POLICY must evict; noeviction turns a full cache into failed logins"
+fi
+
+# The instance is reachable only on the compose network and publishes no port, so
+# a host with a scheme or a path means someone pointed the runtime somewhere else.
+case "$(value_of PEAK_VALKEY_HOST)" in
+  *"://"*|*"/"*|*","*|*" "*|"")
+    fail "PEAK_VALKEY_HOST must be one exact internal hostname"
+    ;;
+esac
+
+require_distinct VALKEY_PASSWORD POSTGRES_APP_PASSWORD
+require_distinct VALKEY_PASSWORD KEYCLOAK_DB_PASSWORD
 
 if [ "$(value_of PEAK_PLATFORM_RECOVERY_ENABLED)" = "true" ] && \
    [ "$(value_of PEAK_PLATFORM_BOOTSTRAP_ENABLED)" != "true" ]; then

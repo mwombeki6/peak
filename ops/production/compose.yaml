@@ -96,6 +96,48 @@ services:
     ports:
       - "${KEYCLOAK_BIND_ADDRESS}:8081:8080"
 
+  valkey:
+    image: valkey/valkey:9.1.1@sha256:3acc0687f2a2e1091fae6450d7842dd658c941338cf0a873ddd9e14b9e4ea4dd
+    restart: unless-stopped
+    # Nothing in here is authoritative. Every key is a rate-limit counter, a send
+    # cooldown, a short-lived revocation cache or presence, so the server is told to
+    # keep none of it: no snapshot, no append-only file, and deliberately no volume.
+    # Losing the whole keyspace on restart is the designed behaviour, and the
+    # PostgreSQL limiter behind RateLimitStore is what keeps refusals honest while
+    # it is gone.
+    #
+    # An eviction policy rather than the noeviction default for the same reason. At
+    # the memory ceiling a cache should shed its coldest keys; refusing writes would
+    # turn a full cache into failed staff logins.
+    command:
+      - valkey-server
+      - --requirepass
+      - ${VALKEY_PASSWORD}
+      - --maxmemory
+      - ${VALKEY_MAXMEMORY}
+      - --maxmemory-policy
+      - ${VALKEY_MAXMEMORY_POLICY}
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+    # The image leaves PID 1 as root and drops to uid 999 from its entrypoint.
+    # Naming the account keeps root out of the container entirely.
+    user: valkey
+    security_opt:
+      - no-new-privileges:true
+    # Above maxmemory, not equal to it: allocator fragmentation and client output
+    # buffers live outside the keyspace budget, and a cgroup kill loses the cache
+    # rather than evicting from it.
+    mem_limit: 384m
+    cpus: 0.5
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli -a ${VALKEY_PASSWORD} --no-auth-warning ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   peak-migration:
     image: ${PEAK_IMAGE}
     restart: "no"
@@ -239,6 +281,17 @@ services:
       PEAK_FISCAL_PRODUCTION_APPROVED_PROVIDER_CODES: ${PEAK_FISCAL_PRODUCTION_APPROVED_PROVIDER_CODES}
       PEAK_FISCAL_GATEWAY_CREDENTIAL: ${PEAK_FISCAL_GATEWAY_CREDENTIAL}
       PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS: ${PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS}
+      # No depends_on on valkey, and no valkey member in the readiness group below.
+      # Both are deliberate. Reservations, check-in, POS ordering, housekeeping and
+      # cash settlement never touch it, so a Valkey that is down or not yet up must
+      # not stop this service starting or report it unready. What an outage does cost
+      # is the fast limiter: RateLimitStore falls through to PostgreSQL and the
+      # refusals go on happening.
+      PEAK_VALKEY_ENABLED: ${PEAK_VALKEY_ENABLED}
+      PEAK_VALKEY_HOST: ${PEAK_VALKEY_HOST}
+      PEAK_VALKEY_PORT: ${PEAK_VALKEY_PORT}
+      PEAK_VALKEY_PASSWORD: ${VALKEY_PASSWORD}
+      PEAK_VALKEY_TIMEOUT: ${PEAK_VALKEY_TIMEOUT}
       PEAK_OUTBOX_WORKER_HEALTH_REQUIRED: "true"
       MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: readinessState,db,keycloakDiscovery,workerRuntime,realtimeJournal,clickPesa
       PEAK_DB_POOL_MAX_SIZE: ${PEAK_DB_POOL_MAX_SIZE}
@@ -313,6 +366,12 @@ services:
       PEAK_ENVELOPE_KEY_BASE64: ${PEAK_ENVELOPE_KEY_BASE64}
       PEAK_ENVELOPE_PREVIOUS_KEY_REFERENCE: ${PEAK_ENVELOPE_PREVIOUS_KEY_REFERENCE}
       PEAK_ENVELOPE_PREVIOUS_KEY_BASE64: ${PEAK_ENVELOPE_PREVIOUS_KEY_BASE64}
+      # Optional infrastructure here too; see peak-api.
+      PEAK_VALKEY_ENABLED: ${PEAK_VALKEY_ENABLED}
+      PEAK_VALKEY_HOST: ${PEAK_VALKEY_HOST}
+      PEAK_VALKEY_PORT: ${PEAK_VALKEY_PORT}
+      PEAK_VALKEY_PASSWORD: ${VALKEY_PASSWORD}
+      PEAK_VALKEY_TIMEOUT: ${PEAK_VALKEY_TIMEOUT}
       PEAK_OUTBOX_WORKER_ENABLED: "false"
       PEAK_OUTBOX_WORKER_HEALTH_REQUIRED: "true"
       PEAK_DB_POOL_MAX_SIZE: ${PEAK_DB_POOL_MAX_SIZE}
@@ -387,6 +446,12 @@ services:
       PEAK_FISCAL_PRODUCTION_APPROVED_PROVIDER_CODES: ${PEAK_FISCAL_PRODUCTION_APPROVED_PROVIDER_CODES}
       PEAK_FISCAL_GATEWAY_CREDENTIAL: ${PEAK_FISCAL_GATEWAY_CREDENTIAL}
       PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS: ${PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS}
+      # Optional infrastructure here too; see peak-api.
+      PEAK_VALKEY_ENABLED: ${PEAK_VALKEY_ENABLED}
+      PEAK_VALKEY_HOST: ${PEAK_VALKEY_HOST}
+      PEAK_VALKEY_PORT: ${PEAK_VALKEY_PORT}
+      PEAK_VALKEY_PASSWORD: ${VALKEY_PASSWORD}
+      PEAK_VALKEY_TIMEOUT: ${PEAK_VALKEY_TIMEOUT}
       PEAK_WORKER_DB_POOL_MAX_SIZE: ${PEAK_WORKER_DB_POOL_MAX_SIZE}
       PEAK_WORKER_DB_POOL_MIN_IDLE: ${PEAK_WORKER_DB_POOL_MIN_IDLE}
       PEAK_DB_CONNECTION_TIMEOUT: ${PEAK_DB_CONNECTION_TIMEOUT}

@@ -36,10 +36,27 @@ spring:
     clean-disabled: true
   jooq:
     sql-dialect: postgres
+  data:
+    # Valkey. The property namespace is Spring's because the wire protocol is
+    # Redis's; the deployed server is Valkey and nothing here is portable beyond
+    # what both speak. Timeouts are deliberately short — a limiter that waits on a
+    # sick cache is worse than one that falls through to PostgreSQL immediately.
+    redis:
+      host: ${PEAK_VALKEY_HOST:localhost}
+      port: ${PEAK_VALKEY_PORT:6379}
+      password: ${PEAK_VALKEY_PASSWORD:}
+      timeout: ${PEAK_VALKEY_TIMEOUT:250ms}
+      connect-timeout: ${PEAK_VALKEY_CONNECT_TIMEOUT:250ms}
 
 peak:
   runtime:
     mode: ${PEAK_RUNTIME_MODE:api}
+  ephemeral:
+    # Off by default so a developer, a test and a migration runtime all reach the
+    # PostgreSQL limiter without a cache to install first. Production turns it on.
+    valkey:
+      enabled: ${PEAK_VALKEY_ENABLED:false}
+    key-prefix: ${PEAK_EPHEMERAL_KEY_PREFIX:peak}
   observability:
     operational-metrics:
       enabled: ${PEAK_OPERATIONAL_METRICS_ENABLED:true}
@@ -193,6 +210,16 @@ peak:
     invitation:
       expose-token-in-response: ${PEAK_INVITATION_EXPOSE_TOKEN_IN_RESPONSE:false}
 management:
+  health:
+    # Valkey holds nothing Peak cannot do without. Boot contributes a Redis health
+    # indicator as soon as the client is on the classpath, and it would drag
+    # /actuator/health to DOWN — and with it every liveness and readiness consumer
+    # watching that endpoint — for a cache whose loss the PostgreSQL limiter is
+    # designed to absorb. Reservations, check-in, POS ordering, housekeeping and
+    # cash settlement are unaffected by the outage and must stay unaffected by the
+    # reporting of it.
+    redis:
+      enabled: false
   otlp:
     metrics:
       export:
