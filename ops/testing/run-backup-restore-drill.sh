@@ -18,30 +18,46 @@ set -a
 source "$ENV_FILE"
 set +a
 
+# Bounded, and no longer silent, because this ran on every exit path and could not report.
+#
+# It is the drill's genuine last act, which matches what three cancelled runs printed: the
+# container removals immediately before it, then nothing. Discarding its output meant whatever
+# it said while stuck was thrown away, and `|| true` meant it could never fail — so a teardown
+# that never returned looked exactly like a drill that had finished.
+#
+# `down -v` removes volumes and the network, which is the slowest thing podman does here, so
+# the bound is generous. If it is exceeded that is the finding, and saying so costs one line.
 cleanup() {
-  podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" \
-    -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" down -v --remove-orphans >/dev/null 2>&1 || true
+  if ! timeout 180 podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" \
+      -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" down -v --remove-orphans >/dev/null 2>&1; then
+    echo "Restore drill teardown did not finish within 180s; leaving $RESTORE_PROJECT behind." >&2
+  fi
 }
 trap cleanup EXIT
 
+# Every query helper below is bounded twice: an outer timeout for a wedged exec channel, and
+# a statement_timeout for a query blocked on a lock, which PostgreSQL would otherwise wait on
+# forever. These are all small reads against a freshly restored database, so exceeding either
+# bound is a finding rather than slow work.
+
 source_db() {
-  podman compose -p "$SOURCE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
-    exec -T postgres psql -XAt -U "$POSTGRES_MIGRATOR_USER" -d "$POSTGRES_DB" -c "$1"
+  timeout 60 podman compose -p "$SOURCE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
+    exec -T -e PGOPTIONS='-c statement_timeout=30000' postgres psql -XAt -U "$POSTGRES_MIGRATOR_USER" -d "$POSTGRES_DB" -c "$1"
 }
 
 restored_db() {
-  podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
-    exec -T postgres psql -XAt -U "$POSTGRES_MIGRATOR_USER" -d "$POSTGRES_DB" -c "$1"
+  timeout 60 podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
+    exec -T -e PGOPTIONS='-c statement_timeout=30000' postgres psql -XAt -U "$POSTGRES_MIGRATOR_USER" -d "$POSTGRES_DB" -c "$1"
 }
 
 source_keycloak_db() {
-  podman compose -p "$SOURCE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
-    exec -T keycloak-db psql -XAt -U "$KEYCLOAK_DB_USER" -d "$KEYCLOAK_DB" -c "$1"
+  timeout 60 podman compose -p "$SOURCE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
+    exec -T -e PGOPTIONS='-c statement_timeout=30000' keycloak-db psql -XAt -U "$KEYCLOAK_DB_USER" -d "$KEYCLOAK_DB" -c "$1"
 }
 
 restored_keycloak_db() {
-  podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
-    exec -T keycloak-db psql -XAt -U "$KEYCLOAK_DB_USER" -d "$KEYCLOAK_DB" -c "$1"
+  timeout 60 podman compose -p "$RESTORE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$KEYCLOAK_ADMIN_OVERLAY" \
+    exec -T -e PGOPTIONS='-c statement_timeout=30000' keycloak-db psql -XAt -U "$KEYCLOAK_DB_USER" -d "$KEYCLOAK_DB" -c "$1"
 }
 
 export BACKUP_DIR="$EVIDENCE_DIR/backups"
