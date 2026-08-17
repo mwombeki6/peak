@@ -10,6 +10,7 @@ import com.mwombeki.peak.reliability.api.IdempotencyReservation
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
+import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.shared.outbound.KYC_DOCUMENT_OBJECT_STORAGE_QUALIFIER
@@ -64,6 +65,7 @@ class TenantTrustControlService(
     private val tenantPermissionAccessPort: TenantPermissionAccessPort,
     private val platformAccessPort: PlatformAccessPort,
     private val requestContextHolder: RequestContextHolder,
+    private val databaseSessionContext: DatabaseSessionContext,
     private val idempotencyPort: IdempotencyPort,
     private val auditPort: AuditPort,
     private val outboxPort: OutboxPort,
@@ -967,6 +969,13 @@ class TenantTrustControlService(
                     identity is RequestIdentity.OnboardingApplicant &&
                         identity.applicationId == subject.applicationId,
                 ) { "Onboarding session does not match the target application" }
+                // JdbcTenantPermissionAccessPort/JdbcPlatformAccessPort bind as a side effect
+                // of their own DB round-trip; this branch had no such call, so without this
+                // the RLS policy's id = current_onboarding_application_id() branch always saw
+                // NULL and every write here was rejected — proven by
+                // VerificationCaseApplicationSubjectRlsIntegrationTests, which fails with a
+                // real Postgres RLS violation without this line.
+                databaseSessionContext.bind(identity)
             }
         }
     }
@@ -1137,11 +1146,25 @@ class TenantTrustControlService(
             is VerificationSubjectRef.Tenant -> recordTenantSideEffects(
                 subject.tenantId, action, type, id, payload, reservationId,
             )
-            is VerificationSubjectRef.Application -> recordPlatformSideEffects(
-                null, action, type, id,
-                payload + ("onboardingApplicationId" to subject.applicationId),
-                reservationId,
-            )
+            is VerificationSubjectRef.Application -> {
+                // pms_app (what an applicant's session runs as) has no direct grant on
+                // platform_audit_logs — only pms_platform does, per V14 — so this goes through
+                // the same SECURITY DEFINER shape as the rest of the pre-tenant path rather
+                // than auditPort.recordPlatformEvent, which would fail with a permission
+                // error. The payload here is domain-shaped (ids, type strings, hashes), never
+                // a raw secret, so skipping AuditPayloadSanitizer is deliberate, not an oversight.
+                jdbcTemplate.queryForList(
+                    "SELECT record_onboarding_platform_audit_event(?, ?, ?, ?::jsonb, ?)",
+                    action,
+                    type,
+                    id,
+                    objectMapper.writeValueAsString(
+                        payload + ("onboardingApplicationId" to subject.applicationId),
+                    ),
+                    requestContextHolder.current().correlationId,
+                )
+                enqueue(null, action, type, id, payload, reservationId)
+            }
         }
     }
 
