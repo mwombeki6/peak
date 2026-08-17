@@ -159,6 +159,23 @@ BEGIN
       NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
   END IF;
 
+  -- Owner of the onboarding-application SECURITY DEFINER functions (V146). A
+  -- public request-access submission and the onboarding session it mints both
+  -- predate any tenant or platform context, so they cannot live under ordinary
+  -- RLS; this role is what those functions run as. Same shape as
+  -- pms_device_pairing_owner and pms_verification_owner, same reason.
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_roles
+    WHERE rolname = 'pms_onboarding_owner'
+  ) THEN
+    CREATE ROLE pms_onboarding_owner
+      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+  ELSE
+    ALTER ROLE pms_onboarding_owner
+      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+  END IF;
+
   -- Declared by V1 and referenced by nothing: no object is owned by them and no
   -- grant names them. They are here so the rule can be stated without exceptions —
   -- every role a migration creates exists before a restore — rather than as a list

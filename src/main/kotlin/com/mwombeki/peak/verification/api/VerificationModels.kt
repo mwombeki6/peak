@@ -57,3 +57,10 @@ data class VerificationOutcome(
 
 @NamedInterface("api")
 class VerificationThrottledException(message: String) : RuntimeException(message)
+
+/** The port other modules depend on — never the concrete service, which stays internal. */
+@NamedInterface("api")
+interface VerificationPort {
+    fun request(command: RequestVerificationCommand): VerificationChallengeReceipt
+    fun confirm(command: ConfirmVerificationCommand): VerificationOutcome
+}

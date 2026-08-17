@@ -228,6 +228,7 @@ class JdbcIdempotencyPort(
             is RequestIdentity.Platform -> ActorScope("platform_user", identity.platformUserId)
             is RequestIdentity.Support -> ActorScope("platform_user", identity.platformUserId)
             is RequestIdentity.Public -> ActorScope("guest", null)
+            is RequestIdentity.OnboardingApplicant -> ActorScope("onboarding_applicant", identity.applicationId)
         }
     }
 
@@ -237,6 +238,7 @@ class JdbcIdempotencyPort(
             is RequestIdentity.Support -> TenantScope(identity.tenantId, null)
             is RequestIdentity.Public -> TenantScope(identity.tenantId, identity.propertyId)
             is RequestIdentity.Platform -> TenantScope(null, null)
+            is RequestIdentity.OnboardingApplicant -> TenantScope(null, null)
         }
     }
 

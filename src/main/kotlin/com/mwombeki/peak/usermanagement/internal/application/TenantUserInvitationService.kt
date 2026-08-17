@@ -387,7 +387,8 @@ class TenantUserInvitationService(
 
             is RequestIdentity.Platform,
             is RequestIdentity.Public,
-            is RequestIdentity.Support -> throw IllegalArgumentException(
+            is RequestIdentity.Support,
+            is RequestIdentity.OnboardingApplicant -> throw IllegalArgumentException(
                 "Tenant user identity is required to invite tenant users",
             )
         }

@@ -118,6 +118,8 @@ night_audit_close_snapshots,nightaudit,active,nightaudit::api-or-internal-owner
 night_audit_issues,nightaudit,active,nightaudit::api-or-internal-owner
 night_audit_runs,nightaudit,active,nightaudit::api-or-internal-owner
 notifications,communication,active,communication::api-or-internal-owner
+onboarding_applications,onboarding,active,onboarding::api-or-internal-owner
+onboarding_sessions,onboarding,active,onboarding::api-or-internal-owner
 operational_sessions,usermanagement,active,usermanagement::api-or-internal-owner
 organization_unit_properties,property,active,property::api-or-internal-owner
 organization_units,property,active,property::api-or-internal-owner

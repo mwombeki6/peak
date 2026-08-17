@@ -7,6 +7,7 @@ import com.mwombeki.peak.verification.api.ConfirmVerificationCommand
 import com.mwombeki.peak.verification.api.RequestVerificationCommand
 import com.mwombeki.peak.verification.api.VerificationChallengeReceipt
 import com.mwombeki.peak.verification.api.VerificationOutcome
+import com.mwombeki.peak.verification.api.VerificationPort
 import com.mwombeki.peak.verification.api.VerificationThrottledException
 import java.nio.charset.StandardCharsets
 import java.security.SecureRandom
@@ -55,10 +56,10 @@ class VerificationService(
     private val secretReferenceResolver: SecretReferenceResolver,
     private val rateLimitStore: RateLimitStore,
     private val properties: VerificationProperties,
-) {
+) : VerificationPort {
     private val random = SecureRandom()
 
-    fun request(command: RequestVerificationCommand): VerificationChallengeReceipt {
+    override fun request(command: RequestVerificationCommand): VerificationChallengeReceipt {
         throttle(RateLimitScope.OTP_SEND_COOLDOWN, command.destination, limit = 1, window = properties.sendCooldown)
         throttle(
             RateLimitScope.REQUESTS_PER_PHONE,
@@ -96,7 +97,7 @@ class VerificationService(
         return row
     }
 
-    fun confirm(command: ConfirmVerificationCommand): VerificationOutcome {
+    override fun confirm(command: ConfirmVerificationCommand): VerificationOutcome {
         val hash = hash(command.code.trim())
         return requireNotNull(
             transactionTemplate.execute {
