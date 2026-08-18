@@ -103,6 +103,8 @@ class AccountActivationExceptionAdvice(
         "code_incorrect" -> "Code incorrect"
         "code_expired" -> "Code expired"
         "too_many_attempts" -> "Too many attempts"
+        "password_too_weak" -> "Password rejected"
+        "credential_setup_pending" -> "Credential setup unavailable"
         else -> "Activation failed"
     }
 }

@@ -117,6 +117,25 @@ class AccountActivationControllerIntegrationTests {
 
         val setupGrant = JsonPath.read<String>(verified.response.contentAsString, "$.setupGrant")
 
+        // A password the policy refuses must not spend the grant, or the person loses the
+        // code they just proved and has to start over.
+        mockMvc.perform(
+            post("/api/v1/invitations/$invitationToken/set-credential")
+                .secure(true)
+                .contentType(MediaType.APPLICATION_JSON)
+                .header(PeakRequestHeaders.CORRELATION_ID, "corr-activation-weak")
+                .content(
+                    """
+                    {
+                      "setupGrant": "$setupGrant",
+                      "password": "short"
+                    }
+                    """.trimIndent(),
+                ),
+        )
+            .andExpect(status().isUnprocessableContent)
+            .andExpect(jsonPath("$.code").value("password_too_weak"))
+
         mockMvc.perform(
             post("/api/v1/invitations/$invitationToken/set-credential")
                 .secure(true)
@@ -126,7 +145,7 @@ class AccountActivationControllerIntegrationTests {
                     """
                     {
                       "setupGrant": "$setupGrant",
-                      "password": "a-long-enough-secret"
+                      "password": "a-long-enough-secret9"
                     }
                     """.trimIndent(),
                 ),
@@ -135,7 +154,7 @@ class AccountActivationControllerIntegrationTests {
             .andExpect(jsonPath("$.signedIn").value(false))
             .andExpect(jsonPath("$.redirectTo").value(nullValue()))
 
-        assertEquals("a-long-enough-secret", identities.lastPassword.get())
+        assertEquals("a-long-enough-secret9", identities.lastPassword.get())
         assertNotNull(identities.lastSubject.get())
 
         val status = jdbcTemplate.queryForObject(

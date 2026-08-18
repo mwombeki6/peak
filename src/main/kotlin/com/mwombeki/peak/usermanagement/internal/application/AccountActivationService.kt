@@ -4,6 +4,7 @@ import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.shared.outbound.EstablishPassword
+import com.mwombeki.peak.shared.outbound.IdentityCredentialRejectedException
 import com.mwombeki.peak.shared.outbound.IdentityProvisionerPort
 import com.mwombeki.peak.shared.outbound.IdentityProvisioningException
 import com.mwombeki.peak.shared.outbound.MarkEmailVerified
@@ -73,9 +74,11 @@ class AccountActivationService(
         password: String?,
     ): CredentialAccepted {
         val row = requirePending(token)
+        // Checked before the grant is spent: a password the policy would refuse must not cost
+        // the person their verified code and send them back to the start.
+        val secret = requireCredential(password, row.realm, row.email)
         val grant = consumeGrant(setupGrant)
         if (grant.email != row.email) throw notFound()
-        val secret = requirePassword(password)
         val names = splitName(row.fullName, row.email)
         val userId = UUID.randomUUID()
         val provisioner = requireProvisioner()
@@ -101,6 +104,9 @@ class AccountActivationService(
             )
             provisioner.markEmailVerified(MarkEmailVerified(provisioned.subjectId, row.realm))
             provisioner.clearRequiredActions(provisioned.subjectId, row.realm)
+        } catch (ex: IdentityCredentialRejectedException) {
+            unwind(provisioner, provisioned.subjectId, row.realm, provisioned.alreadyExisted)
+            throw weakPassword()
         } catch (ex: IdentityProvisioningException) {
             unwind(provisioner, provisioned.subjectId, row.realm, provisioned.alreadyExisted)
             throw unreachable("Identity credential could not be stored")
@@ -190,7 +196,7 @@ class AccountActivationService(
                 "That code isn't right",
             )
         }
-        val secret = requirePassword(password)
+        val secret = requireCredential(password, grant.realm, normalized)
         val provisioner = requireProvisioner()
         val account = findRecoverableAccount(normalized)
             ?: throw AccountActivationException(
@@ -215,6 +221,8 @@ class AccountActivationService(
                 EstablishPassword(provisioned.subjectId, secret, account.realm),
             )
             provisioner.clearRequiredActions(provisioned.subjectId, account.realm)
+        } catch (ex: IdentityCredentialRejectedException) {
+            throw weakPassword()
         } catch (ex: IdentityProvisioningException) {
             throw unreachable("Identity credential could not be stored")
         }
@@ -460,17 +468,37 @@ class AccountActivationService(
         allowedCredentials = if (row.realm == PLATFORM_REALM) listOf("passkey", "totp") else listOf("password"),
     )
 
-    private fun requirePassword(password: String?): String {
-        val secret = password?.trim().orEmpty()
-        if (secret.length < 10) {
+    /**
+     * Peak's copy of the realm's password rules.
+     *
+     * Keycloak enforces the real policy and gets the final say; this exists so the common
+     * refusal costs a round trip instead of a spent setup grant. It must stay in step with
+     * `passwordPolicy` in ops/keycloak/peak-hospitality-realm.json.
+     */
+    private fun requireCredential(password: String?, realm: String, username: String): String {
+        if (realm == PLATFORM_REALM) {
+            // The platform console enrols a device unlock, which Peak cannot register yet.
             throw AccountActivationException(
-                "unknown",
+                "credential_setup_pending",
                 HttpStatus.UNPROCESSABLE_CONTENT,
-                "A password is required",
+                "Credential setup is not available for this account yet",
             )
         }
+        val secret = password?.trim().orEmpty()
+        val strong = secret.length >= MIN_PASSWORD_LENGTH &&
+            secret.any { it.isDigit() } &&
+            secret.any { it.isLowerCase() } &&
+            !secret.equals(username, ignoreCase = true) &&
+            !secret.equals(username.substringBefore('@'), ignoreCase = true)
+        if (!strong) throw weakPassword()
         return secret
     }
+
+    private fun weakPassword() = AccountActivationException(
+        "password_too_weak",
+        HttpStatus.UNPROCESSABLE_CONTENT,
+        "That password does not meet the policy",
+    )
 
     private fun requireProvisioner(): IdentityProvisionerPort =
         identities.getIfAvailable()
@@ -538,6 +566,7 @@ class AccountActivationService(
 
     private companion object {
         const val GRANT_TTL_SECONDS = 300
+        const val MIN_PASSWORD_LENGTH = 10
         const val HOSPITALITY_REALM = "peak-hospitality"
         const val PLATFORM_REALM = "peak-platform"
         const val CODE_EVENT = "account.activation.code.issued"

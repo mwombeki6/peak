@@ -172,6 +172,11 @@ class KeycloakIdentityProvisioner(
                 ),
             ),
         )
+        if (response.statusCode == 400) {
+            // The realm's password policy said no. Keycloak's body names the rule it failed
+            // and can quote the password back, so it stays out of the message.
+            throw IdentityCredentialRejectedException("Keycloak refused the chosen password")
+        }
         requireSuccess(response, "establish password")
     }
 

@@ -144,7 +144,18 @@ data class SendActivationLink(
  * that assumes a working identity must not be committed, so this is the signal to unwind
  * rather than to retry in place.
  */
-class IdentityProvisioningException(
+open class IdentityProvisioningException(
     message: String,
     cause: Throwable? = null,
 ) : RuntimeException(message, cause)
+
+/**
+ * Raised when the provider rejected the credential itself rather than failing to apply it —
+ * a password that misses the realm's policy is the usual cause.
+ *
+ * Separate from its parent because the person can fix this by choosing again. Reported as an
+ * outage it would read as "come back later", which is the one thing that is not true.
+ */
+class IdentityCredentialRejectedException(
+    message: String,
+) : IdentityProvisioningException(message)
