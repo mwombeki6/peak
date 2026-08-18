@@ -23,7 +23,9 @@ import org.springframework.modulith.NamedInterface
  * credential representations stop at the adapter; a caller asks for an identity and receives a
  * subject.
  *
- * Peak never handles a password here, and there is deliberately no method to set one.
+ * Peak-owned activation (Wave 3) is the one place a password crosses this seam: the invitee
+ * typed it into Peak, Peak stores it on the identity through the Admin API, and the person is
+ * never sent to a hosted credential page. Callers still never see a required-action name.
  */
 @NamedInterface("outbound")
 interface IdentityProvisionerPort {
@@ -55,6 +57,27 @@ interface IdentityProvisionerPort {
      */
     fun sendActivationLink(command: SendActivationLink)
 
+    /**
+     * Stores a permanent password the person just chose in Peak's activation or recovery flow.
+     *
+     * Temporary-required-action passwords are forbidden here: that would bounce the next login
+     * to a hosted page, which is the circular dependency this flow exists to remove.
+     */
+    fun establishPassword(command: EstablishPassword)
+
+    /**
+     * Records that Peak already proved control of the address (the emailed six-digit code).
+     *
+     * The identity provider must not ask again, or invitation accept — which requires a
+     * verified-email JWT — remains unreachable.
+     */
+    fun markEmailVerified(command: MarkEmailVerified)
+
+    /**
+     * Clears every outstanding required action on the subject so the next login lands in Peak.
+     */
+    fun clearRequiredActions(subjectId: String, realm: String? = null)
+
     /** Revokes the ability to log in while preserving the subject, for suspension and offboarding. */
     fun disable(subjectId: String)
 
@@ -64,7 +87,7 @@ interface IdentityProvisionerPort {
      * Only for unwinding a provision whose Peak-side transaction then failed. Offboarding a
      * real person is [disable]: deleting them would strip the audit trail of who did what.
      */
-    fun delete(subjectId: String)
+    fun delete(subjectId: String, realm: String? = null)
 }
 
 data class ProvisionIdentity(
@@ -83,6 +106,24 @@ data class ProvisionIdentity(
     /** Carried to the provider so support can trace a login back to a tenant without a join. */
     val tenantId: String,
     val peakUserId: String,
+    /**
+     * Identity-provider realm. Blank means the adapter's configured default.
+     * Hospitality staff and platform operators do not share a realm.
+     */
+    val realm: String? = null,
+    /** True when Peak already proved the email (activation/recovery code). */
+    val emailVerified: Boolean = false,
+)
+
+data class EstablishPassword(
+    val subjectId: String,
+    val password: String,
+    val realm: String? = null,
+)
+
+data class MarkEmailVerified(
+    val subjectId: String,
+    val realm: String? = null,
 )
 
 data class ProvisionedIdentity(

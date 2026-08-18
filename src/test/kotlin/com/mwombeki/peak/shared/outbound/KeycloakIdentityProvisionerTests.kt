@@ -181,6 +181,68 @@ class KeycloakIdentityProvisionerTests {
     }
 
     @Test
+    fun marksTheEmailVerifiedAndClearsRequiredActionsOnTheExistingSubject() {
+        var putBody = ""
+        val provisioner = provisionerFor(
+            users = { exchange -> respond(exchange, 200, "[]") },
+            createUser = { exchange -> respond(exchange, 201, "") },
+            subject = { exchange ->
+                if (exchange.requestMethod == "PUT") {
+                    putBody = exchange.requestBody.bufferedReader().readText()
+                    respond(exchange, 204, "")
+                } else {
+                    respond(
+                        exchange,
+                        200,
+                        """{"id":"$SUBJECT","email":"manager@hotel.co.tz","emailVerified":false,"requiredActions":["VERIFY_EMAIL","UPDATE_PASSWORD"]}""",
+                    )
+                }
+            },
+        )
+        provisioner.markEmailVerified(MarkEmailVerified(SUBJECT))
+        val verified = objectMapper.readTree(putBody)
+        assertTrue(verified.path("emailVerified").asBoolean())
+        putBody = ""
+        provisioner.clearRequiredActions(SUBJECT)
+        val cleared = objectMapper.readTree(putBody)
+        assertEquals(0, cleared.path("requiredActions").size())
+    }
+
+    @Test
+    fun storesAPermanentPasswordRatherThanARequiredAction() {
+        var passwordBody = ""
+        val provisioner = provisionerFor(
+            users = { exchange -> respond(exchange, 200, "[]") },
+            createUser = { exchange -> respond(exchange, 201, "") },
+            resetPassword = { exchange ->
+                passwordBody = exchange.requestBody.bufferedReader().readText()
+                respond(exchange, 204, "")
+            },
+        )
+        provisioner.establishPassword(EstablishPassword(SUBJECT, "a-long-enough-secret-1"))
+        val sent = objectMapper.readTree(passwordBody)
+        assertEquals("password", sent.path("type").asString())
+        assertEquals("a-long-enough-secret-1", sent.path("value").asString())
+        assertFalse(sent.path("temporary").asBoolean())
+    }
+
+    @Test
+    fun provisionsAnEmailIdentityAlreadyMarkedVerifiedWhenPeakProvedTheAddress() {
+        var createdBody = ""
+        val provisioner = provisionerFor(
+            users = { exchange -> respond(exchange, 200, "[]") },
+            createUser = { exchange ->
+                createdBody = exchange.requestBody.bufferedReader().readText()
+                exchange.responseHeaders.add("Location", "$BASE/admin/realms/$REALM/users/$SUBJECT")
+                respond(exchange, 201, "")
+            },
+        )
+        provisioner.provision(command().copy(emailVerified = true))
+        val sent = objectMapper.readTree(createdBody)
+        assertTrue(sent.path("emailVerified").asBoolean())
+    }
+
+    @Test
     fun treatsAnAlreadyDeletedSubjectAsUnwound() {
         val provisioner = provisionerFor(
             users = { exchange -> respond(exchange, 200, "[]") },
@@ -190,7 +252,7 @@ class KeycloakIdentityProvisionerTests {
 
         // Unwinding is usually a retry of an unwind, so an identity that is already gone is the
         // outcome the caller wanted rather than a failure to report.
-        provisioner.delete(SUBJECT)
+        provisioner.delete(SUBJECT, null)
     }
 
     private fun command() = ProvisionIdentity(
@@ -217,6 +279,7 @@ class KeycloakIdentityProvisionerTests {
         createUser: (HttpExchange) -> Unit,
         subject: ((HttpExchange) -> Unit)? = null,
         executeActions: ((HttpExchange) -> Unit)? = null,
+        resetPassword: ((HttpExchange) -> Unit)? = null,
     ): KeycloakIdentityProvisioner {
         val running = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         running.createContext("/realms/$REALM/protocol/openid-connect/token") { exchange ->
@@ -230,6 +293,8 @@ class KeycloakIdentityProvisionerTests {
                 isCollection -> users(exchange)
                 path.endsWith("/execute-actions-email") ->
                     executeActions?.invoke(exchange) ?: respond(exchange, 204, "")
+                path.endsWith("/reset-password") ->
+                    resetPassword?.invoke(exchange) ?: respond(exchange, 204, "")
                 else -> subject?.invoke(exchange) ?: respond(exchange, 200, "{}")
             }
         }

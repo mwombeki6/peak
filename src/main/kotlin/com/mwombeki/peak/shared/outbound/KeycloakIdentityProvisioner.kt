@@ -68,8 +68,9 @@ class KeycloakIdentityProvisioner(
         val username = command.username.trim().lowercase()
         require(username.isNotEmpty()) { "Cannot provision an identity without a username" }
         val email = command.email?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }
+        val realm = targetRealm(command.realm)
 
-        findByUsername(username)?.let { existing ->
+        findByUsername(username, realm)?.let { existing ->
             val linkedTo = existing.path("attributes")
                 .path(PEAK_USER_ID_ATTRIBUTE)
                 .firstOrNull()?.asString()?.trim()
@@ -107,12 +108,12 @@ class KeycloakIdentityProvisioner(
                 // check — so the second hotelier without email would fail to provision.
                 if (email != null) {
                     put("email", email)
-                    put("emailVerified", false)
+                    put("emailVerified", command.emailVerified)
                 }
             },
         )
 
-        val response = send("POST", adminPath("users"), payload)
+        val response = send("POST", adminPath("users", realm), payload)
         if (response.statusCode == 409) {
             // Lost a race between the lookup above and this create. The winner is subject to
             // the same adoption rule, so resolve rather than assume it is ours.
@@ -157,8 +158,56 @@ class KeycloakIdentityProvisioner(
         requireSuccess(response, "send activation link")
     }
 
-    private fun fetchSubject(subjectId: String): JsonNode {
-        val response = send("GET", adminPath("users/${encode(subjectId)}"), null)
+    override fun establishPassword(command: EstablishPassword) {
+        val password = command.password
+        require(password.isNotBlank()) { "Cannot establish an empty password" }
+        val response = send(
+            method = "PUT",
+            uri = adminPath("users/${encode(command.subjectId)}/reset-password", targetRealm(command.realm)),
+            payload = objectMapper.writeValueAsString(
+                mapOf(
+                    "type" to "password",
+                    "value" to password,
+                    "temporary" to false,
+                ),
+            ),
+        )
+        requireSuccess(response, "establish password")
+    }
+
+    override fun markEmailVerified(command: MarkEmailVerified) {
+        patchUser(
+            subjectId = command.subjectId,
+            realm = targetRealm(command.realm),
+            fields = mapOf("emailVerified" to true),
+        )
+    }
+
+    override fun clearRequiredActions(subjectId: String, realm: String?) {
+        patchUser(
+            subjectId = subjectId,
+            realm = targetRealm(realm),
+            fields = mapOf("requiredActions" to emptyList<String>()),
+        )
+    }
+
+    private fun patchUser(subjectId: String, realm: String, fields: Map<String, Any?>) {
+        val existing = fetchSubject(subjectId, realm)
+        val merged = linkedMapOf<String, Any?>()
+        existing.properties().forEach { (key, value) ->
+            merged[key] = objectMapper.treeToValue(value, Any::class.java)
+        }
+        merged.putAll(fields)
+        val response = send(
+            method = "PUT",
+            uri = adminPath("users/${encode(subjectId)}", realm),
+            payload = objectMapper.writeValueAsString(merged),
+        )
+        requireSuccess(response, "write the subject")
+    }
+
+    private fun fetchSubject(subjectId: String, realm: String = properties.realm): JsonNode {
+        val response = send("GET", adminPath("users/${encode(subjectId)}", realm), null)
         requireSuccess(response, "read identity")
         return objectMapper.readTree(response.body)
     }
@@ -172,18 +221,22 @@ class KeycloakIdentityProvisioner(
         requireSuccess(response, "disable identity")
     }
 
-    override fun delete(subjectId: String) {
-        val response = send("DELETE", adminPath("users/${encode(subjectId)}"), null)
+    override fun delete(subjectId: String, realm: String?) {
+        val response = send(
+            "DELETE",
+            adminPath("users/${encode(subjectId)}", targetRealm(realm)),
+            null,
+        )
         // Unwinding is often a retry of an unwind, so an identity that is already gone is the
         // outcome the caller wanted rather than a failure to report.
         if (response.statusCode == 404) return
         requireSuccess(response, "delete identity")
     }
 
-    private fun findByUsername(username: String): JsonNode? {
+    private fun findByUsername(username: String, realm: String): JsonNode? {
         val response = send(
             method = "GET",
-            uri = adminPath("users?username=${encode(username)}&exact=true&max=2"),
+            uri = adminPath("users?username=${encode(username)}&exact=true&max=2", realm),
             payload = null,
         )
         requireSuccess(response, "look up identity")
@@ -274,8 +327,11 @@ class KeycloakIdentityProvisioner(
         }
     }
 
-    private fun adminPath(suffix: String): URI =
-        URI.create("$baseUrl/admin/realms/${encode(properties.realm)}/$suffix")
+    private fun adminPath(suffix: String, realm: String = properties.realm): URI =
+        URI.create("$baseUrl/admin/realms/${encode(realm)}/$suffix")
+
+    private fun targetRealm(override: String?): String =
+        override?.trim()?.takeIf { it.isNotEmpty() } ?: properties.realm
 
     private fun encode(value: String): String =
         URLEncoder.encode(value, StandardCharsets.UTF_8)
