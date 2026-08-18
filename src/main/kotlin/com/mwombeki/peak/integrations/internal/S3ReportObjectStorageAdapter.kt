@@ -6,6 +6,7 @@ import com.mwombeki.peak.shared.outbound.StoredObject
 import io.minio.BucketExistsArgs
 import io.minio.GetBucketEncryptionArgs
 import io.minio.GetBucketPolicyArgs
+import io.minio.GetObjectArgs
 import io.minio.GetPresignedObjectUrlArgs
 import io.minio.Http
 import io.minio.MinioClient
@@ -15,6 +16,7 @@ import io.minio.StatObjectArgs
 import io.minio.ServerSideEncryption
 import io.minio.errors.ErrorResponseException
 import java.io.ByteArrayInputStream
+import java.io.InputStream
 import java.time.Duration
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.boot.context.properties.ConfigurationProperties
@@ -188,6 +190,15 @@ class S3ReportObjectStorageAdapter(
         )
     }
 
+    override fun getObject(objectKey: String): InputStream {
+        return client.getObject(
+            GetObjectArgs.builder()
+                .bucket(bucketName)
+                .`object`(objectKey)
+                .build(),
+        )
+    }
+
     override fun health(): Health {
         return if (isHealthy()) {
             Health.up().withDetail("bucket", bucketName).build()
@@ -244,6 +255,8 @@ class DisabledReportObjectStorageAdapter(
     override fun stat(objectKey: String): StoredObject? =
         error("Report object storage is disabled")
     override fun delete(objectKey: String) =
+        error("Report object storage is disabled")
+    override fun getObject(objectKey: String): InputStream =
         error("Report object storage is disabled")
 }
 

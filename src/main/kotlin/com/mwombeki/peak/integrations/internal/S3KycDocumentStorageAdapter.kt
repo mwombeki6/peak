@@ -7,6 +7,7 @@ import com.mwombeki.peak.shared.outbound.StoredObject
 import io.minio.BucketExistsArgs
 import io.minio.GetBucketEncryptionArgs
 import io.minio.GetBucketPolicyArgs
+import io.minio.GetObjectArgs
 import io.minio.GetPresignedObjectUrlArgs
 import io.minio.Http
 import io.minio.MakeBucketArgs
@@ -17,6 +18,7 @@ import io.minio.StatObjectArgs
 import io.minio.ServerSideEncryption
 import io.minio.errors.ErrorResponseException
 import java.io.ByteArrayInputStream
+import java.io.InputStream
 import java.time.Duration
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
@@ -203,6 +205,15 @@ class S3KycDocumentStorageAdapter(
         )
     }
 
+    override fun getObject(objectKey: String): InputStream {
+        return client.getObject(
+            GetObjectArgs.builder()
+                .bucket(bucketName)
+                .`object`(objectKey)
+                .build(),
+        )
+    }
+
     override fun health(): Health {
         return if (isHealthy()) {
             Health.up().withDetail("bucket", bucketName).build()
@@ -259,5 +270,7 @@ class DisabledKycDocumentStorageAdapter(
     override fun stat(objectKey: String): StoredObject? =
         error("KYC document object storage is disabled")
     override fun delete(objectKey: String) =
+        error("KYC document object storage is disabled")
+    override fun getObject(objectKey: String): InputStream =
         error("KYC document object storage is disabled")
 }

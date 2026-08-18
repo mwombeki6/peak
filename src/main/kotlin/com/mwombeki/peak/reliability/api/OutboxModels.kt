@@ -88,6 +88,9 @@ enum class OutboxDestination(val databaseValue: String) {
      * dead-letter the lot, not only billing's own.
      */
     PLATFORM_BILLING("platform_billing"),
+
+    /** A KYC document was uploaded and needs its bytes checked for malware before it's trusted. */
+    DOCUMENT_SCAN("document_scan"),
 }
 
 @NamedInterface("api")

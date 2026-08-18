@@ -76,6 +76,7 @@ data class VerificationDocumentSummary(
     val expiresAt: LocalDate?,
     val status: String,
     val rejectionReason: String?,
+    val scanStatus: String,
 )
 
 data class CreateVerificationCaseCommand(

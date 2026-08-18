@@ -37,3 +37,18 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+  # Backs peak.verification.malware-scan locally. Slow to become healthy on first start —
+  # freshclam has to pull virus definitions — so most local/CI runs simply leave
+  # PEAK_VERIFICATION_MALWARE_SCAN_ENABLED unset and never start this profile.
+  clamav:
+    image: 'clamav/clamav:1.4'
+    profiles:
+      - malware-scan
+    ports:
+      - '3310:3310'
+    healthcheck:
+      test: ['CMD', 'clamdcheck.sh']
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 180s

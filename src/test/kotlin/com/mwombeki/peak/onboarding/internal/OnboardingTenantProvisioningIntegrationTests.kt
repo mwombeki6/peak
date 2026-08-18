@@ -1,10 +1,13 @@
 package com.mwombeki.peak.onboarding.internal
 
+import com.mwombeki.peak.FakeClamAvServer
 import com.mwombeki.peak.TestcontainersConfiguration
 import com.mwombeki.peak.onboarding.api.OnboardingProvisioningException
 import com.mwombeki.peak.onboarding.api.RequestAccessCommand
 import com.mwombeki.peak.onboarding.api.UpdateOnboardingProfileCommand
 import com.mwombeki.peak.onboarding.api.VerifyOnboardingPhoneCommand
+import com.mwombeki.peak.reliability.api.OutboxDestination
+import com.mwombeki.peak.reliability.internal.OutboxWorkerProcessor
 import com.mwombeki.peak.shared.context.AuthenticationAssurance
 import com.mwombeki.peak.shared.context.RequestContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
@@ -60,9 +63,12 @@ class OnboardingTenantProvisioningIntegrationTests {
     @Autowired private lateinit var rateLimitStore: RateLimitStore
     @Autowired private lateinit var jdbc: JdbcTemplate
     @Autowired private lateinit var contextHolder: RequestContextHolder
+    @Autowired private lateinit var outboxWorkerProcessor: OutboxWorkerProcessor
     private val httpClient: HttpClient = HttpClient.newHttpClient()
 
     companion object {
+        private val fakeClamAv = FakeClamAvServer()
+
         @JvmStatic
         @DynamicPropertySource
         fun kycStorageProperties(registry: DynamicPropertyRegistry) {
@@ -72,7 +78,15 @@ class OnboardingTenantProvisioningIntegrationTests {
             registry.add("peak.verification.storage.endpoint") { container.s3URL }
             registry.add("peak.verification.storage.access-key") { container.userName }
             registry.add("peak.verification.storage.secret-key") { container.password }
+            registry.add("peak.verification.malware-scan.enabled") { "true" }
+            registry.add("peak.verification.malware-scan.host") { "localhost" }
+            registry.add("peak.verification.malware-scan.port") { fakeClamAv.port }
         }
+    }
+
+    /** Drains the async malware-scan queue so a just-uploaded document reaches scan_status=clean. */
+    private fun processDocumentScans() {
+        outboxWorkerProcessor.processBatchBlocking(OutboxDestination.DOCUMENT_SCAN)
     }
 
     @Test
@@ -230,6 +244,7 @@ class OnboardingTenantProvisioningIntegrationTests {
                 authorization.objectKey, bytes.sha256Hex(), "application/pdf", null, null,
             ),
         )
+        processDocumentScans()
 
         applicant(applicationId)
         return trust.submitVerificationCase(subject, case.caseId)

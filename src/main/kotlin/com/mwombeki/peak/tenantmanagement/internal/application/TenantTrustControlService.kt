@@ -231,6 +231,18 @@ class TenantTrustControlService(
                 command.contentHash, command.mimeType,
                 command.issuedAt, command.expiresAt,
             )
+            outboxPort.enqueue(
+                OutboxEventCommand(
+                    aggregateType = "tenant_verification_documents",
+                    aggregateId = id,
+                    tenantId = (subject as? VerificationSubjectRef.Tenant)?.tenantId,
+                    eventType = "tenant.verification.document.scan_requested",
+                    destination = OutboxDestination.DOCUMENT_SCAN,
+                    payload = mapOf("documentId" to id, "objectKey" to command.storageObjectKey),
+                    idempotencyKeyId = reservationId,
+                    priority = 3,
+                ),
+            )
             verificationDocument(subject, command.caseId, id).also {
                 recordSubjectSideEffects(
                     subject, "tenant.verification.document.added",
@@ -362,6 +374,17 @@ class TenantTrustControlService(
                         Boolean::class.java, docParam, command.caseId,
                     ) == true
                     require(!rejected) { "A case with rejected documents cannot be approved" }
+                    val unscanned = jdbcTemplate.queryForObject(
+                        """
+                        SELECT EXISTS (SELECT 1 FROM tenant_verification_documents
+                        WHERE $docClause AND verification_case_id = ?
+                          AND status <> 'rejected' AND scan_status <> 'clean')
+                        """.trimIndent(),
+                        Boolean::class.java, docParam, command.caseId,
+                    ) == true
+                    require(!unscanned) {
+                        "All documents must pass malware scanning before the case can be approved"
+                    }
                     jdbcTemplate.update(
                         """
                         UPDATE tenant_verification_documents
@@ -1331,7 +1354,7 @@ class TenantTrustControlService(
             """
             SELECT id, verification_case_id, document_type, document_number_masked,
                    storage_object_key, content_hash, mime_type, issued_at, expires_at,
-                   status, rejection_reason
+                   status, rejection_reason, scan_status
             FROM tenant_verification_documents
             WHERE $clause AND verification_case_id = ?
             ORDER BY created_at, id
@@ -1350,7 +1373,7 @@ class TenantTrustControlService(
             """
             SELECT id, verification_case_id, document_type, document_number_masked,
                    storage_object_key, content_hash, mime_type, issued_at, expires_at,
-                   status, rejection_reason
+                   status, rejection_reason, scan_status
             FROM tenant_verification_documents
             WHERE $clause AND verification_case_id = ? AND id = ?
             """.trimIndent(),
@@ -1370,6 +1393,7 @@ class TenantTrustControlService(
         expiresAt = rs.getObject("expires_at", LocalDate::class.java),
         status = rs.getString("status"),
         rejectionReason = rs.getString("rejection_reason"),
+        scanStatus = rs.getString("scan_status"),
     )
 
     private fun privacyRequest(tenantId: UUID, requestId: UUID): PrivacyRequestSummary =

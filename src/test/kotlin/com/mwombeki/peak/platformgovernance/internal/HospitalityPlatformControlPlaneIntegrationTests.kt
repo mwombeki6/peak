@@ -1,5 +1,6 @@
 package com.mwombeki.peak.platformgovernance.internal
 
+import com.mwombeki.peak.FakeClamAvServer
 import com.mwombeki.peak.TestcontainersConfiguration
 import com.mwombeki.peak.platformgovernance.api.AssignPlatformReleaseCommand
 import com.mwombeki.peak.platformgovernance.api.ChangePlatformReleaseCommand
@@ -28,6 +29,8 @@ import com.mwombeki.peak.property.api.PortfolioRolloutTarget
 import com.mwombeki.peak.property.api.PortfolioTemplateAction
 import com.mwombeki.peak.property.api.RolloutPortfolioConfigCommand
 import com.mwombeki.peak.property.api.UpdatePortfolioRolloutCommand
+import com.mwombeki.peak.reliability.api.OutboxDestination
+import com.mwombeki.peak.reliability.internal.OutboxWorkerProcessor
 import com.mwombeki.peak.shared.context.AssuranceLevel
 import com.mwombeki.peak.shared.context.AuthenticationAssurance
 import com.mwombeki.peak.shared.context.RequestContext
@@ -92,9 +95,12 @@ class HospitalityPlatformControlPlaneIntegrationTests {
     @Autowired private lateinit var portfolio: PortfolioControlPort
     @Autowired private lateinit var contextHolder: RequestContextHolder
     @Autowired private lateinit var jdbc: JdbcTemplate
+    @Autowired private lateinit var outboxWorkerProcessor: OutboxWorkerProcessor
     private val httpClient: HttpClient = HttpClient.newHttpClient()
 
     companion object {
+        private val fakeClamAv = FakeClamAvServer()
+
         @JvmStatic
         @DynamicPropertySource
         fun kycStorageProperties(registry: DynamicPropertyRegistry) {
@@ -104,6 +110,9 @@ class HospitalityPlatformControlPlaneIntegrationTests {
             registry.add("peak.verification.storage.endpoint") { container.s3URL }
             registry.add("peak.verification.storage.access-key") { container.userName }
             registry.add("peak.verification.storage.secret-key") { container.password }
+            registry.add("peak.verification.malware-scan.enabled") { "true" }
+            registry.add("peak.verification.malware-scan.host") { "localhost" }
+            registry.add("peak.verification.malware-scan.port") { fakeClamAv.port }
         }
     }
 
@@ -145,6 +154,7 @@ class HospitalityPlatformControlPlaneIntegrationTests {
             uploadAuthorization.objectKey, documentBytes.sha256Hex(), "application/pdf",
             LocalDate.now().minusYears(1), LocalDate.now().plusYears(1),
         ))
+        outboxWorkerProcessor.processBatchBlocking(OutboxDestination.DOCUMENT_SCAN)
         tenant(fixture)
         trust.submitVerificationCase(subject, verification.caseId)
         platform(root)

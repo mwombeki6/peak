@@ -1,5 +1,6 @@
 package com.mwombeki.peak.shared.outbound
 
+import java.io.InputStream
 import java.time.Duration
 import org.springframework.modulith.NamedInterface
 
@@ -32,6 +33,9 @@ interface ObjectStoragePort {
     /** `null` if the object does not exist — the caller must not assume a claimed key was ever written. */
     fun stat(objectKey: String): StoredObject?
     fun delete(objectKey: String)
+
+    /** The caller must close the stream. Used only by the malware-scan step to read real bytes. */
+    fun getObject(objectKey: String): InputStream
 }
 
 data class StoreObject(

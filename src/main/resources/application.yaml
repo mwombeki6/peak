@@ -138,6 +138,10 @@ peak:
       secret-key: ${PEAK_VERIFICATION_STORAGE_SECRET_KEY:peak-development-secret}
       bucket: ${PEAK_VERIFICATION_STORAGE_BUCKET:peak-private-kyc-documents}
       region: ${PEAK_VERIFICATION_STORAGE_REGION:us-east-1}
+    malware-scan:
+      enabled: ${PEAK_VERIFICATION_MALWARE_SCAN_ENABLED:false}
+      host: ${PEAK_VERIFICATION_MALWARE_SCAN_HOST:localhost}
+      port: ${PEAK_VERIFICATION_MALWARE_SCAN_PORT:3310}
   reliability:
     outbox:
       worker:
