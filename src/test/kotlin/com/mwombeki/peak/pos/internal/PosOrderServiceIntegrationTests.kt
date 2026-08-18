@@ -53,6 +53,9 @@ class PosOrderServiceIntegrationTests {
     @Autowired
     private lateinit var posPaymentOutboxHandler: PosPaymentOutboxHandler
 
+    @Autowired
+    private lateinit var printJobs: PosPrintJobService
+
     private val createdTenantIds = mutableSetOf<UUID>()
 
     @AfterTest
@@ -211,6 +214,12 @@ class PosOrderServiceIntegrationTests {
         assertEquals("closed", settled.status)
         assertEquals("confirmed", settled.settlementStatus)
         assertNotNull(settled.paymentTransactionId)
+
+        val receipt = printJobs.listJobs(fixture.propertyId, "pending").single { it.jobType == "receipt" }
+        assertEquals(order.id, receipt.sourceId)
+        assertEquals("receipt", receipt.document["kind"])
+        assertEquals("23.60", receipt.document["totalAmount"])
+        assertEquals("cash", receipt.document["settlementMethod"])
 
         val transactionTarget = jdbcTemplate.queryForObject(
             "SELECT pos_order_id FROM payment_transactions WHERE tenant_id = ? AND id = ?",
@@ -432,6 +441,12 @@ class PosOrderServiceIntegrationTests {
         assertEquals("closed", settled.status)
         assertEquals("confirmed", settled.settlementStatus)
         assertEquals(transactionId, settled.paymentTransactionId)
+
+        val receipt = printJobs.listJobs(fixture.propertyId, "pending").single { it.jobType == "receipt" }
+        assertEquals(order.id, receipt.sourceId)
+        assertEquals("pos_order", receipt.sourceType)
+        assertEquals("receipt", receipt.document["kind"])
+        assertEquals(pricedOrder.totalAmount.toPlainString(), receipt.document["totalAmount"])
     }
 
     @Test

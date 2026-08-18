@@ -3,6 +3,8 @@ package com.mwombeki.peak.pos.internal
 import com.mwombeki.peak.pos.api.KitchenTicketResponse
 import com.mwombeki.peak.pos.api.PosConflictException
 import com.mwombeki.peak.pos.api.PosNotFoundException
+import com.mwombeki.peak.pos.api.PosOrderItemResponse
+import com.mwombeki.peak.pos.api.PosOrderResponse
 import com.mwombeki.peak.pos.api.PosPrintJobFailureRequest
 import com.mwombeki.peak.pos.api.PosPrintJobReclaimRequest
 import com.mwombeki.peak.pos.api.PosPrintJobResponse
@@ -11,6 +13,7 @@ import com.mwombeki.peak.realtime.api.RealtimeEventTypes
 import com.mwombeki.peak.realtime.api.RealtimePort
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.TenantActor
+import java.math.BigDecimal
 import java.sql.ResultSet
 import java.util.UUID
 import org.springframework.beans.factory.ObjectProvider
@@ -73,6 +76,138 @@ class PosPrintJobService(
             )
             publish(actor.tenantId, propertyId, outletId, jobId, RealtimeEventTypes.PRINT_JOB_CREATED)
         }
+    }
+
+    /**
+     * Guest receipt for a settled POS order. Called from inside the settle
+     * mutate or the mobile-money confirm TX so the job and the payment commit
+     * together. A later printer failure cannot reopen the order.
+     */
+    fun enqueueReceipt(
+        tenantId: UUID,
+        propertyId: UUID,
+        order: PosOrderResponse,
+    ) {
+        enqueueReceiptDocument(tenantId, propertyId, order)
+    }
+
+    fun enqueueReceipt(
+        tenantId: UUID,
+        propertyId: UUID,
+        orderId: UUID,
+    ) {
+        enqueueReceiptDocument(tenantId, propertyId, loadOrderForReceipt(tenantId, propertyId, orderId))
+    }
+
+    private fun enqueueReceiptDocument(
+        tenantId: UUID,
+        propertyId: UUID,
+        order: PosOrderResponse,
+    ) {
+        val document = mapper.writeValueAsString(
+            mapOf(
+                "kind" to "receipt",
+                "orderNumber" to order.orderNumber,
+                "tableNumber" to order.tableNumber,
+                "settledAt" to order.settledAt?.toString(),
+                "settlementMethod" to order.settlementMethod,
+                "subtotal" to order.subtotal.toPlainString(),
+                "taxAmount" to order.taxAmount.toPlainString(),
+                "totalAmount" to order.totalAmount.toPlainString(),
+                "lines" to order.items.map { item ->
+                    mapOf(
+                        "name" to item.name,
+                        "quantity" to item.quantity.toPlainString(),
+                        "unitPrice" to item.unitPrice.toPlainString(),
+                        "total" to item.totalPrice.toPlainString(),
+                    )
+                },
+            ),
+        )
+        val routeIds = activeRoutes(tenantId, propertyId, order.outletId, "receipt")
+            .ifEmpty { listOf(null) }
+        routeIds.forEach { routeId ->
+            val jobId = UUID.randomUUID()
+            jdbc.update(
+                """
+                INSERT INTO pos_print_jobs (
+                    id, tenant_id, property_id, outlet_id, printer_route_id,
+                    job_type, source_type, source_id, source_version, is_reprint,
+                    status, document
+                ) VALUES (?, ?, ?, ?, ?, 'receipt', 'pos_order', ?, ?, false,
+                          'pending', ?::jsonb)
+                """.trimIndent(),
+                jobId, tenantId, propertyId, order.outletId, routeId,
+                order.id, 0L, document,
+            )
+            publish(tenantId, propertyId, order.outletId, jobId, RealtimeEventTypes.PRINT_JOB_CREATED)
+        }
+    }
+
+    private fun loadOrderForReceipt(
+        tenantId: UUID,
+        propertyId: UUID,
+        orderId: UUID,
+    ): PosOrderResponse {
+        val items = jdbc.query(
+            """
+            SELECT item_name, quantity, unit_price, total_price
+            FROM pos_order_items
+            WHERE tenant_id = ? AND order_id = ? AND voided = false
+            ORDER BY created_at, id
+            """.trimIndent(),
+            { rs, _ ->
+                PosOrderItemResponse(
+                    id = UUID.randomUUID(),
+                    menuItemId = UUID.randomUUID(),
+                    name = rs.getString("item_name"),
+                    quantity = rs.getBigDecimal("quantity"),
+                    unitPrice = rs.getBigDecimal("unit_price"),
+                    subtotal = rs.getBigDecimal("unit_price"),
+                    taxAmount = BigDecimal.ZERO,
+                    totalPrice = rs.getBigDecimal("total_price"),
+                    modifiers = emptyList(),
+                    specialRequest = null,
+                )
+            },
+            tenantId,
+            orderId,
+        )
+        return jdbc.query(
+            """
+            SELECT id, outlet_id, session_id, order_number, order_type, table_number,
+                   status, settlement_status, settlement_method, folio_id,
+                   payment_transaction_id, subtotal, tax_amount, total_amount,
+                   created_at, settled_at
+            FROM pos_orders
+            WHERE tenant_id = ? AND property_id = ? AND id = ? AND deleted_at IS NULL
+            """.trimIndent(),
+            { rs, _ ->
+                PosOrderResponse(
+                    id = rs.getObject("id", UUID::class.java),
+                    propertyId = propertyId,
+                    outletId = rs.getObject("outlet_id", UUID::class.java),
+                    sessionId = rs.getObject("session_id", UUID::class.java),
+                    orderNumber = rs.getString("order_number"),
+                    orderType = rs.getString("order_type"),
+                    tableNumber = rs.getString("table_number"),
+                    status = rs.getString("status"),
+                    settlementStatus = rs.getString("settlement_status"),
+                    settlementMethod = rs.getString("settlement_method"),
+                    folioId = rs.getObject("folio_id", UUID::class.java),
+                    paymentTransactionId = rs.getObject("payment_transaction_id", UUID::class.java),
+                    subtotal = rs.getBigDecimal("subtotal"),
+                    taxAmount = rs.getBigDecimal("tax_amount"),
+                    totalAmount = rs.getBigDecimal("total_amount"),
+                    createdAt = rs.getTimestamp("created_at").toInstant(),
+                    settledAt = rs.getTimestamp("settled_at")?.toInstant(),
+                    items = items,
+                )
+            },
+            tenantId,
+            propertyId,
+            orderId,
+        ).singleOrNull() ?: error("POS order was not found for receipt")
     }
 
     fun listJobs(propertyId: UUID, status: String?): List<PosPrintJobResponse> =

@@ -33,6 +33,7 @@ class PosPaymentOutboxHandler(
     private val outboxPort: OutboxPort,
     private val meterRegistry: MeterRegistry,
     private val realtime: ObjectProvider<RealtimePort>,
+    private val printJobs: PosPrintJobService,
 ) : OutboxEventHandler {
     override val destination = OutboxDestination.POS
 
@@ -137,6 +138,13 @@ class PosPaymentOutboxHandler(
                         "result",
                         status,
                     ).increment()
+                    if (event.eventType == PAYMENT_POSTED) {
+                        printJobs.enqueueReceipt(
+                            tenantId,
+                            propertyId,
+                            settlement.orderId,
+                        )
+                    }
                 }
             }
         } finally {
