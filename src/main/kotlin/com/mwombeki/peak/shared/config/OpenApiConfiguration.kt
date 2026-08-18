@@ -149,7 +149,8 @@ class OpenApiConfiguration {
                 path == "/api/v1/devices/challenges" ||
                 path == "/api/v1/staff/sessions" ||
                 path == "/api/v1/staff/credentials/activate" ||
-                path == "/api/v1/invitations/accept"
+                path.startsWith("/api/v1/invitations/") ||
+                path.startsWith("/api/v1/auth/recovery")
         }
 
         fun problemResponse(description: String): ApiResponse {

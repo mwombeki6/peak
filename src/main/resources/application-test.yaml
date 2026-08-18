@@ -5,6 +5,8 @@ peak:
   usermanagement:
     invitation:
       expose-token-in-response: true
+    activation:
+      expose-code-in-response: true
   realtime:
     websocket:
       allowed-origins:

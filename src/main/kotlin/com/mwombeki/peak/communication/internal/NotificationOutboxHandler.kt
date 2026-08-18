@@ -39,7 +39,7 @@ class InvitationEmailOutboxHandler(
     override val destination = OutboxDestination.EMAIL
 
     override fun supports(event: ClaimedOutboxEvent): Boolean {
-        return event.destination == destination && event.eventType == INVITATION_EVENT
+        return event.destination == destination && event.eventType in SUPPORTED_EVENTS
     }
 
     override suspend fun handle(event: ClaimedOutboxEvent) {
@@ -48,12 +48,21 @@ class InvitationEmailOutboxHandler(
 
     private companion object {
         const val INVITATION_EVENT = "tenant.user.invited"
+        const val ADMINISTRATOR_INVITATION_EVENT = "tenant.administrator.invited"
+        const val ACTIVATION_CODE_EVENT = "account.activation.code.issued"
+        val SUPPORTED_EVENTS = setOf(
+            INVITATION_EVENT,
+            ADMINISTRATOR_INVITATION_EVENT,
+            ACTIVATION_CODE_EVENT,
+        )
     }
 }
 
 @ConfigurationProperties(prefix = "peak.communication.invitation")
 data class InvitationDeliveryProperties(
     val acceptanceBaseUrl: String = "",
+    val hospitalityAcceptanceBaseUrl: String = "",
+    val platformAcceptanceBaseUrl: String = "",
 )
 
 @Service
@@ -472,7 +481,31 @@ class NotificationDeliveryProcessor(
                 },
             )
         }
-        if (eventType == INVITATION_EVENT) {
+        if (eventType == ACTIVATION_CODE_EVENT) {
+            val fullName = payload["fullName"]?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+                ?: "Peak user"
+            val code = payload["code"]?.toString()?.normalizedRequired("code")
+                ?: throw IllegalArgumentException("Activation code is required")
+            val expiresAt = payload["expiresAt"]?.toString()?.normalizedRequired("expiresAt")
+                ?: throw IllegalArgumentException("Activation code expiry is required")
+            return PendingNotificationPayload(
+                channel = "email",
+                recipient = payload["email"]?.toString()?.normalizedRequired("email"),
+                contactChannelId = null,
+                purpose = null,
+                subject = "Your Peak confirmation code",
+                content = buildString {
+                    append("Hello ")
+                    append(fullName)
+                    append(",\n\nYour confirmation code is ")
+                    append(code)
+                    append(".\n\nThis code expires at ")
+                    append(expiresAt)
+                    append(".")
+                },
+            )
+        }
+        if (eventType == INVITATION_EVENT || eventType == ADMINISTRATOR_INVITATION_EVENT) {
             val invitationId = requireNotNull(aggregateId) {
                 "Invitation aggregate id is required"
             }
@@ -482,9 +515,7 @@ class NotificationDeliveryProcessor(
                 envelope = tokenEnvelope,
                 associatedData = invitationId.toString(),
             )
-            val acceptanceBaseUrl = invitationProperties.acceptanceBaseUrl
-                .trim()
-                .trimEnd('/')
+            val acceptanceBaseUrl = invitationUrlFor(eventType)
                 .normalizedRequired("acceptanceBaseUrl")
             val acceptanceUrl = "$acceptanceBaseUrl?token=${
                 URLEncoder.encode(token, StandardCharsets.UTF_8)
@@ -628,6 +659,17 @@ class NotificationDeliveryProcessor(
         databaseSessionContext.bind(RequestIdentity.Public(tenantId = tenantId))
     }
 
+    private fun invitationUrlFor(eventType: String): String {
+        val specific = if (eventType == ADMINISTRATOR_INVITATION_EVENT) {
+            invitationProperties.platformAcceptanceBaseUrl
+        } else {
+            invitationProperties.hospitalityAcceptanceBaseUrl
+        }.trim().trimEnd('/')
+        return specific.ifBlank {
+            invitationProperties.acceptanceBaseUrl.trim().trimEnd('/')
+        }
+    }
+
     private fun counter(
         name: String,
         vararg tags: String,
@@ -688,10 +730,14 @@ class NotificationDeliveryProcessor(
         private val ALLOWED_CHANNELS = setOf("email", "sms", "whatsapp", "voice_phone")
         private const val CHANNEL_VERIFICATION_EVENT = "communication.channel.verification.requested"
         private const val INVITATION_EVENT = "tenant.user.invited"
+        private const val ADMINISTRATOR_INVITATION_EVENT = "tenant.administrator.invited"
+        private const val ACTIVATION_CODE_EVENT = "account.activation.code.issued"
         private const val STAFF_ACTIVATION_EVENT = "staff.credential.activation.issued"
         private val DIRECT_RECIPIENT_EVENTS = setOf(
             CHANNEL_VERIFICATION_EVENT,
             INVITATION_EVENT,
+            ADMINISTRATOR_INVITATION_EVENT,
+            ACTIVATION_CODE_EVENT,
             STAFF_ACTIVATION_EVENT,
         )
         private const val POLICY_BLOCKED_MESSAGE =

@@ -1,5 +1,6 @@
 table,owner,status,write_contract
 accounting_accounts,billing,active,billing::api-or-internal-owner
+account_setup_grants,usermanagement,active,usermanagement::api-or-internal-owner
 allotments,reservations,active,reservations::api-or-internal-owner
 approval_policies,usermanagement,active,usermanagement::api-or-internal-owner
 approval_policy_seats,usermanagement,active,usermanagement::api-or-internal-owner

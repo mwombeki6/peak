@@ -190,9 +190,18 @@ peak:
       enabled: ${PEAK_ROUTE_GUARD_ENABLED:true}
       deny-unregistered-api-routes: ${PEAK_ROUTE_GUARD_DENY_UNREGISTERED:true}
       rule-cache-ttl: ${PEAK_ROUTE_GUARD_RULE_CACHE_TTL:30s}
+  identity:
+    keycloak:
+      enabled: ${PEAK_IDENTITY_KEYCLOAK_ENABLED:false}
+      base-url: ${PEAK_IDENTITY_KEYCLOAK_BASE_URL:}
+      realm: ${PEAK_IDENTITY_KEYCLOAK_REALM:peak-hospitality}
+      client-id: ${PEAK_IDENTITY_KEYCLOAK_CLIENT_ID:}
+      client-secret: ${PEAK_IDENTITY_KEYCLOAK_CLIENT_SECRET:}
   communication:
     invitation:
-      acceptance-base-url: ${PEAK_INVITATION_ACCEPTANCE_BASE_URL:http://localhost:3000/invitations/accept}
+      acceptance-base-url: ${PEAK_INVITATION_ACCEPTANCE_BASE_URL:http://localhost:3001/invitations/accept}
+      hospitality-acceptance-base-url: ${PEAK_HOSPITALITY_INVITATION_ACCEPTANCE_BASE_URL:http://localhost:3001/invitations/accept}
+      platform-acceptance-base-url: ${PEAK_PLATFORM_INVITATION_ACCEPTANCE_BASE_URL:http://localhost:3002/invitations/accept}
     # Which adapter carries each channel. Capability is not routing: the HTTP gateway
     # supports four channels and must still be told which it is responsible for.
     #
@@ -221,6 +230,10 @@ peak:
   usermanagement:
     invitation:
       expose-token-in-response: ${PEAK_INVITATION_EXPOSE_TOKEN_IN_RESPONSE:false}
+    activation:
+      hospitality-issuer: ${PEAK_HOSPITALITY_ISSUER:http://localhost:8081/realms/peak-hospitality}
+      platform-issuer: ${PEAK_PLATFORM_ISSUER:http://localhost:8081/realms/peak-platform}
+      expose-code-in-response: ${PEAK_ACTIVATION_EXPOSE_CODE_IN_RESPONSE:false}
 management:
   health:
     # Valkey holds nothing Peak cannot do without. Boot contributes a Redis health

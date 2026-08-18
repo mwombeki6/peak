@@ -454,7 +454,8 @@ class RouteAccessMatrixCoverageIntegrationTests {
             // not share a route or a credential source.
             startsWith("/api/v1/platform-billing/webhooks/") -> GuardMode.PUBLIC_TOKEN
             startsWith("/api/v1/communication/webhooks/") -> GuardMode.PUBLIC_TOKEN
-            this == "/api/v1/invitations/accept" -> GuardMode.PUBLIC_TOKEN
+            startsWith("/api/v1/invitations/") -> GuardMode.PUBLIC_TOKEN
+            startsWith("/api/v1/auth/recovery") -> GuardMode.PUBLIC_TOKEN
             this == "/api/v1/staff/sessions" ||
                     this == "/api/v1/staff/credentials/activate" ||
                     startsWith("/api/v1/devices/") -> GuardMode.PUBLIC_TOKEN
@@ -484,7 +485,8 @@ class RouteAccessMatrixCoverageIntegrationTests {
             // satisfies the check constraint and then denies every callback at runtime.
             startsWith("/api/v1/platform-billing/webhooks/") -> RouteScope.PUBLIC
             startsWith("/api/v1/communication/webhooks/") -> RouteScope.PUBLIC
-            this == "/api/v1/invitations/accept" -> RouteScope.PUBLIC
+            startsWith("/api/v1/invitations/") -> RouteScope.PUBLIC
+            startsWith("/api/v1/auth/recovery") -> RouteScope.PUBLIC
             this == "/api/v1/staff/sessions" ||
                     this == "/api/v1/staff/credentials/activate" ||
                     startsWith("/api/v1/devices/") -> RouteScope.PUBLIC

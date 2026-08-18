@@ -97,6 +97,15 @@ class ProductionReadinessValidator(
             ) {
                 "peak.usermanagement.invitation.expose-token-in-response must be false in prod"
             }
+            requireTrue(
+                !environment.getProperty(
+                    "peak.usermanagement.activation.expose-code-in-response",
+                    Boolean::class.java,
+                    false,
+                ),
+            ) {
+                "peak.usermanagement.activation.expose-code-in-response must be false in prod"
+            }
         }
 
         if (violations.isNotEmpty()) {
@@ -405,11 +414,26 @@ class ProductionReadinessValidator(
             }
         }
         if (runtimeProperties.mode == PeakRuntimeMode.WORKER) {
-            val acceptanceUrl = environment.getProperty(
+            val hospitalityUrl = environment.getProperty(
+                "peak.communication.invitation.hospitality-acceptance-base-url",
+            )
+            val platformUrl = environment.getProperty(
+                "peak.communication.invitation.platform-acceptance-base-url",
+            )
+            val fallbackUrl = environment.getProperty(
                 "peak.communication.invitation.acceptance-base-url",
             )
-            requireTrue(acceptanceUrl?.startsWith("https://") == true) {
-                "peak.communication.invitation.acceptance-base-url must use https in prod"
+            requireTrue(
+                hospitalityUrl?.startsWith("https://") == true ||
+                    fallbackUrl?.startsWith("https://") == true,
+            ) {
+                "peak.communication.invitation.hospitality-acceptance-base-url must use https in prod"
+            }
+            requireTrue(
+                platformUrl?.startsWith("https://") == true ||
+                    fallbackUrl?.startsWith("https://") == true,
+            ) {
+                "peak.communication.invitation.platform-acceptance-base-url must use https in prod"
             }
         }
     }

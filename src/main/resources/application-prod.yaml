@@ -19,6 +19,8 @@ peak:
   communication:
     invitation:
       acceptance-base-url: ${PEAK_INVITATION_ACCEPTANCE_BASE_URL:}
+      hospitality-acceptance-base-url: ${PEAK_HOSPITALITY_INVITATION_ACCEPTANCE_BASE_URL:}
+      platform-acceptance-base-url: ${PEAK_PLATFORM_INVITATION_ACCEPTANCE_BASE_URL:}
   payment:
     production-approved-provider-codes: ${PEAK_PAYMENT_PRODUCTION_APPROVED_PROVIDER_CODES:}
     providers:
