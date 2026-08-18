@@ -182,6 +182,7 @@ pos_item_void_dispositions,pos,active,pos::api-or-internal-owner
 pos_order_items,pos,active,pos::api-or-internal-owner
 pos_orders,pos,active,pos::api-or-internal-owner
 pos_printer_routes,pos,active,pos::api-or-internal-owner
+pos_print_jobs,pos,active,pos::api-or-internal-owner
 pos_recipe_consumption_snapshots,pos,active,pos::api-or-internal-owner
 pos_sessions,pos,active,pos::api-or-internal-owner
 pos_terminals,pos,active,pos::api-or-internal-owner

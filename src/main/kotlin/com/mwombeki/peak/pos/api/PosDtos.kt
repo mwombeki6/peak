@@ -307,3 +307,38 @@ class PosConflictException(message: String) :
  */
 class PosTenantNotVerifiedException(message: String) :
     PosException(message, HttpStatus.FORBIDDEN, "POS_TENANT_NOT_VERIFIED")
+
+data class PosPrintJobFailureRequest(
+    @field:NotBlank
+    @field:Size(min = 3, max = 500)
+    val error: String,
+)
+
+data class PosPrintJobReclaimRequest(
+    @field:NotBlank
+    @field:Size(min = 3, max = 500)
+    val reason: String,
+)
+
+data class PosPrintJobResponse(
+    val id: UUID,
+    val propertyId: UUID,
+    val outletId: UUID,
+    val printerRouteId: UUID?,
+    val jobType: String,
+    val sourceType: String,
+    val sourceId: UUID,
+    val sourceVersion: Long,
+    val reprint: Boolean,
+    val reprintedFromJobId: UUID?,
+    val status: String,
+    val document: Map<String, Any?>,
+    val claimedByDeviceId: UUID?,
+    val claimedAt: Instant?,
+    val printedAt: Instant?,
+    val failedAt: Instant?,
+    val attempts: Int,
+    val lastError: String?,
+    val createdAt: Instant,
+    val replayed: Boolean = false,
+)

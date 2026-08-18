@@ -34,6 +34,7 @@ class PosKitchenService(
     private val inventory: InventoryPort,
     private val realtime: ObjectProvider<RealtimePort>,
     private val mapper: ObjectMapper,
+    private val printJobs: PosPrintJobService,
 ) {
     fun send(
         propertyId: UUID,
@@ -111,6 +112,10 @@ class PosKitchenService(
             )
         }
 ticket(actor.tenantId, propertyId, ticketId).also { created ->
+                printJobs.enqueueKitchenTicket(
+                    actor, propertyId, order.outletId, created,
+                    order.tableNumber, order.orderNumber,
+                )
                 commands.recordSideEffects(
                     actor, propertyId, "pos.kitchen_ticket.created", KITCHEN_TICKETS,
                     ticketId, mapOf(
@@ -419,14 +424,17 @@ ticket(actor.tenantId, propertyId, ticketId).also { created ->
     private fun requireOrder(tenantId: UUID, propertyId: UUID, orderId: UUID) =
         jdbc.query(
             """
-            SELECT id, outlet_id, status FROM pos_orders
+            SELECT id, outlet_id, status, table_number, order_number FROM pos_orders
             WHERE tenant_id = ? AND property_id = ? AND id = ? AND deleted_at IS NULL
             FOR UPDATE
             """.trimIndent(),
             { rs, _ ->
                 OrderRow(
                     rs.getObject("id", UUID::class.java),
-                    rs.getObject("outlet_id", UUID::class.java), rs.getString("status"),
+                    rs.getObject("outlet_id", UUID::class.java),
+                    rs.getString("status"),
+                    rs.getString("table_number"),
+                    rs.getString("order_number"),
                 )
             },
             tenantId, propertyId, orderId,
@@ -540,7 +548,13 @@ ticket(actor.tenantId, propertyId, ticketId).also { created ->
     private fun String.required() = trim().takeIf { it.isNotEmpty() }
         ?: throw IllegalArgumentException("Reason is required")
 
-    private data class OrderRow(val id: UUID, val outletId: UUID, val status: String)
+    private data class OrderRow(
+        val id: UUID,
+        val outletId: UUID,
+        val status: String,
+        val tableNumber: String?,
+        val orderNumber: String?,
+    )
     private data class ItemRow(
         val id: UUID,
         val menuItemId: UUID,

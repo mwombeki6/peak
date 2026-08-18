@@ -53,6 +53,12 @@ Owns property outlet cashier sessions and POS orders.
 | `POST` | `/api/v1/properties/{propertyId}/pos-orders/{orderId}/send` | `pos.order.manage` |
 | `POST` | `/api/v1/properties/{propertyId}/pos-orders/{orderId}/items/{itemId}/void` | `pos.item.void` |
 | `GET/POST` | `/api/v1/properties/{propertyId}/kitchen-tickets/**` | `pos.kitchen.*` |
+| `GET` | `/api/v1/properties/{propertyId}/pos-print-jobs` | `pos.view` |
+| `POST` | `/api/v1/properties/{propertyId}/pos-print-jobs/{jobId}/claim` | `pos.print.manage` |
+| `POST` | `/api/v1/properties/{propertyId}/pos-print-jobs/{jobId}/printed` | `pos.print.manage` |
+| `POST` | `/api/v1/properties/{propertyId}/pos-print-jobs/{jobId}/failed` | `pos.print.manage` |
+| `POST` | `/api/v1/properties/{propertyId}/pos-print-jobs/{jobId}/reclaim` | `pos.print.manage` |
+| `POST` | `/api/v1/properties/{propertyId}/pos-print-jobs/{jobId}/reprint` | `pos.print.manage` |
 
 The database route matrix is authoritative. Static application roles are not
 used for POS authorization; tenant roles receive these permissions dynamically.
