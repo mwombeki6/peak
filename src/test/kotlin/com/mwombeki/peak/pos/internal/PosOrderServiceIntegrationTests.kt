@@ -6,6 +6,7 @@ import com.mwombeki.peak.pos.api.ApprovePosVarianceRequest
 import com.mwombeki.peak.pos.api.ClosePosSessionRequest
 import com.mwombeki.peak.pos.api.CreatePosOrderRequest
 import com.mwombeki.peak.pos.api.OpenPosSessionRequest
+import com.mwombeki.peak.pos.api.PosTenantNotVerifiedException
 import com.mwombeki.peak.pos.api.SettlePosOrderRequest
 import com.mwombeki.peak.reliability.api.ClaimedOutboxEvent
 import com.mwombeki.peak.reliability.api.OutboxDestination
@@ -61,6 +62,40 @@ class PosOrderServiceIntegrationTests {
         }
         createdTenantIds.clear()
         requestContextHolder.clear()
+    }
+
+    @Test
+    fun anUnverifiedBusinessCannotOpenATill() {
+        val fixture = insertFixture(verified = false)
+        bind(fixture, "unverified-open")
+        val refused = assertFailsWith<PosTenantNotVerifiedException> {
+            posSessionService.openSession(
+                fixture.propertyId,
+                OpenPosSessionRequest(
+                    outletId = fixture.outletId,
+                    openingFloat = BigDecimal("50.00"),
+                ),
+            )
+        }
+        assertEquals("POS_TENANT_NOT_VERIFIED", refused.errorCode)
+        assertTrue(refused.message.contains("not yet verified"), refused.message)
+    }
+
+    @Test
+    fun anUnverifiedProfileCannotOpenATill() {
+        val fixture = insertFixture(verified = false)
+        insertUnverifiedProfile(fixture.tenantId)
+        bind(fixture, "pending-open")
+        val sessionRefused = assertFailsWith<PosTenantNotVerifiedException> {
+            posSessionService.openSession(
+                fixture.propertyId,
+                OpenPosSessionRequest(
+                    outletId = fixture.outletId,
+                    openingFloat = BigDecimal("50.00"),
+                ),
+            )
+        }
+        assertEquals("POS_TENANT_NOT_VERIFIED", sessionRefused.errorCode)
     }
 
     @Test
@@ -538,7 +573,7 @@ class PosOrderServiceIntegrationTests {
         )
     }
 
-    private fun insertFixture(): PosFixture {
+    private fun insertFixture(verified: Boolean = true): PosFixture {
         val fixture = PosFixture(
             planId = UUID.randomUUID(),
             tenantId = UUID.randomUUID(),
@@ -568,6 +603,9 @@ class PosOrderServiceIntegrationTests {
             fixture.planId,
         )
         insertUser(fixture.tenantId, fixture.userId)
+        if (verified) {
+            verifyTenantBusiness(fixture.tenantId)
+        }
         jdbcTemplate.update(
             """
             INSERT INTO properties (id, tenant_id, name, status, is_active, total_rooms)
@@ -633,6 +671,43 @@ class PosOrderServiceIntegrationTests {
             "pos-$userId@example.com",
         )
         return userId
+    }
+
+    /** PosCommandExecutor now requires business verification before any POS command. */
+    private fun insertUnverifiedProfile(tenantId: UUID) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_profiles (
+                tenant_id, legal_name, entity_type, business_phone, business_email,
+                verification_status
+            ) VALUES (?, 'POS Test Business', 'limited_company', '+255700000000', ?,
+                      'unverified')
+            """.trimIndent(),
+            tenantId,
+            "business-$tenantId@example.test",
+        )
+    }
+
+    /** PosCommandExecutor now requires business verification before any POS mutation. */
+    private fun verifyTenantBusiness(tenantId: UUID) {
+        val platformUserId = UUID.randomUUID()
+        jdbcTemplate.update(
+            "INSERT INTO platform_users (id, full_name, email) VALUES (?, 'Test Verifier', ?)",
+            platformUserId,
+            "verifier-$platformUserId@example.test",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_profiles (
+                tenant_id, legal_name, entity_type, business_phone, business_email,
+                verification_status, verified_at, verified_by_platform_user_id
+            ) VALUES (?, 'POS Test Business', 'limited_company', '+255700000000', ?,
+                      'verified', now(), ?)
+            """.trimIndent(),
+            tenantId,
+            "business-$tenantId@example.test",
+            platformUserId,
+        )
     }
 
     private fun bind(

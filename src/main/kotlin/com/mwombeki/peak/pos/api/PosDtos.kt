@@ -295,3 +295,15 @@ class PosNotFoundException(message: String) :
 
 class PosConflictException(message: String) :
     PosException(message, HttpStatus.CONFLICT, "POS_CONFLICT")
+
+/**
+ * A tenant whose business verification isn't complete has no backend enforcement anywhere else
+ * against operating hospitality commands — tenant_allows_operational_writes() only checks
+ * lifecycle status (trial/active), never business verification, and every other operationally
+ * guarded table intentionally stays that way (see PosCommandExecutor.requireTenantBusinessVerified
+ * for why this check is POS-scoped rather than a change to that shared function). A tenant
+ * created through the direct platform-registration path (POST /api/v1/platform/tenants, which
+ * never runs the applicant->KYB->approval gate) can otherwise reach POS with zero verification.
+ */
+class PosTenantNotVerifiedException(message: String) :
+    PosException(message, HttpStatus.FORBIDDEN, "POS_TENANT_NOT_VERIFIED")

@@ -140,6 +140,7 @@ class PosConfigurationServiceIntegrationTests {
             "tenant_${fixture.tenantId}".replace("-", "_"),
             fixture.planId,
         )
+        verifyTenantBusiness(fixture.tenantId)
         jdbcTemplate.update(
             """
             INSERT INTO users (id, tenant_id, full_name, email, status, is_active)
@@ -201,6 +202,28 @@ class PosConfigurationServiceIntegrationTests {
             fixture.taxRateId,
         )
         return fixture
+    }
+
+    /** PosCommandExecutor now requires business verification before any POS command. */
+    private fun verifyTenantBusiness(tenantId: UUID) {
+        val platformUserId = UUID.randomUUID()
+        jdbcTemplate.update(
+            "INSERT INTO platform_users (id, full_name, email) VALUES (?, 'Test Verifier', ?)",
+            platformUserId,
+            "verifier-$platformUserId@example.test",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_profiles (
+                tenant_id, legal_name, entity_type, business_phone, business_email,
+                verification_status, verified_at, verified_by_platform_user_id
+            ) VALUES (?, 'POS Test Business', 'limited_company', '+255700000000', ?,
+                      'verified', now(), ?)
+            """.trimIndent(),
+            tenantId,
+            "business-$tenantId@example.test",
+            platformUserId,
+        )
     }
 
     private fun bind(fixture: CatalogFixture) {

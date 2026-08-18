@@ -254,6 +254,7 @@ class PosRoomChargeIntegrationTests {
             tenantId, "Tenant $tenantId", "tenant-$tenantId",
             "tenant_$tenantId".replace("-", "_"), planId,
         )
+        verifyTenantBusiness(tenantId)
         jdbcTemplate.update(
             """
             INSERT INTO users (id, tenant_id, full_name, email, status, is_active)
@@ -464,4 +465,26 @@ class PosRoomChargeIntegrationTests {
         val room208Folio: UUID,
         val orderId: UUID,
     )
+
+    /** PosCommandExecutor now requires business verification before any POS mutation. */
+    private fun verifyTenantBusiness(tenantId: UUID) {
+        val platformUserId = UUID.randomUUID()
+        jdbcTemplate.update(
+            "INSERT INTO platform_users (id, full_name, email) VALUES (?, 'Test Verifier', ?)",
+            platformUserId,
+            "verifier-$platformUserId@example.test",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_profiles (
+                tenant_id, legal_name, entity_type, business_phone, business_email,
+                verification_status, verified_at, verified_by_platform_user_id
+            ) VALUES (?, 'POS Test Business', 'limited_company', '+255700000000', ?,
+                      'verified', now(), ?)
+            """.trimIndent(),
+            tenantId,
+            "business-$tenantId@example.test",
+            platformUserId,
+        )
+    }
 }
