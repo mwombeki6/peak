@@ -53,7 +53,7 @@
   "otpPolicyLookAheadWindow": 1,
   "otpPolicyPeriod": 30,
   "otpPolicyCodeReusable": false,
-  "passwordPolicy": "length(15) and digits(1) and upperCase(1) and lowerCase(1) and specialChars(1) and notUsername(undefined) and notEmail(undefined) and passwordHistory(5)",
+  "passwordPolicy": "length(10) and digits(1) and lowerCase(1) and notUsername(undefined) and notEmail(undefined)",
   "webAuthnPolicyRpEntityName": "Peak Hospitality",
   "webAuthnPolicySignatureAlgorithms": [
     "ES256",

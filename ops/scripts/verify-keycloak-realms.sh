@@ -239,17 +239,34 @@ def verify_realm(name: str, actions_name: str, *, platform: bool):
     if not smtp.get("user") or not smtp.get("password"):
         raise SystemExit(f"{realm.get('realm')} SMTP authentication is incomplete")
     policy = realm.get("passwordPolicy") or ""
-    minimum = "length(15)"
-    for requirement in (
-        minimum,
-        "digits(1)",
-        "upperCase(1)",
-        "lowerCase(1)",
-        "specialChars(1)",
-        "notUsername(undefined)",
-        "notEmail(undefined)",
-        "passwordHistory(5)",
-    ):
+    if platform:
+        requirements = (
+            "length(15)",
+            "digits(1)",
+            "upperCase(1)",
+            "lowerCase(1)",
+            "specialChars(1)",
+            "notUsername(undefined)",
+            "notEmail(undefined)",
+            "passwordHistory(5)",
+        )
+    else:
+        # Hospitality operators type this password into Peak's own activation
+        # screen. The four-class 15-character rule is the platform operator bar
+        # and is too hostile for a hotel manager on a phone.
+        requirements = (
+            "length(10)",
+            "digits(1)",
+            "lowerCase(1)",
+            "notUsername(undefined)",
+            "notEmail(undefined)",
+        )
+        for forbidden in ("length(15)", "upperCase(1)", "specialChars(1)"):
+            if forbidden in policy:
+                raise SystemExit(
+                    f"{realm.get('realm')} password policy must not require {forbidden}"
+                )
+    for requirement in requirements:
         if requirement not in policy:
             raise SystemExit(f"{realm.get('realm')} password policy is missing {requirement}")
     if "forceExpiredPasswordChange" in policy:
