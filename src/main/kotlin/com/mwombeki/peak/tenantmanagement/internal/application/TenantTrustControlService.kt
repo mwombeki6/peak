@@ -470,6 +470,84 @@ class TenantTrustControlService(
         }
     }
 
+    /**
+     * The approved case and its documents don't get re-verified against the new tenant — they
+     * get re-pointed to it. tenant_id/onboarding_application_id stay mutually exclusive (V146's
+     * CHECK constraint), so this is the one moment a case legitimately crosses from one to the
+     * other. tenant_profiles is updated from the case's own recorded evidence (who approved it,
+     * when, until when) rather than a fresh "now" — TenantOperationalReadinessEvaluator reads
+     * tenant_id, verification_status directly, so without this a freshly provisioned tenant
+     * would fail its own activation readiness gate and force a second, redundant KYB review of
+     * evidence FBC already approved.
+     *
+     * Called mid-provisioning from the onboarding module's own platform-authorized transaction
+     * (platform.tenants.manage) rather than the narrower platform.tenants.verification.manage
+     * checks reviewVerificationCase uses — the row is already owned by the caller's request in
+     * every other sense, so a mutation that touches zero rows here is a hard failure rather than
+     * a silently orphaned evidence trail.
+     */
+    override fun carryForwardVerificationEvidence(applicationId: UUID, tenantId: UUID) {
+        val case = jdbcTemplate.queryForList(
+            """
+            SELECT id, required_level, reviewed_at, approved_by_platform_user_id, expires_at
+            FROM tenant_verification_cases
+            WHERE onboarding_application_id = ? AND status = 'approved'
+            ORDER BY created_at DESC LIMIT 1
+            """.trimIndent(),
+            applicationId,
+        ).firstOrNull()
+            ?: throw PlatformControlConflictException(
+                "Application's verification case must be approved before provisioning",
+            )
+        val caseId = case["id"] as UUID
+
+        val repointedCases = jdbcTemplate.update(
+            """
+            UPDATE tenant_verification_cases
+            SET tenant_id = ?, onboarding_application_id = NULL
+            WHERE id = ? AND onboarding_application_id = ?
+            """.trimIndent(),
+            tenantId, caseId, applicationId,
+        )
+        if (repointedCases != 1) {
+            throw PlatformControlConflictException(
+                "Could not carry the verification case forward onto the new tenant",
+            )
+        }
+        jdbcTemplate.update(
+            """
+            UPDATE tenant_verification_documents
+            SET tenant_id = ?, onboarding_application_id = NULL
+            WHERE verification_case_id = ? AND onboarding_application_id = ?
+            """.trimIndent(),
+            tenantId, caseId, applicationId,
+        )
+
+        val updatedProfiles = jdbcTemplate.update(
+            """
+            UPDATE tenant_profiles
+            SET verification_status = 'verified',
+                verification_level = ?,
+                verified_at = ?,
+                verified_by_platform_user_id = ?,
+                verification_expires_at = ?,
+                rejection_reason = NULL,
+                updated_at = now()
+            WHERE tenant_id = ?
+            """.trimIndent(),
+            case["required_level"],
+            case["reviewed_at"],
+            case["approved_by_platform_user_id"],
+            case["expires_at"],
+            tenantId,
+        )
+        if (updatedProfiles != 1) {
+            throw PlatformControlConflictException(
+                "Could not carry business verification forward onto the new tenant's profile",
+            )
+        }
+    }
+
     override fun listPrivacyRequests(
         tenantId: UUID,
         platformView: Boolean,

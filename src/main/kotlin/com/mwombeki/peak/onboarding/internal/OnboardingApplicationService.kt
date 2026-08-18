@@ -14,6 +14,7 @@ import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.tenantmanagement.api.TenantOnboardingPort
 import com.mwombeki.peak.tenantmanagement.api.TenantRegisterRequest
 import com.mwombeki.peak.tenantmanagement.api.TenantResponse
+import com.mwombeki.peak.tenantmanagement.api.TenantTrustControlPort
 import com.mwombeki.peak.verification.api.ConfirmVerificationCommand
 import com.mwombeki.peak.verification.api.RequestVerificationCommand
 import com.mwombeki.peak.verification.api.VerificationPort
@@ -54,6 +55,7 @@ class OnboardingApplicationService(
     private val requestContextHolder: RequestContextHolder,
     private val databaseSessionContext: DatabaseSessionContext,
     private val tenantOnboardingPort: TenantOnboardingPort,
+    private val tenantTrustControlPort: TenantTrustControlPort,
 ) {
     private val random = SecureRandom()
 
@@ -179,16 +181,16 @@ class OnboardingApplicationService(
                 }
             }
 
-            val caseStatus = jdbcTemplate.query(
+            val case = jdbcTemplate.queryForList(
                 """
-                SELECT status FROM tenant_verification_cases
+                SELECT id, status, required_level, reviewed_at, approved_by_platform_user_id, expires_at
+                FROM tenant_verification_cases
                 WHERE onboarding_application_id = ?
                 ORDER BY created_at DESC LIMIT 1
                 """.trimIndent(),
-                { rs, _ -> rs.getString("status") },
                 applicationId,
             ).firstOrNull()
-            if (caseStatus != "approved") {
+            if (case?.get("status") != "approved") {
                 throw OnboardingProvisioningException(
                     "Application's verification case must be approved before provisioning",
                 )
@@ -227,6 +229,7 @@ class OnboardingApplicationService(
                 tenant.id,
                 applicationId,
             )
+            tenantTrustControlPort.carryForwardVerificationEvidence(applicationId, tenant.id)
             tenant
         },
     )

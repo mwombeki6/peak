@@ -13,6 +13,7 @@ import com.mwombeki.peak.shared.ephemeral.RateLimitScope
 import com.mwombeki.peak.shared.ephemeral.RateLimitStore
 import com.mwombeki.peak.tenantmanagement.api.AddVerificationDocumentCommand
 import com.mwombeki.peak.tenantmanagement.api.CreateVerificationCaseCommand
+import com.mwombeki.peak.tenantmanagement.api.PlatformTenantActivationPort
 import com.mwombeki.peak.tenantmanagement.api.RequestVerificationDocumentUploadCommand
 import com.mwombeki.peak.tenantmanagement.api.ReviewVerificationCaseCommand
 import com.mwombeki.peak.tenantmanagement.api.TenantTrustControlPort
@@ -54,6 +55,7 @@ class OnboardingTenantProvisioningIntegrationTests {
 
     @Autowired private lateinit var onboarding: OnboardingApplicationService
     @Autowired private lateinit var trust: TenantTrustControlPort
+    @Autowired private lateinit var tenantActivation: PlatformTenantActivationPort
     @Autowired private lateinit var verification: VerificationPort
     @Autowired private lateinit var rateLimitStore: RateLimitStore
     @Autowired private lateinit var jdbc: JdbcTemplate
@@ -114,6 +116,44 @@ class OnboardingTenantProvisioningIntegrationTests {
         )
         assertEquals("TENANT_PROVISIONED", row["status"])
         assertEquals(tenant.id, row["tenant_id"])
+
+        // Phase 4F: the case and its document are re-pointed onto the tenant, not re-verified.
+        val caseRow = jdbc.queryForMap(
+            "SELECT tenant_id, onboarding_application_id, status FROM tenant_verification_cases WHERE id = ?",
+            case.caseId,
+        )
+        assertEquals(tenant.id, caseRow["tenant_id"])
+        assertEquals(null, caseRow["onboarding_application_id"])
+        assertEquals("approved", caseRow["status"])
+
+        val documentCount = jdbc.queryForObject(
+            """
+            SELECT count(*) FROM tenant_verification_documents
+            WHERE verification_case_id = ? AND tenant_id = ? AND onboarding_application_id IS NULL
+            """.trimIndent(),
+            Int::class.java,
+            case.caseId,
+            tenant.id,
+        )
+        assertEquals(1, documentCount)
+
+        val profileRow = jdbc.queryForMap(
+            """
+            SELECT verification_status, verified_at, verified_by_platform_user_id
+            FROM tenant_profiles WHERE tenant_id = ?
+            """.trimIndent(),
+            tenant.id,
+        )
+        assertEquals("verified", profileRow["verification_status"])
+        assertNotNull(profileRow["verified_at"])
+        assertEquals(reviewer, profileRow["verified_by_platform_user_id"])
+
+        // The carried-forward evidence is enough on its own to satisfy the tenant's own
+        // activation readiness gate — no second KYB review is required.
+        platform(reviewer)
+        val readiness = tenantActivation.readiness(tenant.id)
+        val verificationGate = readiness.gates.single { it.code == "business_verified" }
+        assertTrue(verificationGate.satisfied, "business verification gate: ${verificationGate.detail}")
 
         // Idempotent: provisioning an already-provisioned application returns the same
         // tenant rather than erroring or creating a second one.

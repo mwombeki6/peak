@@ -27,6 +27,14 @@ interface TenantTrustControlPort {
     fun submitVerificationCase(subject: VerificationSubjectRef, caseId: UUID): VerificationCaseSummary
     fun reviewVerificationCase(command: ReviewVerificationCaseCommand): VerificationCaseSummary
 
+    /**
+     * Re-points an application's approved verification case (and its documents) onto a freshly
+     * provisioned tenant, and carries the case's own recorded evidence onto [tenant_profiles]
+     * so the new tenant doesn't need a second, redundant KYB review of evidence FBC already
+     * approved. Throws if the application has no approved case.
+     */
+    fun carryForwardVerificationEvidence(applicationId: UUID, tenantId: UUID)
+
     fun listPrivacyRequests(tenantId: UUID, platformView: Boolean): List<PrivacyRequestSummary>
     fun createPrivacyRequest(command: CreatePrivacyRequestCommand): PrivacyRequestSummary
     fun processPrivacyRequest(command: ProcessPrivacyRequestCommand): PrivacyRequestSummary
