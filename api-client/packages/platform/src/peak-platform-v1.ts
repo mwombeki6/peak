@@ -1439,7 +1439,7 @@ export interface paths {
          * List
          * @description List
          */
-        get: operations["list_6"];
+        get: operations["list_7"];
         put?: never;
         post?: never;
         delete?: never;
@@ -7891,7 +7891,7 @@ export interface operations {
             };
         };
     };
-    list_6: {
+    list_7: {
         parameters: {
             query?: {
                 tenantId?: string;
