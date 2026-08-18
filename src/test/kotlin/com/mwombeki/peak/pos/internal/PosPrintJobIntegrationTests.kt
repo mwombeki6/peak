@@ -8,6 +8,7 @@ import com.mwombeki.peak.pos.api.PosConflictException
 import com.mwombeki.peak.pos.api.PosPrintJobFailureRequest
 import com.mwombeki.peak.pos.api.PosPrintJobReclaimRequest
 import com.mwombeki.peak.pos.api.SendPosOrderRequest
+import com.mwombeki.peak.pos.api.VoidPosOrderItemRequest
 import com.mwombeki.peak.shared.context.RequestContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
@@ -55,6 +56,51 @@ class PosPrintJobIntegrationTests {
         assertEquals(ticketId, jobs.single().sourceId)
         assertEquals("kitchen_ticket", jobs.single().document["kind"])
         assertTrue((jobs.single().document["lines"] as List<*>).isNotEmpty())
+        assertTrue(jobs.none { it.jobType == "bar_ticket" || it.jobType == "expo_ticket" })
+    }
+
+    @Test
+    fun voidingAnUnsentItemCreatesAPendingVoidTicket() {
+        val fixture = seedTradingOutlet()
+        bind(fixture, "session-void")
+        val session = posSessionService.openSession(
+            fixture.propertyId,
+            OpenPosSessionRequest(outletId = fixture.outletId, openingFloat = BigDecimal.ZERO),
+        )
+        bind(fixture, "create-void")
+        val order = posOrderService.createOrder(
+            fixture.propertyId,
+            CreatePosOrderRequest(
+                sessionId = session.id,
+                orderType = "dine_in",
+                tableNumber = "12",
+                clientOperationId = "void-create-${fixture.tenantId}",
+            ),
+        )
+        bind(fixture, "item-void")
+        val priced = posOrderService.addItem(
+            fixture.propertyId,
+            order.id,
+            AddPosOrderItemRequest(
+                menuItemId = fixture.menuItemId,
+                quantity = BigDecimal.ONE,
+                clientOperationId = "void-item-${fixture.tenantId}",
+            ),
+        )
+        val itemId = priced.items.single().id
+        bind(fixture, "void")
+        posKitchenService.voidItem(
+            fixture.propertyId,
+            order.id,
+            itemId,
+            VoidPosOrderItemRequest(reason = "Guest left"),
+        )
+        val job = printJobs.listJobs(fixture.propertyId, "pending").single { it.jobType == "void_ticket" }
+        assertEquals(itemId, job.sourceId)
+        assertEquals("pos_order", job.sourceType)
+        assertEquals("void_ticket", job.document["kind"])
+        assertEquals("Stew", job.document["itemName"])
+        assertEquals("Guest left", job.document["reason"])
     }
 
     @Test

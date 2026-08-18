@@ -231,6 +231,18 @@ ticket(actor.tenantId, propertyId, ticketId).also { created ->
             actor.tenantId, propertyId, orderId, itemId, disposition,
             request.reason.required(), actor.tenantUserId, returnBatch,
         )
+        printJobs.enqueueVoidTicket(
+            tenantId = actor.tenantId,
+            propertyId = propertyId,
+            outletId = order.outletId,
+            orderId = orderId,
+            orderNumber = order.orderNumber,
+            itemId = itemId,
+            itemName = item.name,
+            quantity = item.quantity.toPlainString(),
+            disposition = disposition,
+            reason = request.reason.required(),
+        )
         recalculate(actor.tenantId, propertyId, orderId)
         PosItemVoidResponse(orderId, itemId, disposition.uppercase(), returnBatch).also {
             commands.recordSideEffects(

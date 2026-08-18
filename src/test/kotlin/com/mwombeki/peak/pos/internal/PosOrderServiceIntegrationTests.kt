@@ -238,6 +238,10 @@ class PosOrderServiceIntegrationTests {
         assertEquals("closed", closed.status)
         assertEquals(BigDecimal("123.60"), closed.expectedCash)
         assertEquals(BigDecimal("0.00"), closed.variance)
+        val shiftReport = printJobs.listJobs(fixture.propertyId, "pending")
+            .single { it.jobType == "shift_report" }
+        assertEquals(session.id, shiftReport.sourceId)
+        assertEquals("shift_report", shiftReport.document["kind"])
 
         assertFailsWith<DataAccessException> {
             jdbcTemplate.update(

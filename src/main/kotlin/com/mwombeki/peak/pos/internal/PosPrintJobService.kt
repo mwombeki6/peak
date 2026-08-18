@@ -8,6 +8,7 @@ import com.mwombeki.peak.pos.api.PosOrderResponse
 import com.mwombeki.peak.pos.api.PosPrintJobFailureRequest
 import com.mwombeki.peak.pos.api.PosPrintJobReclaimRequest
 import com.mwombeki.peak.pos.api.PosPrintJobResponse
+import com.mwombeki.peak.pos.api.PosSessionResponse
 import com.mwombeki.peak.realtime.api.RealtimeEventRequest
 import com.mwombeki.peak.realtime.api.RealtimeEventTypes
 import com.mwombeki.peak.realtime.api.RealtimePort
@@ -41,25 +42,138 @@ class PosPrintJobService(
         tableNumber: String?,
         orderNumber: String?,
     ) {
+        val payload = mapOf(
+            "ticketNumber" to ticket.ticketNumber,
+            "orderNumber" to orderNumber,
+            "tableNumber" to tableNumber,
+            "sentAt" to ticket.sentAt.toString(),
+            "lines" to ticket.items.map { item ->
+                mapOf(
+                    "name" to item.itemName,
+                    "quantity" to item.quantity.toPlainString(),
+                    "note" to item.specialRequest,
+                    "modifiers" to item.modifiers,
+                )
+            },
+        )
+        insertJobs(
+            tenantId = actor.tenantId,
+            propertyId = propertyId,
+            outletId = outletId,
+            jobType = "kitchen_ticket",
+            sourceType = "kitchen_ticket",
+            sourceId = ticket.id,
+            category = "kitchen",
+            document = stationDocument("kitchen_ticket", payload),
+            unroutedFallback = true,
+        )
+        insertJobs(
+            tenantId = actor.tenantId,
+            propertyId = propertyId,
+            outletId = outletId,
+            jobType = "bar_ticket",
+            sourceType = "kitchen_ticket",
+            sourceId = ticket.id,
+            category = "bar",
+            document = stationDocument("bar_ticket", payload),
+            unroutedFallback = false,
+        )
+        insertJobs(
+            tenantId = actor.tenantId,
+            propertyId = propertyId,
+            outletId = outletId,
+            jobType = "expo_ticket",
+            sourceType = "kitchen_ticket",
+            sourceId = ticket.id,
+            category = "pass",
+            document = stationDocument("expo_ticket", payload),
+            unroutedFallback = false,
+        )
+    }
+
+    fun enqueueVoidTicket(
+        tenantId: UUID,
+        propertyId: UUID,
+        outletId: UUID,
+        orderId: UUID,
+        orderNumber: String?,
+        itemId: UUID,
+        itemName: String,
+        quantity: String,
+        disposition: String,
+        reason: String,
+    ) {
         val document = mapper.writeValueAsString(
             mapOf(
-                "kind" to "kitchen_ticket",
-                "ticketNumber" to ticket.ticketNumber,
+                "kind" to "void_ticket",
+                "orderId" to orderId.toString(),
                 "orderNumber" to orderNumber,
-                "tableNumber" to tableNumber,
-                "sentAt" to ticket.sentAt.toString(),
-                "lines" to ticket.items.map { item ->
-                    mapOf(
-                        "name" to item.itemName,
-                        "quantity" to item.quantity.toPlainString(),
-                        "note" to item.specialRequest,
-                        "modifiers" to item.modifiers,
-                    )
-                },
+                "itemName" to itemName,
+                "quantity" to quantity,
+                "disposition" to disposition,
+                "reason" to reason,
             ),
         )
-        val routeIds = activeRoutes(actor.tenantId, propertyId, outletId, "kitchen")
-            .ifEmpty { listOf(null) }
+        insertJobs(
+            tenantId = tenantId,
+            propertyId = propertyId,
+            outletId = outletId,
+            jobType = "void_ticket",
+            sourceType = "pos_order",
+            sourceId = itemId,
+            category = "kitchen",
+            document = document,
+            unroutedFallback = true,
+        )
+    }
+
+    fun enqueueShiftReport(
+        tenantId: UUID,
+        propertyId: UUID,
+        session: PosSessionResponse,
+    ) {
+        val document = mapper.writeValueAsString(
+            mapOf(
+                "kind" to "shift_report",
+                "sessionId" to session.id.toString(),
+                "status" to session.status,
+                "openingFloat" to session.openingFloat.toPlainString(),
+                "expectedCash" to session.expectedCash.toPlainString(),
+                "closingCash" to session.closingCash?.toPlainString(),
+                "variance" to session.variance?.toPlainString(),
+            ),
+        )
+        insertJobs(
+            tenantId = tenantId,
+            propertyId = propertyId,
+            outletId = session.outletId,
+            jobType = "shift_report",
+            sourceType = "pos_session",
+            sourceId = session.id,
+            category = "receipt",
+            document = document,
+            unroutedFallback = true,
+        )
+    }
+
+    private fun stationDocument(kind: String, payload: Map<String, Any?>): String =
+        mapper.writeValueAsString(
+            linkedMapOf<String, Any?>("kind" to kind).apply { putAll(payload) },
+        )
+
+    private fun insertJobs(
+        tenantId: UUID,
+        propertyId: UUID,
+        outletId: UUID,
+        jobType: String,
+        sourceType: String,
+        sourceId: UUID,
+        category: String,
+        document: String,
+        unroutedFallback: Boolean,
+    ) {
+        val routeIds = activeRoutes(tenantId, propertyId, outletId, category)
+            .let { routes -> if (routes.isEmpty() && unroutedFallback) listOf(null) else routes }
         routeIds.forEach { routeId ->
             val jobId = UUID.randomUUID()
             jdbc.update(
@@ -68,13 +182,12 @@ class PosPrintJobService(
                     id, tenant_id, property_id, outlet_id, printer_route_id,
                     job_type, source_type, source_id, source_version, is_reprint,
                     status, document
-                ) VALUES (?, ?, ?, ?, ?, 'kitchen_ticket', 'kitchen_ticket', ?, ?, false,
-                          'pending', ?::jsonb)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, false, 'pending', ?::jsonb)
                 """.trimIndent(),
-                jobId, actor.tenantId, propertyId, outletId, routeId,
-                ticket.id, 0L, document,
+                jobId, tenantId, propertyId, outletId, routeId,
+                jobType, sourceType, sourceId, 0L, document,
             )
-            publish(actor.tenantId, propertyId, outletId, jobId, RealtimeEventTypes.PRINT_JOB_CREATED)
+            publish(tenantId, propertyId, outletId, jobId, RealtimeEventTypes.PRINT_JOB_CREATED)
         }
     }
 
@@ -124,24 +237,17 @@ class PosPrintJobService(
                 },
             ),
         )
-        val routeIds = activeRoutes(tenantId, propertyId, order.outletId, "receipt")
-            .ifEmpty { listOf(null) }
-        routeIds.forEach { routeId ->
-            val jobId = UUID.randomUUID()
-            jdbc.update(
-                """
-                INSERT INTO pos_print_jobs (
-                    id, tenant_id, property_id, outlet_id, printer_route_id,
-                    job_type, source_type, source_id, source_version, is_reprint,
-                    status, document
-                ) VALUES (?, ?, ?, ?, ?, 'receipt', 'pos_order', ?, ?, false,
-                          'pending', ?::jsonb)
-                """.trimIndent(),
-                jobId, tenantId, propertyId, order.outletId, routeId,
-                order.id, 0L, document,
-            )
-            publish(tenantId, propertyId, order.outletId, jobId, RealtimeEventTypes.PRINT_JOB_CREATED)
-        }
+        insertJobs(
+            tenantId = tenantId,
+            propertyId = propertyId,
+            outletId = order.outletId,
+            jobType = "receipt",
+            sourceType = "pos_order",
+            sourceId = order.id,
+            category = "receipt",
+            document = document,
+            unroutedFallback = true,
+        )
     }
 
     private fun loadOrderForReceipt(
