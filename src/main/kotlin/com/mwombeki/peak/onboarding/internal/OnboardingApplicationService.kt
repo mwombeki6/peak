@@ -1,5 +1,8 @@
 package com.mwombeki.peak.onboarding.internal
 
+import com.mwombeki.peak.onboarding.api.OnboardingApplicationDetail
+import com.mwombeki.peak.onboarding.api.OnboardingApplicationNotFoundException
+import com.mwombeki.peak.onboarding.api.OnboardingApplicationQueueItem
 import com.mwombeki.peak.onboarding.api.OnboardingProvisioningException
 import com.mwombeki.peak.onboarding.api.OnboardingSessionReceipt
 import com.mwombeki.peak.onboarding.api.OnboardingVerificationFailedException
@@ -15,12 +18,15 @@ import com.mwombeki.peak.tenantmanagement.api.TenantOnboardingPort
 import com.mwombeki.peak.tenantmanagement.api.TenantRegisterRequest
 import com.mwombeki.peak.tenantmanagement.api.TenantResponse
 import com.mwombeki.peak.tenantmanagement.api.TenantTrustControlPort
+import com.mwombeki.peak.usermanagement.api.PlatformAccessPort
+import com.mwombeki.peak.usermanagement.api.PlatformAccessRequest
 import com.mwombeki.peak.verification.api.ConfirmVerificationCommand
 import com.mwombeki.peak.verification.api.RequestVerificationCommand
 import com.mwombeki.peak.verification.api.VerificationPort
 import com.mwombeki.peak.verification.api.VerificationPurpose
 import java.security.MessageDigest
 import java.security.SecureRandom
+import java.sql.ResultSet
 import java.time.Duration
 import java.util.Base64
 import java.util.HexFormat
@@ -56,6 +62,7 @@ class OnboardingApplicationService(
     private val databaseSessionContext: DatabaseSessionContext,
     private val tenantOnboardingPort: TenantOnboardingPort,
     private val tenantTrustControlPort: TenantTrustControlPort,
+    private val platformAccessPort: PlatformAccessPort,
 ) {
     private val random = SecureRandom()
 
@@ -150,6 +157,86 @@ class OnboardingApplicationService(
             )
         }
     }
+
+    /**
+     * FBC's review queue. onboarding_applications carries a platform-readable RLS policy (any
+     * platform user holding platform.tenants.verify or .verification.manage sees every row,
+     * not just one) precisely so this can be a genuine cross-application listing — the same
+     * shape as the platform tenant catalog, not a per-application lookup repeated in a loop.
+     */
+    fun listApplications(statuses: List<String>?): List<OnboardingApplicationQueueItem> = requireNotNull(
+        transactionTemplate.execute {
+            platformAccessPort.requireAuthorized(
+                PlatformAccessRequest(null, PLATFORM_VERIFICATION_PERMISSION, "platform.onboarding.list"),
+            )
+            val normalized = statuses?.map { it.trim().lowercase() }?.filter { it.isNotEmpty() }
+            jdbcTemplate.query(
+                """
+                SELECT a.id, a.representative_full_name, a.representative_phone, a.business_name,
+                       a.status, a.created_at,
+                       c.id AS case_id, c.status AS case_status, c.submitted_at AS case_submitted_at
+                FROM onboarding_applications a
+                LEFT JOIN LATERAL (
+                    SELECT id, status, submitted_at
+                    FROM tenant_verification_cases
+                    WHERE onboarding_application_id = a.id
+                    ORDER BY created_at DESC LIMIT 1
+                ) c ON true
+                WHERE a.tenant_id IS NULL
+                  AND (?::text[] IS NULL OR c.status = ANY (?::text[]))
+                ORDER BY c.submitted_at DESC NULLS LAST, a.created_at DESC
+                LIMIT 200
+                """.trimIndent(),
+                { rs, _ -> mapQueueItem(rs) },
+                normalized?.toTypedArray(),
+                normalized?.toTypedArray(),
+            )
+        },
+    )
+
+    fun getApplication(applicationId: UUID): OnboardingApplicationDetail = requireNotNull(
+        transactionTemplate.execute {
+            platformAccessPort.requireAuthorized(
+                PlatformAccessRequest(null, PLATFORM_VERIFICATION_PERMISSION, "platform.onboarding.view"),
+            )
+            jdbcTemplate.query(
+                """
+                SELECT id, representative_full_name, representative_phone, business_name,
+                       legal_name, business_email, country_code, status, tenant_id, created_at
+                FROM onboarding_applications
+                WHERE id = ?
+                """.trimIndent(),
+                { rs, _ -> mapApplicationDetail(rs) },
+                applicationId,
+            ).singleOrNull()
+                ?: throw OnboardingApplicationNotFoundException("Onboarding application was not found")
+        },
+    )
+
+    private fun mapQueueItem(rs: ResultSet) = OnboardingApplicationQueueItem(
+        applicationId = rs.getObject("id", UUID::class.java),
+        representativeFullName = rs.getString("representative_full_name"),
+        representativePhone = rs.getString("representative_phone"),
+        businessName = rs.getString("business_name"),
+        applicationStatus = rs.getString("status"),
+        caseId = rs.getObject("case_id", UUID::class.java),
+        caseStatus = rs.getString("case_status"),
+        caseSubmittedAt = rs.getTimestamp("case_submitted_at")?.toInstant(),
+        createdAt = rs.getTimestamp("created_at").toInstant(),
+    )
+
+    private fun mapApplicationDetail(rs: ResultSet) = OnboardingApplicationDetail(
+        applicationId = rs.getObject("id", UUID::class.java),
+        representativeFullName = rs.getString("representative_full_name"),
+        representativePhone = rs.getString("representative_phone"),
+        businessName = rs.getString("business_name"),
+        legalName = rs.getString("legal_name"),
+        businessEmail = rs.getString("business_email"),
+        countryCode = rs.getString("country_code"),
+        status = rs.getString("status"),
+        tenantId = rs.getObject("tenant_id", UUID::class.java),
+        createdAt = rs.getTimestamp("created_at").toInstant(),
+    )
 
     /**
      * The explicit step after KYB approval — never an implicit side effect of reviewing the
@@ -253,6 +340,7 @@ class OnboardingApplicationService(
     private companion object {
         val EMAIL_PATTERN = Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")
         const val SLUG_SUFFIX_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
+        const val PLATFORM_VERIFICATION_PERMISSION = "platform.tenants.verification.manage"
 
         fun sha256Hex(value: String): String {
             val digest = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))

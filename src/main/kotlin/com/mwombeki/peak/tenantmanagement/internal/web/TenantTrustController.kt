@@ -125,6 +125,13 @@ class PlatformTenantTrustController(
     fun verificationCases(@PathVariable tenantId: UUID) =
         trustPort.listVerificationCases(VerificationSubjectRef.Tenant(tenantId), platformView = true)
 
+    @GetMapping("/verification-cases/{caseId}/documents/{documentId}/view-url")
+    fun requestVerificationDocumentView(
+        @PathVariable tenantId: UUID,
+        @PathVariable caseId: UUID,
+        @PathVariable documentId: UUID,
+    ) = trustPort.requestVerificationDocumentView(VerificationSubjectRef.Tenant(tenantId), caseId, documentId)
+
     @PostMapping("/verification-cases/{caseId}/review")
     fun reviewVerificationCase(
         @PathVariable tenantId: UUID,

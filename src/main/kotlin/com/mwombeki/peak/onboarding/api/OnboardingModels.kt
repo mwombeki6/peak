@@ -42,3 +42,40 @@ data class UpdateOnboardingProfileCommand(
 
 @NamedInterface("api")
 class OnboardingProvisioningException(message: String) : RuntimeException(message)
+
+/**
+ * FBC's review queue row: an application joined to its most recent verification case, if it has
+ * one yet. [caseId] is null for an application that hasn't created a case (still on the phone
+ * step); [caseStatus] is the field the queue actually filters and sorts on, not
+ * [applicationStatus] — onboarding_applications.status tracks the phone/provisioning
+ * bookends, the case tracks the review lifecycle in between.
+ */
+@NamedInterface("api")
+data class OnboardingApplicationQueueItem(
+    val applicationId: UUID,
+    val representativeFullName: String,
+    val representativePhone: String,
+    val businessName: String?,
+    val applicationStatus: String,
+    val caseId: UUID?,
+    val caseStatus: String?,
+    val caseSubmittedAt: Instant?,
+    val createdAt: Instant,
+)
+
+@NamedInterface("api")
+data class OnboardingApplicationDetail(
+    val applicationId: UUID,
+    val representativeFullName: String,
+    val representativePhone: String,
+    val businessName: String?,
+    val legalName: String?,
+    val businessEmail: String?,
+    val countryCode: String,
+    val status: String,
+    val tenantId: UUID?,
+    val createdAt: Instant,
+)
+
+@NamedInterface("api")
+class OnboardingApplicationNotFoundException(message: String) : RuntimeException(message)

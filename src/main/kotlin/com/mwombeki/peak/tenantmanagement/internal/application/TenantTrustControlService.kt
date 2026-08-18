@@ -37,6 +37,7 @@ import com.mwombeki.peak.tenantmanagement.api.UpsertIdentityConnectionCommand
 import com.mwombeki.peak.tenantmanagement.api.VerificationCaseSummary
 import com.mwombeki.peak.tenantmanagement.api.VerificationDocumentSummary
 import com.mwombeki.peak.tenantmanagement.api.VerificationDocumentUploadAuthorization
+import com.mwombeki.peak.tenantmanagement.api.VerificationDocumentViewAuthorization
 import com.mwombeki.peak.tenantmanagement.api.VerificationReviewAction
 import com.mwombeki.peak.tenantmanagement.api.VerificationSubjectRef
 import com.mwombeki.peak.usermanagement.api.PlatformAccessPort
@@ -256,6 +257,29 @@ class TenantTrustControlService(
                     reservationId,
                 )
             }
+        }
+    }
+
+    override fun requestVerificationDocumentView(
+        subject: VerificationSubjectRef,
+        caseId: UUID,
+        documentId: UUID,
+    ): VerificationDocumentViewAuthorization {
+        return readForSubject(subject, platformView = true, "tenant.verification.view", PLATFORM_VERIFICATION) {
+            val (clause, param) = subjectWhereClause(subject)
+            val objectKey = jdbcTemplate.queryForList(
+                """
+                SELECT storage_object_key FROM tenant_verification_documents
+                WHERE $clause AND verification_case_id = ? AND id = ?
+                """.trimIndent(),
+                String::class.java,
+                param, caseId, documentId,
+            ).singleOrNull()
+                ?: throw PlatformControlNotFoundException("Verification document was not found")
+            VerificationDocumentViewAuthorization(
+                url = kycDocumentStoragePort.presignedGet(objectKey, VIEW_URL_EXPIRY),
+                expiresAt = Instant.now().plus(VIEW_URL_EXPIRY),
+            )
         }
     }
 
@@ -1514,6 +1538,7 @@ class TenantTrustControlService(
         const val PLATFORM_VERIFICATION = "platform.tenants.verification.manage"
         val SAFE_OBJECT_KEY = Regex("[A-Za-z0-9][A-Za-z0-9/_ .-]{0,499}")
         val UPLOAD_URL_EXPIRY: Duration = Duration.ofMinutes(10)
+        val VIEW_URL_EXPIRY: Duration = Duration.ofMinutes(10)
         const val MAX_VERIFICATION_DOCUMENT_BYTES = 10L * 1024 * 1024
         val ALLOWED_VERIFICATION_MIME_TYPES = setOf(
             "application/pdf", "image/jpeg", "image/png", "image/webp",

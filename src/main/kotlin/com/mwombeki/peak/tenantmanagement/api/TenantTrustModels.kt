@@ -24,6 +24,19 @@ interface TenantTrustControlPort {
         command: RequestVerificationDocumentUploadCommand,
     ): VerificationDocumentUploadAuthorization
     fun addVerificationDocument(command: AddVerificationDocumentCommand): VerificationDocumentSummary
+
+    /**
+     * Platform-only: a short-lived read URL so FBC can actually look at what an applicant or
+     * tenant submitted before deciding on a case. Never exposed to the subject's own session —
+     * an applicant/tenant already has the object key from [addVerificationDocument]'s response
+     * and needs no signed read of their own upload.
+     */
+    fun requestVerificationDocumentView(
+        subject: VerificationSubjectRef,
+        caseId: UUID,
+        documentId: UUID,
+    ): VerificationDocumentViewAuthorization
+
     fun submitVerificationCase(subject: VerificationSubjectRef, caseId: UUID): VerificationCaseSummary
     fun reviewVerificationCase(command: ReviewVerificationCaseCommand): VerificationCaseSummary
 
@@ -107,6 +120,11 @@ data class RequestVerificationDocumentUploadCommand(
 data class VerificationDocumentUploadAuthorization(
     val objectKey: String,
     val uploadUrl: String,
+    val expiresAt: Instant,
+)
+
+data class VerificationDocumentViewAuthorization(
+    val url: String,
     val expiresAt: Instant,
 )
 

@@ -177,6 +177,40 @@ class OnboardingTenantProvisioningIntegrationTests {
     }
 
     @Test
+    fun theReviewQueueListsAndDetailsAnApplicationThroughItsLifecycle() {
+        val applicationId = createPhoneVerifiedApplication()
+        val reviewer = insertPlatformOperator()
+        val case = submittedCase(applicationId)
+
+        platform(reviewer)
+        val queued = onboarding.listApplications(listOf("submitted"))
+        val queueRow = queued.single { it.applicationId == applicationId }
+        assertEquals(case.caseId, queueRow.caseId)
+        assertEquals("submitted", queueRow.caseStatus)
+
+        platform(reviewer)
+        val detail = onboarding.getApplication(applicationId)
+        assertEquals(applicationId, detail.applicationId)
+        assertEquals(null, detail.tenantId)
+
+        platform(reviewer)
+        trust.reviewVerificationCase(
+            ReviewVerificationCaseCommand(
+                VerificationSubjectRef.Application(applicationId), case.caseId,
+                VerificationReviewAction.START_REVIEW, null, "low", null,
+            ),
+        )
+
+        platform(reviewer)
+        val underReview = onboarding.listApplications(listOf("under_review"))
+        assertEquals("under_review", underReview.single { it.applicationId == applicationId }.caseStatus)
+
+        platform(reviewer)
+        val excluded = onboarding.listApplications(listOf("submitted"))
+        assertTrue(excluded.none { it.applicationId == applicationId })
+    }
+
+    @Test
     fun provisioningBeforeApprovalIsRefused() {
         val applicationId = createPhoneVerifiedApplication()
         applicant(applicationId)

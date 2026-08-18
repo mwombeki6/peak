@@ -11,12 +11,16 @@ import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.tenantmanagement.api.AddVerificationDocumentCommand
 import com.mwombeki.peak.tenantmanagement.api.CreateVerificationCaseCommand
 import com.mwombeki.peak.tenantmanagement.api.RequestVerificationDocumentUploadCommand
+import com.mwombeki.peak.tenantmanagement.api.ReviewVerificationCaseCommand
 import com.mwombeki.peak.tenantmanagement.api.TenantTrustControlPort
+import com.mwombeki.peak.tenantmanagement.api.VerificationReviewAction
 import com.mwombeki.peak.tenantmanagement.api.VerificationSubjectRef
 import jakarta.validation.Valid
 import jakarta.validation.constraints.Email
 import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.Pattern
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 import org.springframework.http.HttpStatus
@@ -26,6 +30,7 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 
 /**
@@ -119,11 +124,52 @@ class OnboardingController(
 @RequestMapping("/api/v1/platform/onboarding")
 class PlatformOnboardingController(
     private val onboardingApplicationService: OnboardingApplicationService,
+    private val trustPort: TenantTrustControlPort,
 ) {
+    @GetMapping
+    fun listApplications(@RequestParam(required = false) status: List<String>?) =
+        onboardingApplicationService.listApplications(status)
+
+    @GetMapping("/{applicationId}")
+    fun application(@PathVariable applicationId: UUID) =
+        onboardingApplicationService.getApplication(applicationId)
+
+    @GetMapping("/{applicationId}/verification-cases")
+    fun verificationCases(@PathVariable applicationId: UUID) =
+        trustPort.listVerificationCases(VerificationSubjectRef.Application(applicationId), platformView = true)
+
+    @GetMapping("/{applicationId}/verification-cases/{caseId}/documents/{documentId}/view-url")
+    fun requestVerificationDocumentView(
+        @PathVariable applicationId: UUID,
+        @PathVariable caseId: UUID,
+        @PathVariable documentId: UUID,
+    ) = trustPort.requestVerificationDocumentView(
+        VerificationSubjectRef.Application(applicationId), caseId, documentId,
+    )
+
+    @PostMapping("/{applicationId}/verification-cases/{caseId}/review")
+    fun reviewVerificationCase(
+        @PathVariable applicationId: UUID,
+        @PathVariable caseId: UUID,
+        @Valid @RequestBody request: PlatformOnboardingReviewHttpRequest,
+    ) = trustPort.reviewVerificationCase(
+        ReviewVerificationCaseCommand(
+            VerificationSubjectRef.Application(applicationId), caseId, request.action, request.reason,
+            request.riskRating, request.expiresAt,
+        ),
+    )
+
     @PostMapping("/{applicationId}/provision")
     fun provisionTenant(@PathVariable applicationId: UUID) =
         onboardingApplicationService.provisionTenant(applicationId)
 }
+
+data class PlatformOnboardingReviewHttpRequest(
+    @field:NotNull val action: VerificationReviewAction,
+    val reason: String? = null,
+    val riskRating: String? = null,
+    val expiresAt: Instant? = null,
+)
 
 data class RequestAccessHttpRequest(
     @field:NotBlank val representativeFullName: String,
