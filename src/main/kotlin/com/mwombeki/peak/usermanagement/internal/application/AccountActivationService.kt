@@ -3,6 +3,8 @@ package com.mwombeki.peak.usermanagement.internal.application
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
+import com.mwombeki.peak.shared.context.DatabaseSessionContext
+import com.mwombeki.peak.shared.context.RequestIdentity
 import com.mwombeki.peak.shared.outbound.EstablishPassword
 import com.mwombeki.peak.shared.outbound.IdentityCredentialRejectedException
 import com.mwombeki.peak.shared.outbound.IdentityProvisionerPort
@@ -32,6 +34,7 @@ import tools.jackson.databind.ObjectMapper
 class AccountActivationService(
     private val jdbcTemplate: JdbcTemplate,
     private val transactionTemplate: TransactionTemplate,
+    private val databaseSessionContext: DatabaseSessionContext,
     private val verification: VerificationPort,
     private val outbox: OutboxPort,
     private val identities: ObjectProvider<IdentityProvisionerPort>,
@@ -254,6 +257,7 @@ class AccountActivationService(
         }
         if (tenantId != null) {
             transactionTemplate.execute {
+                databaseSessionContext.bind(RequestIdentity.Public(tenantId = tenantId))
                 outbox.enqueue(
                     OutboxEventCommand(
                         aggregateType = "account_setup_grants",
