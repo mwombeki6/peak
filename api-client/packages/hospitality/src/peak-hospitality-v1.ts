@@ -6605,7 +6605,8 @@ export interface components {
         };
         InviteTenantUserHttpRequest: {
             /** Format: email */
-            email: string;
+            email?: string | null;
+            phoneNumber: string | null;
             /** Format: uuid */
             tenantRoleId: string;
             fullName?: string | null;
@@ -6620,7 +6621,8 @@ export interface components {
             invitationId?: string;
             /** Format: uuid */
             tenantId?: string;
-            email?: string;
+            email?: string | null;
+            phoneNumber?: string | null;
             /** Format: uuid */
             tenantRoleId?: string;
             /** Format: date-time */
@@ -8285,17 +8287,14 @@ export interface components {
         };
         SetCredentialHttpRequest: {
             setupGrant: string;
-            password?: string | null;
-            webauthnAttestation?: {
-                [key: string]: unknown;
-            } | null;
+            password: string;
         };
         CredentialAccepted: {
             signedIn?: boolean;
             redirectTo?: string | null;
         };
         CodeDispatch: {
-            maskedEmail?: string;
+            maskedEmail?: string | null;
             /** Format: int32 */
             resendAvailableInSeconds?: number;
             /** Format: int32 */
@@ -8519,22 +8518,16 @@ export interface components {
             replayed?: boolean;
         };
         RecoveryVerifyHttpRequest: {
-            /** Format: email */
-            email: string;
+            identifier: string;
             code: string;
         };
         RecoveryStartHttpRequest: {
-            /** Format: email */
-            email: string;
+            identifier: string;
         };
         RecoverySetCredentialHttpRequest: {
-            /** Format: email */
-            email: string;
+            identifier: string;
             setupGrant: string;
-            password?: string | null;
-            webauthnAttestation?: {
-                [key: string]: unknown;
-            } | null;
+            password: string;
         };
         AmendReservationRequest: {
             /** Format: uuid */
@@ -8940,7 +8933,8 @@ export interface components {
         };
         InvitationDetails: {
             inviteeName?: string;
-            maskedEmail?: string;
+            maskedEmail?: string | null;
+            maskedPhone?: string | null;
             organisationName?: string;
             propertyName?: string | null;
             /** Format: date-time */

@@ -39868,8 +39868,11 @@
         "type" : "object",
         "properties" : {
           "email" : {
-            "type" : "string",
-            "format" : "email",
+            "type" : [ "string", "null" ],
+            "format" : "email"
+          },
+          "phoneNumber" : {
+            "type" : [ "string", "null" ],
             "minLength" : 1
           },
           "tenantRoleId" : {
@@ -39889,7 +39892,7 @@
             "additionalProperties" : { }
           }
         },
-        "required" : [ "email", "tenantRoleId" ]
+        "required" : [ "phoneNumber", "tenantRoleId" ]
       },
       "TenantUserInvitationHttpResponse" : {
         "type" : "object",
@@ -39903,7 +39906,10 @@
             "format" : "uuid"
           },
           "email" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
+          },
+          "phoneNumber" : {
+            "type" : [ "string", "null" ]
           },
           "tenantRoleId" : {
             "type" : "string",
@@ -44898,8 +44904,11 @@
             "minLength" : 1
           },
           "email" : {
-            "type" : "string",
-            "format" : "email",
+            "type" : [ "string", "null" ],
+            "format" : "email"
+          },
+          "phoneNumber" : {
+            "type" : [ "string", "null" ],
             "minLength" : 1
           },
           "expiresInHours" : {
@@ -44909,7 +44918,7 @@
             "minimum" : 1
           }
         },
-        "required" : [ "email", "fullName" ]
+        "required" : [ "fullName", "phoneNumber" ]
       },
       "TenantUserInvitationReceipt" : {
         "type" : "object",
@@ -44923,7 +44932,10 @@
             "format" : "uuid"
           },
           "email" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
+          },
+          "phoneNumber" : {
+            "type" : [ "string", "null" ]
           },
           "tenantRoleId" : {
             "type" : "string",
@@ -45912,14 +45924,11 @@
             "minLength" : 1
           },
           "password" : {
-            "type" : [ "string", "null" ]
-          },
-          "webauthnAttestation" : {
-            "type" : [ "object", "null" ],
-            "additionalProperties" : { }
+            "type" : "string",
+            "minLength" : 1
           }
         },
-        "required" : [ "setupGrant" ]
+        "required" : [ "password", "setupGrant" ]
       },
       "CredentialAccepted" : {
         "type" : "object",
@@ -45936,7 +45945,7 @@
         "type" : "object",
         "properties" : {
           "maskedEmail" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "resendAvailableInSeconds" : {
             "type" : "integer",
@@ -46416,9 +46425,8 @@
       "RecoveryVerifyHttpRequest" : {
         "type" : "object",
         "properties" : {
-          "email" : {
+          "identifier" : {
             "type" : "string",
-            "format" : "email",
             "minLength" : 1
           },
           "code" : {
@@ -46426,25 +46434,23 @@
             "minLength" : 1
           }
         },
-        "required" : [ "code", "email" ]
+        "required" : [ "code", "identifier" ]
       },
       "RecoveryStartHttpRequest" : {
         "type" : "object",
         "properties" : {
-          "email" : {
+          "identifier" : {
             "type" : "string",
-            "format" : "email",
             "minLength" : 1
           }
         },
-        "required" : [ "email" ]
+        "required" : [ "identifier" ]
       },
       "RecoverySetCredentialHttpRequest" : {
         "type" : "object",
         "properties" : {
-          "email" : {
+          "identifier" : {
             "type" : "string",
-            "format" : "email",
             "minLength" : 1
           },
           "setupGrant" : {
@@ -46452,14 +46458,11 @@
             "minLength" : 1
           },
           "password" : {
-            "type" : [ "string", "null" ]
-          },
-          "webauthnAttestation" : {
-            "type" : [ "object", "null" ],
-            "additionalProperties" : { }
+            "type" : "string",
+            "minLength" : 1
           }
         },
-        "required" : [ "email", "setupGrant" ]
+        "required" : [ "identifier", "password", "setupGrant" ]
       },
       "AmendReservationRequest" : {
         "type" : "object",
@@ -49054,7 +49057,10 @@
             "type" : "string"
           },
           "maskedEmail" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
+          },
+          "maskedPhone" : {
+            "type" : [ "string", "null" ]
           },
           "organisationName" : {
             "type" : "string"
