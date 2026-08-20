@@ -8,7 +8,6 @@ import com.mwombeki.peak.usermanagement.internal.application.CredentialAccepted
 import com.mwombeki.peak.usermanagement.internal.application.InvitationDetails
 import com.mwombeki.peak.usermanagement.internal.application.SetupGrant
 import jakarta.validation.Valid
-import jakarta.validation.constraints.Email
 import jakarta.validation.constraints.NotBlank
 import org.springframework.core.Ordered
 import org.springframework.core.annotation.Order
@@ -59,18 +58,18 @@ class AccountActivationController(
 
     @PostMapping("/auth/recovery/start")
     fun startRecovery(@Valid @RequestBody request: RecoveryStartHttpRequest): CodeDispatch =
-        activation.startRecovery(request.email)
+        activation.startRecovery(request.identifier)
 
     @PostMapping("/auth/recovery/verify-code")
     fun verifyRecoveryCode(
         @Valid @RequestBody request: RecoveryVerifyHttpRequest,
-    ): SetupGrant = activation.verifyRecoveryCode(request.email, request.code)
+    ): SetupGrant = activation.verifyRecoveryCode(request.identifier, request.code)
 
     @PostMapping("/auth/recovery/set-credential")
     fun setRecoveryCredential(
         @Valid @RequestBody request: RecoverySetCredentialHttpRequest,
     ): CredentialAccepted =
-        activation.setRecoveryCredential(request.email, request.setupGrant, request.password)
+        activation.setRecoveryCredential(request.identifier, request.setupGrant, request.password)
 }
 
 @Order(Ordered.HIGHEST_PRECEDENCE)
@@ -115,8 +114,7 @@ data class VerifyCodeHttpRequest(
 
 data class SetCredentialHttpRequest(
     @field:NotBlank val setupGrant: String,
-    val password: String? = null,
-    val webauthnAttestation: Map<String, Any?>? = null,
+    @field:NotBlank val password: String,
 )
 
 data class ConfirmRecoveryHttpRequest(
@@ -125,17 +123,16 @@ data class ConfirmRecoveryHttpRequest(
 )
 
 data class RecoveryStartHttpRequest(
-    @field:NotBlank @field:Email val email: String,
+    @field:NotBlank val identifier: String,
 )
 
 data class RecoveryVerifyHttpRequest(
-    @field:NotBlank @field:Email val email: String,
+    @field:NotBlank val identifier: String,
     @field:NotBlank val code: String,
 )
 
 data class RecoverySetCredentialHttpRequest(
-    @field:NotBlank @field:Email val email: String,
+    @field:NotBlank val identifier: String,
     @field:NotBlank val setupGrant: String,
-    val password: String? = null,
-    val webauthnAttestation: Map<String, Any?>? = null,
+    @field:NotBlank val password: String,
 )

@@ -488,6 +488,25 @@ class NotificationDeliveryProcessor(
                 ?: throw IllegalArgumentException("Activation code is required")
             val expiresAt = payload["expiresAt"]?.toString()?.normalizedRequired("expiresAt")
                 ?: throw IllegalArgumentException("Activation code expiry is required")
+            val phoneNumber = payload["phoneNumber"]?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+            if (phoneNumber != null) {
+                return PendingNotificationPayload(
+                    channel = "sms",
+                    recipient = phoneNumber,
+                    contactChannelId = null,
+                    purpose = null,
+                    subject = null,
+                    content = buildString {
+                        append("Hello ")
+                        append(fullName)
+                        append(". Your Peak confirmation code is ")
+                        append(code)
+                        append(". Expires ")
+                        append(expiresAt)
+                        append(".")
+                    },
+                )
+            }
             return PendingNotificationPayload(
                 channel = "email",
                 recipient = payload["email"]?.toString()?.normalizedRequired("email"),
@@ -524,6 +543,25 @@ class NotificationDeliveryProcessor(
                 ?: "Peak user"
             val expiresAt = payload["expiresAt"]?.toString()?.normalizedRequired("expiresAt")
                 ?: throw IllegalArgumentException("Invitation expiry is required")
+            val phoneNumber = payload["phoneNumber"]?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+            if (phoneNumber != null) {
+                return PendingNotificationPayload(
+                    channel = "sms",
+                    recipient = phoneNumber,
+                    contactChannelId = null,
+                    purpose = null,
+                    subject = null,
+                    content = buildString {
+                        append("Hello ")
+                        append(fullName)
+                        append(". Use this link to accept your Peak invitation: ")
+                        append(acceptanceUrl)
+                        append(". Expires ")
+                        append(expiresAt)
+                        append(".")
+                    },
+                )
+            }
             return PendingNotificationPayload(
                 channel = "email",
                 recipient = payload["email"]?.toString()?.normalizedRequired("email"),

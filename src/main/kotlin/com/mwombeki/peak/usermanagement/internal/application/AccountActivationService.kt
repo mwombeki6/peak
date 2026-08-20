@@ -50,7 +50,7 @@ class AccountActivationService(
         val row = requirePending(token)
         return dispatchCode(
             purpose = VerificationPurpose.ACCOUNT_ACTIVATION,
-            email = row.email,
+            destination = row.contact(),
             subjectRef = row.invitationId.toString(),
             tenantId = row.tenantId,
             fullName = row.fullName,
@@ -59,13 +59,14 @@ class AccountActivationService(
 
     fun verifyInvitationCode(token: String, code: String): SetupGrant {
         val row = requirePending(token)
-        confirmCode(VerificationPurpose.ACCOUNT_ACTIVATION, row.email, code)
+        confirmCode(VerificationPurpose.ACCOUNT_ACTIVATION, row.contact(), code)
         val grant = InvitationTokens.newToken()
         insertGrant(
             grantHash = InvitationTokens.hash(grant),
             invitationId = row.invitationId,
             tenantId = row.tenantId,
             email = row.email,
+            phoneNumber = row.phoneNumber,
             realm = row.realm,
         )
         return SetupGrant(setupGrant = grant, expiresInSeconds = GRANT_TTL_SECONDS)
@@ -79,23 +80,25 @@ class AccountActivationService(
         val row = requirePending(token)
         // Checked before the grant is spent: a password the policy would refuse must not cost
         // the person their verified code and send them back to the start.
-        val secret = requireCredential(password, row.realm, row.email)
+        val username = row.username()
+        val secret = requireCredential(password, username)
         val grant = consumeGrant(setupGrant)
-        if (grant.email != row.email) throw notFound()
-        val names = splitName(row.fullName, row.email)
+        if (grant.email != row.email || grant.phoneNumber != row.phoneNumber) throw notFound()
+        val names = splitName(row.fullName, username)
         val userId = UUID.randomUUID()
         val provisioner = requireProvisioner()
         val provisioned = try {
             provisioner.provision(
                 ProvisionIdentity(
-                    username = row.email,
+                    username = username,
                     email = row.email,
+                    phoneNumber = row.phoneNumber,
                     firstName = names.first,
                     lastName = names.second,
                     tenantId = row.tenantId.toString(),
                     peakUserId = userId.toString(),
                     realm = row.realm,
-                    emailVerified = true,
+                    emailVerified = row.email != null,
                 ),
             )
         } catch (ex: IdentityProvisioningException) {
@@ -105,7 +108,9 @@ class AccountActivationService(
             provisioner.establishPassword(
                 EstablishPassword(provisioned.subjectId, secret, row.realm),
             )
-            provisioner.markEmailVerified(MarkEmailVerified(provisioned.subjectId, row.realm))
+            if (row.email != null) {
+                provisioner.markEmailVerified(MarkEmailVerified(provisioned.subjectId, row.realm))
+            }
             provisioner.clearRequiredActions(provisioned.subjectId, row.realm)
         } catch (ex: IdentityCredentialRejectedException) {
             unwind(provisioner, provisioned.subjectId, row.realm, provisioned.alreadyExisted)
@@ -120,6 +125,7 @@ class AccountActivationService(
                 issuer = issuerFor(row.realm),
                 subject = provisioned.subjectId,
                 email = row.email,
+                phoneNumber = row.phoneNumber,
                 fullName = row.fullName,
             )
         } catch (ex: RuntimeException) {
@@ -145,28 +151,28 @@ class AccountActivationService(
         )
     }
 
-    fun startRecovery(email: String): CodeDispatch {
-        val normalized = email.trim().lowercase(Locale.ROOT)
+    fun startRecovery(identifier: String): CodeDispatch {
+        val normalized = normalize(identifier)
         val existing = findRecoverableAccount(normalized)
         if (existing != null) {
             return dispatchCode(
                 purpose = VerificationPurpose.ACCOUNT_RECOVERY,
-                email = normalized,
+                destination = existing.contact,
                 subjectRef = existing.subjectRef,
                 tenantId = existing.tenantId,
                 fullName = existing.fullName,
             )
         }
-        // Same shape whether or not the address exists.
+        // Same shape whether or not the identifier exists.
         return CodeDispatch(
-            maskedEmail = maskEmail(normalized),
+            maskedEmail = maskIdentifier(normalized),
             resendAvailableInSeconds = 60,
             expiresInSeconds = 600,
         )
     }
 
-    fun verifyRecoveryCode(email: String, code: String): SetupGrant {
-        val normalized = email.trim().lowercase(Locale.ROOT)
+    fun verifyRecoveryCode(identifier: String, code: String): SetupGrant {
+        val normalized = normalize(identifier)
         confirmCode(VerificationPurpose.ACCOUNT_RECOVERY, normalized, code)
         val account = findRecoverableAccount(normalized)
             ?: throw AccountActivationException(
@@ -179,27 +185,29 @@ class AccountActivationService(
             grantHash = InvitationTokens.hash(grant),
             invitationId = null,
             tenantId = account.tenantId,
-            email = normalized,
+            email = if (account.contact.contains('@')) account.contact else null,
+            phoneNumber = if (account.contact.contains('@')) null else account.contact,
             realm = account.realm,
         )
         return SetupGrant(setupGrant = grant, expiresInSeconds = GRANT_TTL_SECONDS)
     }
 
     fun setRecoveryCredential(
-        email: String,
+        identifier: String,
         setupGrant: String,
         password: String?,
     ): CredentialAccepted {
-        val normalized = email.trim().lowercase(Locale.ROOT)
+        val normalized = normalize(identifier)
         val grant = consumeGrant(setupGrant)
-        if (grant.email != normalized) {
+        val grantContact = grant.phoneNumber ?: grant.email
+        if (grantContact != normalized) {
             throw AccountActivationException(
                 "code_incorrect",
                 HttpStatus.UNPROCESSABLE_CONTENT,
                 "That code isn't right",
             )
         }
-        val secret = requireCredential(password, grant.realm, normalized)
+        val secret = requireCredential(password, normalized)
         val provisioner = requireProvisioner()
         val account = findRecoverableAccount(normalized)
             ?: throw AccountActivationException(
@@ -211,13 +219,14 @@ class AccountActivationService(
             val provisioned = provisioner.provision(
                 ProvisionIdentity(
                     username = normalized,
-                    email = normalized,
+                    email = if (normalized.contains('@')) normalized else account.contact.takeIf { it.contains('@') },
+                    phoneNumber = if (normalized.contains('@')) null else normalized,
                     firstName = splitName(account.fullName, normalized).first,
                     lastName = splitName(account.fullName, normalized).second,
                     tenantId = (account.tenantId ?: UUID(0, 0)).toString(),
                     peakUserId = account.subjectRef,
                     realm = account.realm,
-                    emailVerified = true,
+                    emailVerified = normalized.contains('@'),
                 ),
             )
             provisioner.establishPassword(
@@ -234,7 +243,7 @@ class AccountActivationService(
 
     private fun dispatchCode(
         purpose: VerificationPurpose,
-        email: String,
+        destination: String,
         subjectRef: String?,
         tenantId: UUID?,
         fullName: String?,
@@ -243,7 +252,7 @@ class AccountActivationService(
             verification.request(
                 RequestVerificationCommand(
                     purpose = purpose,
-                    destination = email,
+                    destination = destination,
                     subjectRef = subjectRef,
                     tenantId = tenantId,
                 ),
@@ -256,6 +265,7 @@ class AccountActivationService(
             )
         }
         if (tenantId != null) {
+            val viaSms = !destination.contains('@')
             transactionTemplate.execute {
                 databaseSessionContext.bind(RequestIdentity.Public(tenantId = tenantId))
                 outbox.enqueue(
@@ -264,13 +274,22 @@ class AccountActivationService(
                         aggregateId = receipt.id,
                         tenantId = tenantId,
                         eventType = CODE_EVENT,
-                        destination = OutboxDestination.EMAIL,
-                        payload = mapOf(
-                            "email" to email,
-                            "fullName" to (fullName ?: "Peak user"),
-                            "code" to receipt.code,
-                            "expiresAt" to receipt.expiresAt.toString(),
-                        ),
+                        destination = if (viaSms) OutboxDestination.SMS else OutboxDestination.EMAIL,
+                        payload = if (viaSms) {
+                            mapOf(
+                                "phoneNumber" to destination,
+                                "fullName" to (fullName ?: "Peak user"),
+                                "code" to receipt.code,
+                                "expiresAt" to receipt.expiresAt.toString(),
+                            )
+                        } else {
+                            mapOf(
+                                "email" to destination,
+                                "fullName" to (fullName ?: "Peak user"),
+                                "code" to receipt.code,
+                                "expiresAt" to receipt.expiresAt.toString(),
+                            )
+                        },
                         priority = 4,
                     ),
                 )
@@ -278,16 +297,16 @@ class AccountActivationService(
         }
         val ttl = Duration.between(Instant.now(), receipt.expiresAt).seconds.coerceAtLeast(1).toInt()
         return CodeDispatch(
-            maskedEmail = maskEmail(email),
+            maskedEmail = maskIdentifier(destination),
             resendAvailableInSeconds = 60,
             expiresInSeconds = ttl,
             debugCode = receipt.code.takeIf { activationProperties.exposeCodeInResponse },
         )
     }
 
-    private fun confirmCode(purpose: VerificationPurpose, email: String, code: String) {
+    private fun confirmCode(purpose: VerificationPurpose, destination: String, code: String) {
         val outcome = verification.confirm(
-            ConfirmVerificationCommand(purpose = purpose, destination = email, code = code),
+            ConfirmVerificationCommand(purpose = purpose, destination = destination, code = code),
         )
         if (!outcome.verified) {
             throw AccountActivationException(
@@ -338,6 +357,7 @@ class AccountActivationService(
                     invitationId = rs.getObject("invitation_id", UUID::class.java),
                     tenantId = rs.getObject("tenant_id", UUID::class.java),
                     email = rs.getString("email"),
+                    phoneNumber = rs.getString("phone_number"),
                     fullName = rs.getString("full_name"),
                     status = rs.getString("status"),
                     expiresAt = rs.getTimestamp("expires_at").toInstant(),
@@ -354,21 +374,23 @@ class AccountActivationService(
         grantHash: String,
         invitationId: UUID?,
         tenantId: UUID?,
-        email: String,
+        email: String?,
+        phoneNumber: String?,
         realm: String,
     ) {
         transactionTemplate.execute {
             jdbcTemplate.query(
                 { connection ->
                     val statement = connection.prepareStatement(
-                        "SELECT insert_account_setup_grant(?, ?, ?, ?, ?, ?)",
+                        "SELECT insert_account_setup_grant(?, ?, ?, ?, ?, ?, ?)",
                     )
                     statement.setString(1, grantHash)
                     statement.setObject(2, invitationId)
                     statement.setObject(3, tenantId)
                     statement.setString(4, email)
-                    statement.setString(5, realm)
-                    statement.setInt(6, GRANT_TTL_SECONDS)
+                    statement.setString(5, phoneNumber)
+                    statement.setString(6, realm)
+                    statement.setInt(7, GRANT_TTL_SECONDS)
                     statement
                 },
                 { rs, _ -> rs.getObject(1, UUID::class.java) },
@@ -384,6 +406,7 @@ class AccountActivationService(
                     invitationId = rs.getObject("invitation_id", UUID::class.java),
                     tenantId = rs.getObject("tenant_id", UUID::class.java),
                     email = rs.getString("email"),
+                    phoneNumber = rs.getString("phone_number"),
                     realm = rs.getString("realm"),
                 )
             },
@@ -400,7 +423,8 @@ class AccountActivationService(
         token: String,
         issuer: String,
         subject: String,
-        email: String,
+        email: String?,
+        phoneNumber: String?,
         fullName: String?,
     ) {
         try {
@@ -424,10 +448,52 @@ class AccountActivationService(
         }
     }
 
-    private fun findRecoverableAccount(email: String): RecoverableAccount? {
+    private fun findRecoverableAccount(identifier: String): RecoverableAccount? {
+        val phone = identifier.takeIf { !it.contains('@') }
+        val email = identifier.takeIf { it.contains('@') }
+        if (phone != null) {
+            val platformUser = jdbcTemplate.query(
+                """
+                SELECT id::text AS subject, full_name, phone_number
+                FROM platform_users
+                WHERE phone_number = ? AND deleted_at IS NULL
+                LIMIT 1
+                """.trimIndent(),
+                { rs, _ ->
+                    RecoverableAccount(
+                        subjectRef = rs.getString("subject"),
+                        tenantId = null,
+                        fullName = rs.getString("full_name"),
+                        realm = PLATFORM_REALM,
+                        contact = rs.getString("phone_number"),
+                    )
+                },
+                phone,
+            ).singleOrNull()
+            if (platformUser != null) return platformUser
+            val tenantUser = jdbcTemplate.query(
+                """
+                SELECT id::text AS subject, tenant_id, full_name, phone_number
+                FROM users
+                WHERE phone_number = ? AND deleted_at IS NULL AND is_active = true
+                LIMIT 1
+                """.trimIndent(),
+                { rs, _ ->
+                    RecoverableAccount(
+                        subjectRef = rs.getString("subject"),
+                        tenantId = rs.getObject("tenant_id", UUID::class.java),
+                        fullName = rs.getString("full_name"),
+                        realm = HOSPITALITY_REALM,
+                        contact = rs.getString("phone_number"),
+                    )
+                },
+                phone,
+            ).singleOrNull()
+            return tenantUser
+        }
         val tenant = jdbcTemplate.query(
             """
-            SELECT id::text AS subject, tenant_id, full_name
+            SELECT id::text AS subject, tenant_id, full_name, email
             FROM users
             WHERE lower(email) = ? AND deleted_at IS NULL AND is_active = true
             LIMIT 1
@@ -438,6 +504,7 @@ class AccountActivationService(
                     tenantId = rs.getObject("tenant_id", UUID::class.java),
                     fullName = rs.getString("full_name"),
                     realm = HOSPITALITY_REALM,
+                    contact = rs.getString("email"),
                 )
             },
             email,
@@ -445,7 +512,7 @@ class AccountActivationService(
         if (tenant != null) return tenant
         return jdbcTemplate.query(
             """
-            SELECT id::text AS subject, full_name
+            SELECT id::text AS subject, full_name, email
             FROM platform_users
             WHERE lower(email) = ? AND deleted_at IS NULL
             LIMIT 1
@@ -456,6 +523,7 @@ class AccountActivationService(
                     tenantId = null,
                     fullName = rs.getString("full_name"),
                     realm = PLATFORM_REALM,
+                    contact = rs.getString("email"),
                 )
             },
             email,
@@ -463,13 +531,15 @@ class AccountActivationService(
     }
 
     private fun toDetails(row: InvitationRow) = InvitationDetails(
-        inviteeName = row.fullName?.trim()?.takeIf { it.isNotEmpty() } ?: row.email.substringBefore("@"),
-        maskedEmail = maskEmail(row.email),
+        inviteeName = row.fullName?.trim()?.takeIf { it.isNotEmpty() }
+            ?: row.phoneNumber ?: row.email?.substringBefore("@") ?: "Operator",
+        maskedEmail = row.email?.let { maskIdentifier(it) },
+        maskedPhone = row.phoneNumber?.let { maskIdentifier(it) },
         organisationName = row.organisationName,
         propertyName = row.propertyName,
         expiresAt = row.expiresAt,
         status = row.status.uppercase(Locale.ROOT),
-        allowedCredentials = if (row.realm == PLATFORM_REALM) listOf("passkey", "totp") else listOf("password"),
+        allowedCredentials = listOf("password"),
     )
 
     /**
@@ -479,15 +549,7 @@ class AccountActivationService(
      * refusal costs a round trip instead of a spent setup grant. It must stay in step with
      * `passwordPolicy` in ops/keycloak/peak-hospitality-realm.json.
      */
-    private fun requireCredential(password: String?, realm: String, username: String): String {
-        if (realm == PLATFORM_REALM) {
-            // The platform console enrols a device unlock, which Peak cannot register yet.
-            throw AccountActivationException(
-                "credential_setup_pending",
-                HttpStatus.UNPROCESSABLE_CONTENT,
-                "Credential setup is not available for this account yet",
-            )
-        }
+    private fun requireCredential(password: String?, username: String): String {
         val secret = password?.trim().orEmpty()
         val strong = secret.length >= MIN_PASSWORD_LENGTH &&
             secret.any { it.isDigit() } &&
@@ -545,19 +607,31 @@ class AccountActivationService(
     private data class InvitationRow(
         val invitationId: UUID,
         val tenantId: UUID,
-        val email: String,
+        val email: String?,
+        val phoneNumber: String?,
         val fullName: String?,
         val status: String,
         val expiresAt: Instant,
         val organisationName: String,
         val propertyName: String?,
         val realm: String,
-    )
+    ) {
+        /** The contact this invitation was issued to: phone first, email fallback. */
+        fun contact(): String = phoneNumber ?: requireNotNull(email) {
+            "Invitation has neither phone nor email"
+        }
+
+        /** The identity-provider username: phone when present, else the email. */
+        fun username(): String = phoneNumber ?: requireNotNull(email) {
+            "Invitation has neither phone nor email"
+        }
+    }
 
     private data class GrantRow(
         val invitationId: UUID?,
         val tenantId: UUID?,
-        val email: String,
+        val email: String?,
+        val phoneNumber: String?,
         val realm: String,
     )
 
@@ -566,6 +640,7 @@ class AccountActivationService(
         val tenantId: UUID?,
         val fullName: String?,
         val realm: String,
+        val contact: String,
     )
 
     private companion object {
@@ -575,15 +650,26 @@ class AccountActivationService(
         const val PLATFORM_REALM = "peak-platform"
         const val CODE_EVENT = "account.activation.code.issued"
 
-        fun maskEmail(email: String): String {
-            val at = email.indexOf('@')
-            if (at <= 0) return "****"
-            return email.first() + "****" + email.substring(at)
+        fun maskIdentifier(identifier: String): String {
+            if (identifier.contains('@')) {
+                val at = identifier.indexOf('@')
+                return identifier.first() + "****" + identifier.substring(at)
+            }
+            if (identifier.length >= 8) {
+                return identifier.take(4) + "****" + identifier.takeLast(4)
+            }
+            return "****"
         }
 
-        fun splitName(fullName: String?, email: String): Pair<String, String> {
+        fun normalize(identifier: String): String =
+            identifier.trim().let {
+                if (it.contains('@')) it.lowercase(Locale.ROOT) else it
+            }
+
+        fun splitName(fullName: String?, identifier: String): Pair<String, String> {
             val parts = fullName?.trim()?.split(Regex("\\s+")).orEmpty().filter { it.isNotBlank() }
-            val first = parts.firstOrNull() ?: email.substringBefore("@")
+            val first = parts.firstOrNull()
+                ?: identifier.substringBefore('@').takeIf { it.isNotBlank() } ?: "Operator"
             val last = parts.drop(1).joinToString(" ").ifBlank { "User" }
             return first to last
         }

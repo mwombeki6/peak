@@ -4,7 +4,8 @@ import java.time.Instant
 
 data class InvitationDetails(
     val inviteeName: String,
-    val maskedEmail: String,
+    val maskedEmail: String?,
+    val maskedPhone: String? = null,
     val organisationName: String,
     val propertyName: String?,
     val expiresAt: Instant,
@@ -13,7 +14,7 @@ data class InvitationDetails(
 )
 
 data class CodeDispatch(
-    val maskedEmail: String,
+    val maskedEmail: String?,
     val resendAvailableInSeconds: Int,
     val expiresInSeconds: Int,
     val debugCode: String? = null,

@@ -338,7 +338,7 @@ class PlatformAdministrationController(
     ) = ResponseEntity.status(HttpStatus.CREATED).body(
         platformAdministrationPort.inviteTenantAdministrator(
             InviteTenantAdministratorCommand(
-                tenantId, request.fullName, request.email, request.expiresInHours,
+                tenantId, request.fullName, request.email, request.phoneNumber, request.expiresInHours,
             ),
         ),
     )
@@ -577,7 +577,8 @@ data class ProvisionTenantAdministratorHttpRequest(
 
 data class InviteTenantAdministratorHttpRequest(
     @field:NotBlank val fullName: String,
-    @field:NotBlank @field:Email val email: String,
+    @field:Email val email: String? = null,
+    @field:NotBlank val phoneNumber: String? = null,
     @field:Min(1) @field:Max(168) val expiresInHours: Long = 72,
 )
 

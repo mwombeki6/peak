@@ -83,6 +83,7 @@ class TenantUserInvitationService(
                 requestPayload = mapOf(
                     "tenantId" to command.tenantId,
                     "email" to command.email,
+                    "phoneNumber" to command.phoneNumber,
                     "tenantRoleId" to command.tenantRoleId,
                     "fullName" to command.fullName,
                     "expiresInSeconds" to command.expiresInSeconds,
@@ -111,7 +112,7 @@ class TenantUserInvitationService(
     ): TenantUserInvitationReceipt {
         requireActiveTenantRole(command.tenantId, command.tenantRoleId)
         requireDelegableTenantInvitationRole(command.tenantId, command.tenantRoleId, actor)
-        requireNoExistingUserWithEmail(command.tenantId, command.email)
+        requireNoExistingUserWithContact(command.tenantId, command.email, command.phoneNumber)
         jdbcTemplate.queryForList(
             "SELECT assert_tenant_capacity(?, 'limit.users')",
             command.tenantId,
@@ -129,6 +130,7 @@ class TenantUserInvitationService(
                     id,
                     tenant_id,
                     email,
+                    phone_number,
                     full_name,
                     tenant_role_id,
                     token_hash,
@@ -137,11 +139,12 @@ class TenantUserInvitationService(
                     expires_at,
                     metadata
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
                 """.trimIndent(),
                 invitationId,
                 command.tenantId,
                 command.email,
+                command.phoneNumber,
                 command.fullName,
                 command.tenantRoleId,
                 tokenHash,
@@ -152,7 +155,7 @@ class TenantUserInvitationService(
             )
         } catch (ex: DuplicateKeyException) {
             throw TenantUserInvitationConflictException(
-                "A pending invitation already exists for this tenant user email",
+                "A pending invitation already exists for this tenant user contact",
             )
         }
 
@@ -160,6 +163,7 @@ class TenantUserInvitationService(
             invitationId = invitationId,
             tenantId = command.tenantId,
             email = command.email,
+            phoneNumber = command.phoneNumber,
             tenantRoleId = command.tenantRoleId,
             expiresAt = expiresAt,
         )
@@ -171,30 +175,46 @@ class TenantUserInvitationService(
                 resource = AuditResource("tenant_user_invitations", invitationId),
                 after = mapOf(
                     "email" to command.email,
+                    "phoneNumber" to command.phoneNumber,
                     "tenantRoleId" to command.tenantRoleId,
                     "expiresAt" to expiresAt.toString(),
                 ),
             ),
         )
 
+        val viaSms = command.phoneNumber != null
         outboxPort.enqueue(
             OutboxEventCommand(
                 aggregateType = "tenant_user_invitations",
                 aggregateId = invitationId,
                 tenantId = command.tenantId,
                 eventType = "tenant.user.invited",
-                destination = OutboxDestination.EMAIL,
-                payload = mapOf(
-                    "invitationId" to invitationId,
-                    "tenantId" to command.tenantId,
-                    "email" to command.email,
-                    "fullName" to command.fullName,
-                    "expiresAt" to expiresAt.toString(),
-                    "tokenEnvelope" to secretEnvelopeService.encrypt(
-                        plaintext = token,
-                        associatedData = invitationId.toString(),
-                    ),
-                ),
+                destination = if (viaSms) OutboxDestination.SMS else OutboxDestination.EMAIL,
+                payload = if (viaSms) {
+                    mapOf(
+                        "invitationId" to invitationId,
+                        "tenantId" to command.tenantId,
+                        "phoneNumber" to command.phoneNumber,
+                        "fullName" to command.fullName,
+                        "expiresAt" to expiresAt.toString(),
+                        "tokenEnvelope" to secretEnvelopeService.encrypt(
+                            plaintext = token,
+                            associatedData = invitationId.toString(),
+                        ),
+                    )
+                } else {
+                    mapOf(
+                        "invitationId" to invitationId,
+                        "tenantId" to command.tenantId,
+                        "email" to command.email,
+                        "fullName" to command.fullName,
+                        "expiresAt" to expiresAt.toString(),
+                        "tokenEnvelope" to secretEnvelopeService.encrypt(
+                            plaintext = token,
+                            associatedData = invitationId.toString(),
+                        ),
+                    )
+                },
                 idempotencyKeyId = idempotencyKeyId,
                 priority = 4,
             ),
@@ -483,9 +503,10 @@ class TenantUserInvitationService(
         }
     }
 
-    private fun requireNoExistingUserWithEmail(
+    private fun requireNoExistingUserWithContact(
         tenantId: UUID,
-        email: String,
+        email: String?,
+        phoneNumber: String?,
     ) {
         val exists = jdbcTemplate.queryForObject(
             """
@@ -493,29 +514,47 @@ class TenantUserInvitationService(
                 SELECT 1
                 FROM users
                 WHERE tenant_id = ?
-                  AND lower(email) = ?
                   AND deleted_at IS NULL
+                  AND (
+                      (email IS NOT NULL AND ? IS NOT NULL AND lower(email) = ?)
+                      OR (phone_number IS NOT NULL AND ? IS NOT NULL AND phone_number = ?)
+                  )
             )
             """.trimIndent(),
             Boolean::class.java,
             tenantId,
             email,
+            email,
+            phoneNumber,
+            phoneNumber,
         ) == true
 
         require(!exists) {
-            "A tenant user already exists for this email"
+            "A tenant user already exists for this email or phone"
         }
     }
 
     private fun InviteTenantUserCommand.normalized(): NormalizedInviteCommand {
-        val email = email.trim().lowercase(Locale.ROOT)
-        require(EMAIL_PATTERN.matches(email)) {
-            "Invitation email is invalid"
+        val email = email?.trim()?.lowercase(Locale.ROOT)?.takeIf { it.isNotBlank() }
+        if (email != null) {
+            require(EMAIL_PATTERN.matches(email)) {
+                "Invitation email is invalid"
+            }
+        }
+        val phoneNumber = phoneNumber?.trim()?.takeIf { it.isNotBlank() }
+        if (phoneNumber != null) {
+            require(PHONE_PATTERN.matches(phoneNumber)) {
+                "Invitation phone must be a valid E.164 number"
+            }
+        }
+        require(email != null || phoneNumber != null) {
+            "An invitation needs a phone number or an email"
         }
 
         return NormalizedInviteCommand(
             tenantId = tenantId,
             email = email,
+            phoneNumber = phoneNumber,
             tenantRoleId = tenantRoleId,
             fullName = fullName?.trim()?.takeIf { it.isNotBlank() },
             expiresInSeconds = expiresIn.toSeconds(),
@@ -554,6 +593,7 @@ class TenantUserInvitationService(
             invitationId = invitationId,
             tenantId = tenantId,
             email = email,
+            phoneNumber = phoneNumber,
             tenantRoleId = tenantRoleId,
             expiresAt = expiresAt,
             invitationToken = invitationToken,
@@ -592,7 +632,8 @@ class TenantUserInvitationService(
 
     private data class NormalizedInviteCommand(
         val tenantId: UUID,
-        val email: String,
+        val email: String?,
+        val phoneNumber: String? = null,
         val tenantRoleId: UUID,
         val fullName: String?,
         val expiresInSeconds: Long,
@@ -615,7 +656,8 @@ class TenantUserInvitationService(
     private data class InvitationSnapshot(
         val invitationId: UUID,
         val tenantId: UUID,
-        val email: String,
+        val email: String?,
+        val phoneNumber: String? = null,
         val tenantRoleId: UUID,
         val expiresAt: Instant,
     )
@@ -633,5 +675,6 @@ class TenantUserInvitationService(
         private const val TENANT_ADMIN_ALL_PERMISSION = "tenant.admin.all"
         private const val TENANT_USER_MANAGE_PERMISSION = "tenant.users.manage"
         val EMAIL_PATTERN = Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")
+        val PHONE_PATTERN = Regex("^\\+[1-9][0-9]{7,14}$")
     }
 }

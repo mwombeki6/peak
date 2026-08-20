@@ -52,6 +52,7 @@ class TenantUserInvitationController(
             InviteTenantUserCommand(
                 tenantId = tenantId,
                 email = request.email,
+                phoneNumber = request.phoneNumber,
                 tenantRoleId = request.tenantRoleId,
                 fullName = request.fullName,
                 expiresIn = Duration.ofHours(request.expiresInHours ?: DEFAULT_EXPIRY_HOURS),
@@ -130,6 +131,7 @@ class TenantUserInvitationController(
             invitationId = invitationId,
             tenantId = tenantId,
             email = email,
+            phoneNumber = phoneNumber,
             tenantRoleId = tenantRoleId,
             expiresAt = expiresAt,
             invitationToken = invitationToken,
@@ -224,9 +226,10 @@ class TenantUserInvitationExceptionAdvice(
 }
 
 data class InviteTenantUserHttpRequest(
-    @field:NotBlank
     @field:Email
-    val email: String,
+    val email: String? = null,
+    @field:NotBlank
+    val phoneNumber: String? = null,
     @field:NotNull
     val tenantRoleId: UUID,
     val fullName: String? = null,
@@ -238,7 +241,8 @@ data class InviteTenantUserHttpRequest(
 data class TenantUserInvitationHttpResponse(
     val invitationId: UUID,
     val tenantId: UUID,
-    val email: String,
+    val email: String?,
+    val phoneNumber: String? = null,
     val tenantRoleId: UUID,
     val expiresAt: Instant,
     val invitationToken: String?,

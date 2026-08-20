@@ -6,15 +6,16 @@ import java.util.UUID
 
 data class InviteTenantUserCommand(
     val tenantId: UUID,
-    val email: String,
+    val email: String? = null,
+    val phoneNumber: String? = null,
     val tenantRoleId: UUID,
     val fullName: String? = null,
     val expiresIn: Duration = Duration.ofHours(72),
     val metadata: Map<String, Any?> = emptyMap(),
 ) {
     init {
-        require(email.isNotBlank()) {
-            "Invitation email is required"
+        require(email != null || phoneNumber != null) {
+            "An invitation needs a phone number or an email"
         }
         require(expiresIn.toSeconds() > 0) {
             "Invitation expiry must be positive"
@@ -25,7 +26,8 @@ data class InviteTenantUserCommand(
 data class TenantUserInvitationReceipt(
     val invitationId: UUID,
     val tenantId: UUID,
-    val email: String,
+    val email: String?,
+    val phoneNumber: String? = null,
     val tenantRoleId: UUID,
     val expiresAt: Instant,
     val invitationToken: String?,

@@ -1230,7 +1230,11 @@ class PlatformAdministrationService(
                 "platform.tenants.manage",
                 "Tenant administrator invitation requires tenant management permission",
             )
-            val email = command.email.normalizedEmail()
+            val email = command.email?.normalizedEmail()
+            val phoneNumber = command.phoneNumber?.normalizedPhone()
+            require(email != null || phoneNumber != null) {
+                "An administrator invitation needs a phone number or an email"
+            }
             val fullName = command.fullName.normalizedRequired("fullName")
             require(command.expiresInHours in 1..168) {
                 "Tenant administrator invitation expiry must be between 1 and 168 hours"
@@ -1252,15 +1256,23 @@ class PlatformAdministrationService(
                 """
                 SELECT EXISTS (
                     SELECT 1 FROM users
-                    WHERE tenant_id = ? AND lower(email) = ? AND deleted_at IS NULL
+                    WHERE tenant_id = ?
+                      AND deleted_at IS NULL
+                      AND (
+                          (email IS NOT NULL AND ? IS NOT NULL AND lower(email) = ?)
+                          OR (phone_number IS NOT NULL AND ? IS NOT NULL AND phone_number = ?)
+                      )
                 )
                 """.trimIndent(),
                 Boolean::class.java,
                 command.tenantId,
                 email,
+                email,
+                phoneNumber,
+                phoneNumber,
             ) == true
             if (existingUser) throw PlatformAdministrationConflictException(
-                "A tenant user already exists for this email",
+                "A tenant user already exists for this email or phone",
             )
             val tenantRoleId = requireNotNull(
                 jdbcTemplate.queryForObject(
@@ -1282,17 +1294,17 @@ class PlatformAdministrationService(
                 jdbcTemplate.update(
                     """
                     INSERT INTO tenant_user_invitations (
-                        id, tenant_id, email, full_name, tenant_role_id, token_hash,
+                        id, tenant_id, email, phone_number, full_name, tenant_role_id, token_hash,
                         invited_by_platform_user_id, expires_at, metadata
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, jsonb_build_object('source', 'platform_onboarding'))
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, jsonb_build_object('source', 'platform_onboarding'))
                     """.trimIndent(),
-                    invitationId, command.tenantId, email, fullName, tenantRoleId,
+                    invitationId, command.tenantId, email, phoneNumber, fullName, tenantRoleId,
                     InvitationTokens.hash(token), currentPlatformActorId(),
                     Timestamp.from(expiresAt),
                 )
             } catch (ex: DuplicateKeyException) {
                 throw PlatformAdministrationConflictException(
-                    "A pending administrator invitation already exists for this email",
+                    "A pending administrator invitation already exists for this email or phone",
                 )
             }
             recordPlatformSideEffects(
@@ -1306,30 +1318,45 @@ class PlatformAdministrationService(
                 ),
                 idempotencyKeyId = reservationId,
             )
+            val viaSms = phoneNumber != null
             outboxPort.enqueue(
                 OutboxEventCommand(
                     aggregateType = "tenant_user_invitations",
                     aggregateId = invitationId,
                     tenantId = command.tenantId,
                     eventType = "tenant.administrator.invited",
-                    destination = OutboxDestination.EMAIL,
-                    payload = mapOf(
-                        "invitationId" to invitationId,
-                        "tenantId" to command.tenantId,
-                        "email" to email,
-                        "fullName" to fullName,
-                        "expiresAt" to expiresAt,
-                        "tokenEnvelope" to secretEnvelopeService.encrypt(
-                            plaintext = token,
-                            associatedData = invitationId.toString(),
-                        ),
-                    ),
+                    destination = if (viaSms) OutboxDestination.SMS else OutboxDestination.EMAIL,
+                    payload = if (viaSms) {
+                        mapOf(
+                            "invitationId" to invitationId,
+                            "tenantId" to command.tenantId,
+                            "phoneNumber" to phoneNumber,
+                            "fullName" to fullName,
+                            "expiresAt" to expiresAt,
+                            "tokenEnvelope" to secretEnvelopeService.encrypt(
+                                plaintext = token,
+                                associatedData = invitationId.toString(),
+                            ),
+                        )
+                    } else {
+                        mapOf(
+                            "invitationId" to invitationId,
+                            "tenantId" to command.tenantId,
+                            "email" to email,
+                            "fullName" to fullName,
+                            "expiresAt" to expiresAt,
+                            "tokenEnvelope" to secretEnvelopeService.encrypt(
+                                plaintext = token,
+                                associatedData = invitationId.toString(),
+                            ),
+                        )
+                    },
                     idempotencyKeyId = null,
                     priority = 5,
                 ),
             )
             TenantUserInvitationReceipt(
-                invitationId, command.tenantId, email, tenantRoleId, expiresAt,
+                invitationId, command.tenantId, email, phoneNumber, tenantRoleId, expiresAt,
                 token.takeIf { invitationSecurityProperties.exposeTokenInResponse },
                 replayed = false,
             )
@@ -2030,6 +2057,14 @@ class PlatformAdministrationService(
         val value = normalizedRequired("email").lowercase()
         require(value.contains("@")) {
             "email must be valid"
+        }
+        return value
+    }
+
+    private fun String.normalizedPhone(): String {
+        val value = normalizedRequired("phoneNumber")
+        require(value.matches(Regex("^\\+[1-9][0-9]{7,14}$"))) {
+            "phoneNumber must be a valid E.164 number"
         }
         return value
     }

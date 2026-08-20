@@ -416,7 +416,7 @@ class TenantUserInvitationServiceIntegrationTests {
                 invitationToken = requireNotNull(invitation.invitationToken),
                 issuer = "https://issuer.example.com/realms/peak",
                 subject = "oidc-subject-${fixture.tenantId}",
-                email = invitation.email.uppercase(),
+                email = requireNotNull(invitation.email).uppercase(),
                 fullName = "Accepted User",
             ),
         )
