@@ -2201,7 +2201,8 @@ export interface components {
         InviteTenantAdministratorHttpRequest: {
             fullName: string;
             /** Format: email */
-            email: string;
+            email?: string | null;
+            phoneNumber: string | null;
             /** Format: int64 */
             expiresInHours?: number;
         };
@@ -2210,7 +2211,8 @@ export interface components {
             invitationId?: string;
             /** Format: uuid */
             tenantId?: string;
-            email?: string;
+            email?: string | null;
+            phoneNumber?: string | null;
             /** Format: uuid */
             tenantRoleId?: string;
             /** Format: date-time */
