@@ -115,7 +115,22 @@ class PosOperationalTillHttpIntegrationTests {
             .andExpect(status().isForbidden)
     }
 
-    private fun seedOperationalTill(): Till {
+    @Test
+    fun anUnverifiedBusinessCannotUsePosEvenWithAPairedTill() {
+        val till = seedOperationalTill(verified = false)
+
+        mockMvc.perform(
+            get("/api/v1/properties/${till.propertyId}/pos/room-charge-candidates")
+                .secure(true)
+                .queryParam("query", "204")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer ${till.token}")
+                .header(PeakRequestHeaders.CORRELATION_ID, "corr-unverified-${till.tenantId}"),
+        )
+            .andExpect(status().isForbidden)
+            .andExpect(jsonPath("$.errorCode").value("POS_TENANT_NOT_VERIFIED"))
+    }
+
+    private fun seedOperationalTill(verified: Boolean = true): Till {
         val planId = UUID.randomUUID()
         val tenantId = UUID.randomUUID()
         val propertyId = UUID.randomUUID()
@@ -139,6 +154,9 @@ class PosOperationalTillHttpIntegrationTests {
             tenantId, "Tenant $tenantId", "tenant-$tenantId",
             "tenant_$tenantId".replace("-", "_"), planId,
         )
+        if (verified) {
+            verifyTenantBusiness(tenantId)
+        }
         jdbcTemplate.update(
             """
             INSERT INTO users (id, tenant_id, full_name, email, status, is_active)
@@ -146,17 +164,12 @@ class PosOperationalTillHttpIntegrationTests {
             """.trimIndent(),
             managerId, tenantId, "mgr-$managerId@example.com",
         )
-        val staffNumber = requireNotNull(
-            jdbcTemplate.queryForObject(
-                "SELECT allocate_staff_number(?)", String::class.java, tenantId,
-            ),
-        )
         jdbcTemplate.update(
             """
-            INSERT INTO users (id, tenant_id, full_name, staff_number, status, is_active)
-            VALUES (?, ?, 'Amina Hassan', ?, 'active', true)
+            INSERT INTO users (id, tenant_id, full_name, status, is_active)
+            VALUES (?, ?, 'Amina Hassan', 'active', true)
             """.trimIndent(),
-            staffUserId, tenantId, staffNumber,
+            staffUserId, tenantId,
         )
         jdbcTemplate.update(
             """
@@ -164,6 +177,13 @@ class PosOperationalTillHttpIntegrationTests {
             VALUES (?, ?, ?, ?, 'active', true)
             """.trimIndent(),
             propertyId, tenantId, "Property $propertyId", "P${propertyId.toString().take(8)}",
+        )
+        val staffNumber = requireNotNull(
+            jdbcTemplate.queryForObject(
+                "SELECT allocate_property_staff_number(?, ?, ?)",
+                String::class.java,
+                tenantId, propertyId, staffUserId,
+            ),
         )
 
         listOf("pos", "property", "reservations", "tenant_admin").forEach { moduleId ->
@@ -310,7 +330,7 @@ class PosOperationalTillHttpIntegrationTests {
                 deviceCode = paired.deviceCode,
                 challengeId = challenge.challengeId,
                 signature = sign(keys, challenge.nonce),
-                staffNumber = staffNumber,
+                staffNumber = staffNumber.substringAfterLast('-'),
                 pin = pin,
             ),
         )
@@ -321,6 +341,27 @@ class PosOperationalTillHttpIntegrationTests {
             stayId = stayId,
             roomId = roomId,
             token = session.token,
+        )
+    }
+
+    private fun verifyTenantBusiness(tenantId: UUID) {
+        val platformUserId = UUID.randomUUID()
+        jdbcTemplate.update(
+            "INSERT INTO platform_users (id, full_name, email) VALUES (?, 'Test Verifier', ?)",
+            platformUserId,
+            "verifier-$platformUserId@example.test",
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO tenant_profiles (
+                tenant_id, legal_name, entity_type, business_phone, business_email,
+                verification_status, verified_at, verified_by_platform_user_id
+            ) VALUES (?, 'POS Test Business', 'limited_company', '+255700000000', ?,
+                      'verified', now(), ?)
+            """.trimIndent(),
+            tenantId,
+            "business-$tenantId@example.test",
+            platformUserId,
         )
     }
 

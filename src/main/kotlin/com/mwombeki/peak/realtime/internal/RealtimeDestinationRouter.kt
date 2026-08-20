@@ -28,7 +28,9 @@ class RealtimeDestinationRouter {
                 }
                 event.aggregateId?.let { destinations += order(it) }
             }
-            RealtimeEventTypes.AGGREGATE_KITCHEN_TICKET -> {
+            RealtimeEventTypes.AGGREGATE_KITCHEN_TICKET,
+            RealtimeEventTypes.AGGREGATE_PRINT_JOB,
+            -> {
                 if (outletId != null) {
                     destinations += outletKitchen(outletId)
                 }

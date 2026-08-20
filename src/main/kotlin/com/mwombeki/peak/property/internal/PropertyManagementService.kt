@@ -4,6 +4,7 @@ import com.mwombeki.peak.audit.api.AuditOutcome
 import com.mwombeki.peak.audit.api.AuditPort
 import com.mwombeki.peak.audit.api.AuditResource
 import com.mwombeki.peak.audit.api.TenantAuditEvent
+import com.mwombeki.peak.property.api.BaseRateResponse
 import com.mwombeki.peak.property.api.BuildingResponse
 import com.mwombeki.peak.property.api.CreateBuildingRequest
 import com.mwombeki.peak.property.api.CreateDepartmentRequest
@@ -53,6 +54,8 @@ import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.shared.util.HumanIdentifierGenerator
+import com.mwombeki.peak.shared.util.violatesConstraint
 import com.mwombeki.peak.tenantmanagement.api.ConfigureTenantModuleCommand
 import com.mwombeki.peak.tenantmanagement.api.TenantModuleConfigurationPort
 import com.mwombeki.peak.usermanagement.api.EnsurePropertyAdministratorCommand
@@ -84,6 +87,8 @@ class PropertyManagementService(
     private val tenantModuleConfigurationPort: TenantModuleConfigurationPort,
     private val goLiveEvaluator: PropertyGoLiveEvaluator,
 ) : PropertyPort, PropertyOperationsPort {
+
+    private val propertyNumberGenerator = HumanIdentifierGenerator()
 
     override fun requireAssignableRoom(
         tenantId: UUID,
@@ -383,12 +388,13 @@ class PropertyManagementService(
             resourceType = "properties",
             replayType = PropertyMutationReceipt::class.java,
         ) { identity, reservationId ->
-            val propertyId = insertDraftProperty(identity, request, reservationId)
+            val draft = insertDraftProperty(identity, request, reservationId)
             PropertyMutationReceipt(
-                propertyId = propertyId,
+                propertyId = draft.propertyId,
                 status = PROPERTY_STATUS_DRAFT,
                 changed = true,
                 replayed = false,
+                propertyNumber = draft.propertyNumber,
             )
         }
     }
@@ -400,7 +406,7 @@ class PropertyManagementService(
             resourceType = "properties",
             replayType = PropertyBootstrapResponse::class.java,
         ) { identity, reservationId ->
-            val propertyId = insertDraftProperty(identity, request, reservationId)
+            val propertyId = insertDraftProperty(identity, request, reservationId).propertyId
             goLiveEvaluator.evaluateAndPersist(identity.tenantId, propertyId)
                 .toBootstrapResponse(
                     status = PROPERTY_STATUS_DRAFT,
@@ -1565,6 +1571,27 @@ class PropertyManagementService(
         }
     }
 
+    /**
+     * A room type that has never had a rate set reads back at its `base_price` of 0, and is
+     * listed rather than filtered out. The onboarding wizard's question is "which room types
+     * still need a price", so the unpriced ones are the rows it most needs to see.
+     */
+    override fun listRoomTypeBaseRates(propertyId: UUID): List<BaseRateResponse> {
+        return readProperty(propertyId) { identity ->
+            jdbcTemplate.query(
+                """
+                SELECT id, property_id, name, code, base_price, max_occupancy, is_active
+                FROM room_types
+                WHERE tenant_id = ? AND property_id = ? AND deleted_at IS NULL
+                ORDER BY name, id
+                """.trimIndent(),
+                ::mapBaseRate,
+                identity.tenantId,
+                propertyId,
+            )
+        }
+    }
+
     override fun createTaxRate(request: CreateTaxRateRequest): PropertyChildMutationReceipt {
         return mutate(
             operationType = "property.tax_rate.create",
@@ -2170,37 +2197,49 @@ class PropertyManagementService(
         }
     }
 
+    private data class DraftProperty(val propertyId: UUID, val propertyNumber: String)
+
     private fun insertDraftProperty(
         identity: TenantIdentity,
         request: CreatePropertyRequest,
         reservationId: UUID,
-    ): UUID {
+    ): DraftProperty {
         requireTenantCapacity(identity.tenantId, "limit.properties")
         val propertyId = UUID.randomUUID()
-        try {
-            jdbcTemplate.update(
-                """
-                INSERT INTO properties (
-                    id, tenant_id, name, location, code, type, status,
-                    is_active, timezone, business_date_offset, business_date
+        var propertyNumber = propertyNumberGenerator.generate("PR")
+        var propertyNumberAttempts = 0
+        while (true) {
+            try {
+                jdbcTemplate.update(
+                    """
+                    INSERT INTO properties (
+                        id, tenant_id, name, location, code, type, status,
+                        is_active, timezone, business_date_offset, business_date, property_number
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, false, ?, ?,
+                            ((now() AT TIME ZONE ?)::date + ?), ?)
+                    """.trimIndent(),
+                    propertyId,
+                    identity.tenantId,
+                    request.name.normalizedRequired("name"),
+                    request.location?.trimmedOrNull(),
+                    request.code?.normalizedCode(),
+                    request.type.normalizedRequired("type").uppercase(),
+                    PROPERTY_STATUS_DRAFT,
+                    request.timezone.validatedTimezone(),
+                    request.businessDateOffset.validatedBusinessDateOffset(),
+                    request.timezone.validatedTimezone(),
+                    request.businessDateOffset.validatedBusinessDateOffset(),
+                    propertyNumber,
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, false, ?, ?,
-                        ((now() AT TIME ZONE ?)::date + ?))
-                """.trimIndent(),
-                propertyId,
-                identity.tenantId,
-                request.name.normalizedRequired("name"),
-                request.location?.trimmedOrNull(),
-                request.code?.normalizedCode(),
-                request.type.normalizedRequired("type").uppercase(),
-                PROPERTY_STATUS_DRAFT,
-                request.timezone.validatedTimezone(),
-                request.businessDateOffset.validatedBusinessDateOffset(),
-                request.timezone.validatedTimezone(),
-                request.businessDateOffset.validatedBusinessDateOffset(),
-            )
-        } catch (ex: DuplicateKeyException) {
-            throw PropertyManagementConflictException("Property code is already in use")
+                break
+            } catch (ex: DuplicateKeyException) {
+                if (ex.violatesConstraint("uq_properties_property_number") && ++propertyNumberAttempts < 5) {
+                    propertyNumber = propertyNumberGenerator.generate("PR")
+                    continue
+                }
+                throw PropertyManagementConflictException("Property code is already in use")
+            }
         }
 
         tenantModuleConfigurationPort.enableConfiguredModule(
@@ -2234,7 +2273,7 @@ class PropertyManagementService(
             ),
             idempotencyKeyId = reservationId,
         )
-        return propertyId
+        return DraftProperty(propertyId, propertyNumber)
     }
 
     private fun upsertPropertyModule(
@@ -2578,6 +2617,18 @@ class PropertyManagementService(
             basePrice = rs.getDouble("base_price"),
             maxAdults = rs.getInt("max_adults"),
             maxChildren = rs.getInt("max_children"),
+            maxOccupancy = rs.getInt("max_occupancy"),
+            isActive = rs.getBoolean("is_active"),
+        )
+    }
+
+    private fun mapBaseRate(rs: ResultSet, @Suppress("UNUSED_PARAMETER") row: Int): BaseRateResponse {
+        return BaseRateResponse(
+            roomTypeId = rs.getObject("id", UUID::class.java),
+            propertyId = rs.getObject("property_id", UUID::class.java),
+            roomTypeName = rs.getString("name"),
+            roomTypeCode = rs.getString("code"),
+            basePrice = rs.getDouble("base_price"),
             maxOccupancy = rs.getInt("max_occupancy"),
             isActive = rs.getBoolean("is_active"),
         )

@@ -58,6 +58,11 @@ dependencies {
     runtimeOnly("org.postgresql:postgresql")
     runtimeOnly("io.micrometer:micrometer-registry-prometheus")
 
+    // Shared ephemeral store. Valkey speaks the Redis protocol, so this is its
+    // client; it holds rate-limit counters, cooldowns and short-lived caches, and
+    // nothing that survives losing the instance.
+    implementation("org.springframework.boot:spring-boot-starter-data-redis")
+
     // Web and API
     implementation("org.springframework.boot:spring-boot-starter-webmvc")
     implementation("org.springframework.boot:spring-boot-starter-websocket")
@@ -106,6 +111,9 @@ dependencies {
     // Spring Boot tests
     testImplementation(
         "org.springframework.boot:spring-boot-starter-actuator-test"
+    )
+    testImplementation(
+        "org.springframework.boot:spring-boot-starter-data-redis-test"
     )
     testImplementation(
         "org.springframework.boot:spring-boot-starter-flyway-test"
@@ -159,6 +167,9 @@ dependencies {
     )
     testImplementation(
         "org.testcontainers:testcontainers-grafana"
+    )
+    testImplementation(
+        "org.testcontainers:testcontainers-minio"
     )
 
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

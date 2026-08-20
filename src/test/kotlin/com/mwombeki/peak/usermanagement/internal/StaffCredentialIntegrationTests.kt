@@ -53,9 +53,9 @@ class StaffCredentialIntegrationTests {
 
         assertEquals(
             staff.userId,
-            credentials.verify(staff.tenantId, staff.staffNumber, "418205"),
+            credentials.verify(staff.tenantId, staff.propertyId, staff.localSuffix, "418205"),
         )
-        assertNull(credentials.verify(staff.tenantId, staff.staffNumber, "000000"))
+        assertNull(credentials.verify(staff.tenantId, staff.propertyId, staff.localSuffix, "000000"))
     }
 
     /**
@@ -93,7 +93,7 @@ class StaffCredentialIntegrationTests {
         }
         assertEquals(
             staff.userId,
-            credentials.verify(staff.tenantId, staff.staffNumber, "418205"),
+            credentials.verify(staff.tenantId, staff.propertyId, staff.localSuffix, "418205"),
             "the original PIN must survive a failed second activation",
         )
     }
@@ -148,10 +148,10 @@ class StaffCredentialIntegrationTests {
     fun repeatedWrongPinsLockTheAccount() {
         val staff = activatedStaff(pin = "418205")
 
-        repeat(5) { credentials.verify(staff.tenantId, staff.staffNumber, "000000") }
+        repeat(5) { credentials.verify(staff.tenantId, staff.propertyId, staff.localSuffix, "000000") }
 
         assertNull(
-            credentials.verify(staff.tenantId, staff.staffNumber, "418205"),
+            credentials.verify(staff.tenantId, staff.propertyId, staff.localSuffix, "418205"),
             "the correct PIN must not work while the account is locked",
         )
     }
@@ -161,12 +161,12 @@ class StaffCredentialIntegrationTests {
     fun asuccessfulEntryForgivesEarlierMistakes() {
         val staff = activatedStaff(pin = "418205")
 
-        repeat(4) { credentials.verify(staff.tenantId, staff.staffNumber, "000000") }
-        assertNotNull(credentials.verify(staff.tenantId, staff.staffNumber, "418205"))
-        repeat(4) { credentials.verify(staff.tenantId, staff.staffNumber, "000000") }
+        repeat(4) { credentials.verify(staff.tenantId, staff.propertyId, staff.localSuffix, "000000") }
+        assertNotNull(credentials.verify(staff.tenantId, staff.propertyId, staff.localSuffix, "418205"))
+        repeat(4) { credentials.verify(staff.tenantId, staff.propertyId, staff.localSuffix, "000000") }
 
         assertNotNull(
-            credentials.verify(staff.tenantId, staff.staffNumber, "418205"),
+            credentials.verify(staff.tenantId, staff.propertyId, staff.localSuffix, "418205"),
             "four mistakes, a success, then four more must not equal eight",
         )
     }
@@ -179,47 +179,47 @@ class StaffCredentialIntegrationTests {
         val fresh = credentials.issueActivation(staff.tenantId, staff.userId, staff.managerId)
 
         assertNull(
-            credentials.verify(staff.tenantId, staff.staffNumber, "418205"),
+            credentials.verify(staff.tenantId, staff.propertyId, staff.localSuffix, "418205"),
             "issuing a new activation secret must invalidate the old PIN at once",
         )
         credentials.activate(staff.tenantId, staff.staffNumber, fresh.plaintext, "770311")
         assertEquals(
             staff.userId,
-            credentials.verify(staff.tenantId, staff.staffNumber, "770311"),
+            credentials.verify(staff.tenantId, staff.propertyId, staff.localSuffix, "770311"),
         )
     }
 
     /**
-     * Staff numbers restart per tenant, so two hotels both have an 0001. The same number and
-     * the same PIN in two tenants must resolve to two different people — that is the whole
-     * reason the lookup is tenant-scoped rather than global.
+     * Local sequences restart per property, so two hotels both have an 00001. The same local
+     * suffix and the same PIN at two properties must resolve to two different people — that is
+     * the whole reason the lookup is scoped by property rather than global.
      */
     @Test
-    fun theSameNumberAndPinInTwoTenantsAreTwoDifferentPeople() {
+    fun theSameLocalSuffixAndPinAtTwoPropertiesAreTwoDifferentPeople() {
         val ours = activatedStaff(pin = "418205")
         val theirs = activatedStaff(pin = "418205")
 
-        assertEquals(ours.staffNumber, theirs.staffNumber, "both tenants should start at 0001")
-        assertEquals(ours.userId, credentials.verify(ours.tenantId, "0001", "418205"))
-        assertEquals(theirs.userId, credentials.verify(theirs.tenantId, "0001", "418205"))
+        assertEquals(ours.localSuffix, theirs.localSuffix, "both properties should start at 00001")
+        assertEquals(ours.userId, credentials.verify(ours.tenantId, ours.propertyId, "00001", "418205"))
+        assertEquals(theirs.userId, credentials.verify(theirs.tenantId, theirs.propertyId, "00001", "418205"))
         assertNotEquals(ours.userId, theirs.userId)
     }
 
-    /** A number that exists only in another tenant must not resolve here at all. */
+    /** A number that exists only at another property must not resolve here at all. */
     @Test
-    fun aStaffNumberThatExistsOnlyElsewhereIsNotFound() {
+    fun aStaffNumberThatExistsOnlyAtAnotherPropertyIsNotFound() {
         val ours = activatedStaff(pin = "418205")
         val theirs = activatedStaff(pin = "770311")
-        val theirSecond = seedStaffIn(theirs.tenantId)
+        val theirSecond = hireAt(theirs.tenantId, theirs.propertyId)
         val secret = credentials.issueActivation(
             theirs.tenantId, theirSecond.userId, theirSecond.managerId,
         )
         credentials.activate(theirs.tenantId, theirSecond.staffNumber, secret.plaintext, "550194")
 
-        assertEquals("0002", theirSecond.staffNumber, "the second staff member in that tenant")
+        assertEquals("00002", theirSecond.localSuffix, "the second hire at that property")
         assertNull(
-            credentials.verify(ours.tenantId, "0002", "550194"),
-            "our tenant has no 0002, and the other tenant's must not leak across",
+            credentials.verify(ours.tenantId, ours.propertyId, "00002", "550194"),
+            "our property has no 00002, and the other property's must not leak across",
         )
     }
 
@@ -247,6 +247,16 @@ class StaffCredentialIntegrationTests {
     }
 
     private fun seedStaffIn(tenantId: UUID): Staff {
+        val propertyId = UUID.randomUUID()
+        jdbcTemplate.update(
+            "INSERT INTO properties (id, tenant_id, name) VALUES (?, ?, ?)",
+            propertyId, tenantId, "Property $propertyId",
+        )
+        return hireAt(tenantId, propertyId)
+    }
+
+    /** A second hire at an already-seeded property, so its local sequence advances instead of restarting. */
+    private fun hireAt(tenantId: UUID, propertyId: UUID): Staff {
         val managerId = UUID.randomUUID()
         val userId = UUID.randomUUID()
 
@@ -257,25 +267,31 @@ class StaffCredentialIntegrationTests {
             """.trimIndent(),
             managerId, tenantId, "mgr-$managerId@example.com",
         )
-        val staffNumber = requireNotNull(
-            jdbcTemplate.queryForObject(
-                "SELECT allocate_staff_number(?)", String::class.java, tenantId,
-            ),
-        )
         jdbcTemplate.update(
             """
-            INSERT INTO users (id, tenant_id, full_name, staff_number, status, is_active)
-            VALUES (?, ?, 'Amina Hassan', ?, 'active', true)
+            INSERT INTO users (id, tenant_id, full_name, status, is_active)
+            VALUES (?, ?, 'Amina Hassan', 'active', true)
             """.trimIndent(),
-            userId, tenantId, staffNumber,
+            userId, tenantId,
         )
-        return Staff(tenantId, userId, managerId, staffNumber)
+        val staffNumber = requireNotNull(
+            jdbcTemplate.queryForObject(
+                "SELECT allocate_property_staff_number(?, ?, ?)",
+                String::class.java,
+                tenantId, propertyId, userId,
+            ),
+        )
+        return Staff(tenantId, propertyId, userId, managerId, staffNumber)
     }
 
     private data class Staff(
         val tenantId: UUID,
+        val propertyId: UUID,
         val userId: UUID,
         val managerId: UUID,
         val staffNumber: String,
-    )
+    ) {
+        /** The local sequence typed on a terminal — everything after the last '-' in the full number. */
+        val localSuffix: String get() = staffNumber.substringAfterLast('-')
+    }
 }

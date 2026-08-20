@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.bind.annotation.RestControllerAdvice
 
@@ -80,6 +81,28 @@ class DevicePairingController(
             deviceId = paired.deviceId,
             deviceCode = paired.deviceCode,
         )
+    }
+
+    @GetMapping("/tenants/{tenantId}/devices")
+    fun listDevices(
+        @PathVariable tenantId: UUID,
+        @RequestParam(required = false) propertyId: UUID?,
+    ): List<PairedDeviceHttpSummary> {
+        val actor = requestContextHolder.current().identity as RequestIdentity.Tenant
+        return pairing.listDevices(tenantId, propertyId, actor.tenantUserId).map {
+            PairedDeviceHttpSummary(
+                deviceId = it.deviceId,
+                propertyId = it.propertyId,
+                outletId = it.outletId,
+                deviceCode = it.deviceCode,
+                terminalName = it.terminalName,
+                mode = it.mode,
+                status = it.status,
+                keyFingerprint = it.keyFingerprint,
+                pairedAt = it.pairedAt,
+                revokedAt = it.revokedAt,
+            )
+        }
     }
 
     @PostMapping("/tenants/{tenantId}/devices/{deviceId}/revoke")
@@ -175,4 +198,23 @@ data class PairingApprovalHttpRequest(
 data class PairedDeviceHttpResponse(
     val deviceId: UUID,
     val deviceCode: String,
+)
+
+@JsonInclude(JsonInclude.Include.ALWAYS)
+data class PairedDeviceHttpSummary(
+    val deviceId: UUID,
+    val propertyId: UUID,
+    val outletId: UUID?,
+    val deviceCode: String,
+    val terminalName: String,
+    val mode: String,
+    val status: String,
+    /**
+     * The public key digest, so a manager can check the terminal in front of them is the one in
+     * the list. Without it two tills both named "Bar 1" are indistinguishable, which is exactly
+     * when revoking the wrong one does the most damage.
+     */
+    val keyFingerprint: String,
+    val pairedAt: Instant,
+    val revokedAt: Instant?,
 )

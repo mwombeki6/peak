@@ -61,7 +61,11 @@ class StaffProvisionControllerIntegrationTests {
                 ),
         )
             .andExpect(status().isCreated)
-            .andExpect(jsonPath("$.staffNumber").value("0001"))
+            .andExpect(
+                jsonPath("$.staffNumber").value(
+                    org.hamcrest.Matchers.matchesPattern("^ST-[0-9ABCDEFGHJKMNPQRSTVWXYZ]{8}-00001$"),
+                ),
+            )
             .andExpect(jsonPath("$.phoneNumber").value(phone))
             .andExpect(jsonPath("$.activationSecret").isString)
             .andExpect(jsonPath("$.replayed").value(false))
@@ -110,7 +114,15 @@ class StaffProvisionControllerIntegrationTests {
         )
             .andExpect(status().isOk)
 
-        assertEquals(userId, credentials.verify(fixture.tenantId, staffNumber, "418205"))
+        assertEquals(
+            userId,
+            credentials.verify(
+                fixture.tenantId,
+                fixture.propertyId,
+                staffNumber.substringAfterLast('-'),
+                "418205",
+            ),
+        )
         assertNull(
             jdbcTemplate.queryForObject(
                 "SELECT pin_hash FROM staff_credentials WHERE user_id = ?",
@@ -124,7 +136,7 @@ class StaffProvisionControllerIntegrationTests {
     fun provisionsStaffWithNoPhoneAndHandsTheSecretToTheManager() {
         val fixture = seedManager()
 
-        mockMvc.perform(
+        val result = mockMvc.perform(
             post("/api/v1/tenants/${fixture.tenantId}/staff")
                 .secure(true)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -143,13 +155,21 @@ class StaffProvisionControllerIntegrationTests {
                 ),
         )
             .andExpect(status().isCreated)
+            .andExpect(
+                jsonPath("$.staffNumber").value(
+                    org.hamcrest.Matchers.matchesPattern("^ST-[0-9ABCDEFGHJKMNPQRSTVWXYZ]{8}-00001$"),
+                ),
+            )
             .andExpect(jsonPath("$.activationSecret").isString)
+            .andReturn()
+
+        val userId = UUID.fromString(JsonPath.read(result.response.contentAsString, "$.userId"))
 
         assertNull(
             jdbcTemplate.queryForObject(
-                "SELECT phone_number FROM users WHERE tenant_id = ? AND staff_number = '0001'",
+                "SELECT phone_number FROM users WHERE id = ?",
                 String::class.java,
-                fixture.tenantId,
+                userId,
             ),
             "in-person hire has no phone to SMS",
         )

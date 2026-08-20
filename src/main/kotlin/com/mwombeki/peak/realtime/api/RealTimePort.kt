@@ -92,6 +92,13 @@ object RealtimeEventTypes {
     const val KITCHEN_TICKET_DELIVERED = "pos.kitchen_ticket.delivered"
     const val KITCHEN_TICKET_VOIDED = "pos.kitchen_ticket.voided"
 
+    // Print jobs
+    const val PRINT_JOB_CREATED = "pos.print_job.created"
+    const val PRINT_JOB_CLAIMED = "pos.print_job.claimed"
+    const val PRINT_JOB_PRINTED = "pos.print_job.printed"
+    const val PRINT_JOB_FAILED = "pos.print_job.failed"
+    const val PRINT_JOB_RECLAIMED = "pos.print_job.reclaimed"
+
     // Shifts / sessions
     const val SESSION_OPENED = "pos.session.opened"
     const val SESSION_CLOSING = "pos.session.closing"
@@ -111,6 +118,7 @@ object RealtimeEventTypes {
 
     const val AGGREGATE_POS_ORDER = "POS_ORDER"
     const val AGGREGATE_KITCHEN_TICKET = "KITCHEN_TICKET"
+    const val AGGREGATE_PRINT_JOB = "PRINT_JOB"
     const val AGGREGATE_POS_SESSION = "POS_SESSION"
     const val AGGREGATE_PAYMENT_TRANSACTION = "PAYMENT_TRANSACTION"
     const val AGGREGATE_DEVICE = "DEVICE"

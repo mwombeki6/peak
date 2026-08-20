@@ -193,7 +193,7 @@ class DeviceIdentityIntegrationTests {
                 deviceCode = paired.deviceCode,
                 challengeId = challenge.challengeId,
                 signature = sign(keys, challenge.nonce),
-                staffNumber = hotel.staffNumber,
+                staffNumber = hotel.staffNumberSuffix,
                 pin = pin,
             ),
         )
@@ -249,7 +249,7 @@ class DeviceIdentityIntegrationTests {
                 deviceCode = paired.deviceCode,
                 challengeId = challenge.challengeId,
                 signature = sign(keys, challenge.nonce),
-                staffNumber = hotel.staffNumber,
+                staffNumber = hotel.staffNumberSuffix,
                 pin = pin,
             ),
         )
@@ -283,7 +283,7 @@ class DeviceIdentityIntegrationTests {
                 deviceCode = paired.deviceCode,
                 challengeId = UUID.randomUUID(),
                 signature = "not-a-signature",
-                staffNumber = hotel.staffNumber,
+                staffNumber = hotel.staffNumberSuffix,
                 pin = pin,
             ),
         )
@@ -304,8 +304,8 @@ class DeviceIdentityIntegrationTests {
         activateStaff(hotel, pin)
         val paired = pair(hotel, keys)
 
-        val first = pinLogin(paired.deviceCode, keys, hotel.staffNumber, pin)
-        val second = pinLogin(paired.deviceCode, keys, hotel.staffNumber, pin)
+        val first = pinLogin(paired.deviceCode, keys, hotel.staffNumberSuffix, pin)
+        val second = pinLogin(paired.deviceCode, keys, hotel.staffNumberSuffix, pin)
 
         assertNotEquals(first.token, second.token)
         assertEquals(1, liveSessionCount(paired.deviceId))
@@ -321,7 +321,7 @@ class DeviceIdentityIntegrationTests {
         val pin = "418205"
         activateStaff(hotel, pin)
         val paired = pair(hotel, keys)
-        pinLogin(paired.deviceCode, keys, hotel.staffNumber, pin)
+        pinLogin(paired.deviceCode, keys, hotel.staffNumberSuffix, pin)
 
         credentials.issueActivation(hotel.tenantId, hotel.staffUserId, hotel.managerId)
 
@@ -336,7 +336,7 @@ class DeviceIdentityIntegrationTests {
         val pin = "418205"
         activateStaff(hotel, pin)
         val paired = pair(hotel, keys)
-        val session = pinLogin(paired.deviceCode, keys, hotel.staffNumber, pin)
+        val session = pinLogin(paired.deviceCode, keys, hotel.staffNumberSuffix, pin)
         val sessionId = jdbcTemplate.queryForObject(
             """
             SELECT id FROM operational_sessions
@@ -463,17 +463,12 @@ class DeviceIdentityIntegrationTests {
             """.trimIndent(),
             managerId, tenantId, "mgr-$managerId@example.com",
         )
-        val staffNumber = requireNotNull(
-            jdbcTemplate.queryForObject(
-                "SELECT allocate_staff_number(?)", String::class.java, tenantId,
-            ),
-        )
         jdbcTemplate.update(
             """
-            INSERT INTO users (id, tenant_id, full_name, staff_number, status, is_active)
-            VALUES (?, ?, 'Amina Hassan', ?, 'active', true)
+            INSERT INTO users (id, tenant_id, full_name, status, is_active)
+            VALUES (?, ?, 'Amina Hassan', 'active', true)
             """.trimIndent(),
-            staffUserId, tenantId, staffNumber,
+            staffUserId, tenantId,
         )
         jdbcTemplate.update(
             """
@@ -481,6 +476,13 @@ class DeviceIdentityIntegrationTests {
             VALUES (?, ?, ?, ?, 'active', true)
             """.trimIndent(),
             propertyId, tenantId, "Property $propertyId", "P${propertyId.toString().take(8)}",
+        )
+        val staffNumber = requireNotNull(
+            jdbcTemplate.queryForObject(
+                "SELECT allocate_property_staff_number(?, ?, ?)",
+                String::class.java,
+                tenantId, propertyId, staffUserId,
+            ),
         )
         return Hotel(tenantId, propertyId, managerId, staffUserId, staffNumber)
     }
@@ -503,5 +505,8 @@ class DeviceIdentityIntegrationTests {
         val managerId: UUID,
         val staffUserId: UUID,
         val staffNumber: String,
-    )
+    ) {
+        /** The local sequence typed on a terminal — everything after the last '-' in the full number. */
+        val staffNumberSuffix: String get() = staffNumber.substringAfterLast('-')
+    }
 }

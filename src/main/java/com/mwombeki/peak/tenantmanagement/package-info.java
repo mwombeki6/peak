@@ -7,6 +7,7 @@
                 "shared::context",
                 "shared::exception",
                 "shared::outbound",
+                "shared::util",
                 "usermanagement::api"
         }
 )

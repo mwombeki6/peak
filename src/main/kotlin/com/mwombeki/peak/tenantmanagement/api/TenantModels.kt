@@ -16,6 +16,7 @@ data class Tenant(
     val planId: UUID,
     val countryCode: String?,
     val currencyCode: String?,
+    val tenantNumber: String,
     val createdAt: Instant,
     val updatedAt: Instant,
 )
@@ -84,5 +85,6 @@ data class TenantResponse(
     val status: TenantStatus,
     val planId: UUID,
     val businessEmail: String,
+    val tenantNumber: String,
     val nextAction: TenantOnboardingNextAction? = null,
 )

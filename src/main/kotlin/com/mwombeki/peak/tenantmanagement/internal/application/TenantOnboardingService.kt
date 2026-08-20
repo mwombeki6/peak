@@ -11,6 +11,8 @@ import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.shared.util.HumanIdentifierGenerator
+import com.mwombeki.peak.shared.util.violatesConstraint
 import com.mwombeki.peak.tenantmanagement.api.Tenant
 import com.mwombeki.peak.tenantmanagement.api.TenantOnboardingNextAction
 import com.mwombeki.peak.tenantmanagement.api.TenantOnboardingPort
@@ -25,6 +27,7 @@ import com.mwombeki.peak.usermanagement.api.PlatformAccessPort
 import com.mwombeki.peak.usermanagement.api.PlatformAccessRequest
 import java.time.Instant
 import java.util.UUID
+import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -43,6 +46,8 @@ class TenantOnboardingService(
     private val jdbcTemplate: JdbcTemplate,
     private val launchEvaluator: TenantLaunchEvaluator,
 ) : TenantOnboardingPort {
+
+    private val identifierGenerator = HumanIdentifierGenerator()
 
     @Transactional
     override fun registerNewTenant(request: TenantRegisterRequest): TenantResponse {
@@ -67,7 +72,7 @@ class TenantOnboardingService(
 
             val now = Instant.now()
             val tenantId = UUID.randomUUID()
-            val tenant = Tenant(
+            var tenant = Tenant(
                 id = tenantId,
                 name = request.name.trim(),
                 slug = slug,
@@ -76,6 +81,7 @@ class TenantOnboardingService(
                 planId = request.planId,
                 countryCode = request.countryCode,
                 currencyCode = request.currencyCode,
+                tenantNumber = identifierGenerator.generate("TN"),
                 createdAt = now,
                 updatedAt = now,
             )
@@ -94,7 +100,18 @@ class TenantOnboardingService(
                 updatedAt = now,
             )
 
-            tenantRepository.save(tenant)
+            var tenantNumberAttempts = 0
+            while (true) {
+                try {
+                    tenantRepository.save(tenant)
+                    break
+                } catch (ex: DuplicateKeyException) {
+                    if (!ex.violatesConstraint("uq_tenants_tenant_number") || ++tenantNumberAttempts >= 5) {
+                        throw ex
+                    }
+                    tenant = tenant.copy(tenantNumber = identifierGenerator.generate("TN"))
+                }
+            }
             tenantProfileRepository.save(profile)
             initializeControlPlane(tenant, operatorId)
             tenantRepository.recordLifecycleEvent(
@@ -251,6 +268,7 @@ class TenantOnboardingService(
             status = tenant.status,
             planId = tenant.planId,
             businessEmail = profile.businessEmail,
+            tenantNumber = tenant.tenantNumber,
             nextAction = nextAction,
         )
     }

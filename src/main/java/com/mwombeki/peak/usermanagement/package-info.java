@@ -6,8 +6,10 @@
                 "shared::exception",
                 "shared::security",
                 "shared::secrets",
+                "shared::outbound",
                 "audit::api",
-                "reliability::api"
+                "reliability::api",
+                "verification::api"
         }
 )
 package com.mwombeki.peak.usermanagement;

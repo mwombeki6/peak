@@ -47,6 +47,16 @@ class RealtimeDestinationRouterTests {
     }
 
     @Test
+    fun `print job event reaches outlet kitchen like a ticket`() {
+        val destinations = router.destinations(
+            event(RealtimeEventTypes.AGGREGATE_PRINT_JOB, ticketId, outletId),
+        )
+
+        assertTrue(RealtimeDestinationRouter.outletKitchen(outletId) in destinations)
+        assertTrue(RealtimeDestinationRouter.outletOrders(outletId) !in destinations)
+    }
+
+    @Test
     fun `payment event reaches payment stream but not any order stream`() {
         val destinations = router.destinations(
             event(RealtimeEventTypes.AGGREGATE_PAYMENT_TRANSACTION, paymentId, null),

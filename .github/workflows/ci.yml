@@ -221,6 +221,7 @@ jobs:
             -e 's|^KEYCLOAK_SMTP_USER=.*|KEYCLOAK_SMTP_USER=ci-keycloak-smtp-user|' \
             -e 's|^KEYCLOAK_SMTP_PASSWORD=.*|KEYCLOAK_SMTP_PASSWORD=ci-keycloak-smtp-password-1234|' \
             -e 's|^KEYCLOAK_RECONCILER_SECRET=.*|KEYCLOAK_RECONCILER_SECRET=ci-keycloak-reconciler-secret-1234|' \
+            -e 's|^VALKEY_PASSWORD=.*|VALKEY_PASSWORD=ci-valkey-password-1234|' \
             -e 's|^PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=.*|PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=ci-communication-key-1234|' \
             -e 's|^PEAK_COMMUNICATION_PROVIDERS_BEEM_API_KEY=.*|PEAK_COMMUNICATION_PROVIDERS_BEEM_API_KEY=ci-beem-api-key-1234|' \
             -e 's|^PEAK_COMMUNICATION_PROVIDERS_BEEM_SECRET_KEY=.*|PEAK_COMMUNICATION_PROVIDERS_BEEM_SECRET_KEY=ci-beem-secret-key-1234|' \
@@ -233,6 +234,10 @@ jobs:
             -e 's|^PEAK_GUEST_IDENTITY_HASH_KEY=.*|PEAK_GUEST_IDENTITY_HASH_KEY=ci-guest-identity-hmac-key-1234567890|' \
             -e 's|^PEAK_REPORT_STORAGE_ACCESS_KEY=.*|PEAK_REPORT_STORAGE_ACCESS_KEY=ci-report-access-key|' \
             -e 's|^PEAK_REPORT_STORAGE_SECRET_KEY=.*|PEAK_REPORT_STORAGE_SECRET_KEY=ci-report-secret-key-1234|' \
+            -e 's|^MINIO_ROOT_USER=.*|MINIO_ROOT_USER=ci-minio-root-user|' \
+            -e 's|^MINIO_ROOT_PASSWORD=.*|MINIO_ROOT_PASSWORD=ci-minio-root-password-1234|' \
+            -e 's|^PEAK_VERIFICATION_STORAGE_ACCESS_KEY=.*|PEAK_VERIFICATION_STORAGE_ACCESS_KEY=ci-verification-access-key|' \
+            -e 's|^PEAK_VERIFICATION_STORAGE_SECRET_KEY=.*|PEAK_VERIFICATION_STORAGE_SECRET_KEY=ci-verification-secret-key-1234|' \
             "$tmp"
           ops/scripts/validate-production-env.sh "$tmp"
       - name: Validate scripts and observability assets
@@ -335,6 +340,10 @@ jobs:
       - name: Build acceptance image
         run: ./gradlew bootJar && podman build -t localhost/peak:acceptance-ci .
       - name: Prepare acceptance environment
+        # PEAK_VALKEY_ENABLED is turned off below because this harness starts each
+        # service by name with --no-deps and never starts valkey. Leaving it on would
+        # point the runtimes at a host that does not exist and prove nothing; the
+        # Valkey adapters are covered against the pinned server by Testcontainers.
         run: |
           cp ops/production/.env.example "$RUNNER_TEMP/peak-acceptance.env"
           sed -i \
@@ -356,6 +365,8 @@ jobs:
             -e 's|^KEYCLOAK_SMTP_USER=.*|KEYCLOAK_SMTP_USER=acceptance-keycloak-smtp-user|' \
             -e 's|^KEYCLOAK_SMTP_PASSWORD=.*|KEYCLOAK_SMTP_PASSWORD=acceptance-keycloak-smtp-password|' \
             -e 's|^KEYCLOAK_RECONCILER_SECRET=.*|KEYCLOAK_RECONCILER_SECRET=acceptance-reconciler-secret|' \
+            -e 's|^VALKEY_PASSWORD=.*|VALKEY_PASSWORD=acceptance-valkey-password|' \
+            -e 's|^PEAK_VALKEY_ENABLED=.*|PEAK_VALKEY_ENABLED=false|' \
             -e 's|^PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=.*|PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=acceptance-communication-key|' \
             -e 's|^PEAK_COMMUNICATION_PROVIDERS_BEEM_API_KEY=.*|PEAK_COMMUNICATION_PROVIDERS_BEEM_API_KEY=acceptance-beem-api-key|' \
             -e 's|^PEAK_COMMUNICATION_PROVIDERS_BEEM_SECRET_KEY=.*|PEAK_COMMUNICATION_PROVIDERS_BEEM_SECRET_KEY=acceptance-beem-secret-key|' \
@@ -368,14 +379,18 @@ jobs:
             -e 's|^PEAK_GUEST_IDENTITY_HASH_KEY=.*|PEAK_GUEST_IDENTITY_HASH_KEY=acceptance-guest-identity-hmac-key-2026|' \
             -e 's|^PEAK_REPORT_STORAGE_ACCESS_KEY=.*|PEAK_REPORT_STORAGE_ACCESS_KEY=acceptance-report-access-key|' \
             -e 's|^PEAK_REPORT_STORAGE_SECRET_KEY=.*|PEAK_REPORT_STORAGE_SECRET_KEY=acceptance-report-secret-key|' \
+            -e 's|^MINIO_ROOT_USER=.*|MINIO_ROOT_USER=acceptance-minio-root-user|' \
+            -e 's|^MINIO_ROOT_PASSWORD=.*|MINIO_ROOT_PASSWORD=acceptance-minio-root-password|' \
+            -e 's|^PEAK_VERIFICATION_STORAGE_ACCESS_KEY=.*|PEAK_VERIFICATION_STORAGE_ACCESS_KEY=acceptance-verification-access-key|' \
+            -e 's|^PEAK_VERIFICATION_STORAGE_SECRET_KEY=.*|PEAK_VERIFICATION_STORAGE_SECRET_KEY=acceptance-verification-secret-key|' \
             "$RUNNER_TEMP/peak-acceptance.env"
       - name: Run multi-role adversarial hotel journey
-        # Bounded well under the job ceiling so a hang becomes a diagnosis instead of a
-        # cancellation. Three separate hangs have now been found in this stage, each in a
-        # different unguarded podman exec, and every one cost the full ninety minutes and
-        # printed nothing: the job could only ever report "cancelled", which says where it
-        # stopped and nothing about why. Failing at 45 leaves the evidence upload and the
-        # teardown below room to run and report what was actually stuck.
+        # Bounded under the job ceiling so a hang becomes a diagnosis instead of a
+        # cancellation. Three separate hangs were found in this stage, each in a different
+        # unguarded podman exec, and every one cost the full budget and printed nothing:
+        # the job could only report "cancelled", which says where it stopped and nothing
+        # about why. Failing here leaves the evidence upload and the teardown below room
+        # to run and report what was actually stuck.
         timeout-minutes: 30
         env:
           COMPOSE_PROJECT_NAME: peak-acceptance-ci

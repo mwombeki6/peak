@@ -28,6 +28,7 @@ import com.mwombeki.peak.communication.api.RegisterGuestWhatsAppRequest
 import com.mwombeki.peak.communication.api.RecordCommunicationConsentRequest
 import com.mwombeki.peak.communication.api.AssignContactRoleRequest
 import com.mwombeki.peak.communication.api.TemplateMutationReceipt
+import com.mwombeki.peak.communication.api.TemplateResponse
 import com.mwombeki.peak.reliability.api.IdempotencyCommand
 import com.mwombeki.peak.reliability.api.IdempotencyPort
 import com.mwombeki.peak.reliability.api.IdempotencyReservation
@@ -627,6 +628,21 @@ class OutboxService(
 
             TemplateMutationReceipt(templateId = templateId, replayed = false)
         }
+    }
+
+    @Transactional
+    override fun listTemplates(): List<TemplateResponse> {
+        val tenantId = bindTenantContext()
+        return jdbcTemplate.query(
+            """
+            SELECT id, name, subject, content, channel_type, created_at
+            FROM communication_templates
+            WHERE tenant_id = ? AND deleted_at IS NULL
+            ORDER BY channel_type, name, id
+            """.trimIndent(),
+            ::mapTemplate,
+            tenantId,
+        )
     }
 
     @Transactional
@@ -1477,6 +1493,17 @@ class OutboxService(
         if (!exists) {
             throw NoSuchElementException("Communication delivery request not found or access denied.")
         }
+    }
+
+    private fun mapTemplate(rs: ResultSet, rowNumber: Int): TemplateResponse {
+        return TemplateResponse(
+            id = rs.getObject("id", UUID::class.java),
+            name = rs.getString("name"),
+            subject = rs.getString("subject"),
+            content = rs.getString("content"),
+            channelType = rs.getString("channel_type"),
+            createdAt = rs.getObject("created_at", OffsetDateTime::class.java),
+        )
     }
 
     private fun mapDeliveryRequest(rs: ResultSet, rowNumber: Int): DeliveryRequestResponse {

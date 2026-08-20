@@ -1,5 +1,6 @@
 table,owner,status,write_contract
 accounting_accounts,billing,active,billing::api-or-internal-owner
+account_setup_grants,usermanagement,active,usermanagement::api-or-internal-owner
 allotments,reservations,active,reservations::api-or-internal-owner
 approval_policies,usermanagement,active,usermanagement::api-or-internal-owner
 approval_policy_seats,usermanagement,active,usermanagement::api-or-internal-owner
@@ -52,6 +53,8 @@ device_pairing_requests,usermanagement,active,usermanagement::api-or-internal-ow
 document_sequences,billing,active,billing::api-or-internal-owner
 edge_sync_events,deferred,dormant,no-runtime-writes
 employees,deferred,dormant,no-runtime-writes
+ephemeral_rate_limit_counters,shared,active,shared::api-or-internal-owner
+ephemeral_state_entries,shared,active,shared::api-or-internal-owner
 event_booking_items,deferred,dormant,no-runtime-writes
 event_bookings,deferred,dormant,no-runtime-writes
 event_packages,deferred,dormant,no-runtime-writes
@@ -116,6 +119,8 @@ night_audit_close_snapshots,nightaudit,active,nightaudit::api-or-internal-owner
 night_audit_issues,nightaudit,active,nightaudit::api-or-internal-owner
 night_audit_runs,nightaudit,active,nightaudit::api-or-internal-owner
 notifications,communication,active,communication::api-or-internal-owner
+onboarding_applications,onboarding,active,onboarding::api-or-internal-owner
+onboarding_sessions,onboarding,active,onboarding::api-or-internal-owner
 operational_sessions,usermanagement,active,usermanagement::api-or-internal-owner
 organization_unit_properties,property,active,property::api-or-internal-owner
 organization_units,property,active,property::api-or-internal-owner
@@ -178,6 +183,7 @@ pos_item_void_dispositions,pos,active,pos::api-or-internal-owner
 pos_order_items,pos,active,pos::api-or-internal-owner
 pos_orders,pos,active,pos::api-or-internal-owner
 pos_printer_routes,pos,active,pos::api-or-internal-owner
+pos_print_jobs,pos,active,pos::api-or-internal-owner
 pos_recipe_consumption_snapshots,pos,active,pos::api-or-internal-owner
 pos_sessions,pos,active,pos::api-or-internal-owner
 pos_terminals,pos,active,pos::api-or-internal-owner
@@ -194,6 +200,8 @@ property_onboarding_states,property,active,property::api-or-internal-owner
 property_onboarding_steps,property,active,property::api-or-internal-owner
 property_pos_settings,pos,active,pos::api-or-internal-owner
 property_reservation_settings,reservations,active,reservations::api-or-internal-owner
+property_staff_number_sequences,usermanagement,active,usermanagement::api-or-internal-owner
+property_staff_numbers,usermanagement,active,usermanagement::api-or-internal-owner
 purchase_order_approvals,procurement,active,procurement::api-or-internal-owner
 purchase_order_items,procurement,active,procurement::api-or-internal-owner
 purchase_orders,procurement,active,procurement::api-or-internal-owner
@@ -276,6 +284,7 @@ unpaid_checkout_overrides,frontdesk,active,frontdesk::api-or-internal-owner
 user_property_roles,usermanagement,active,usermanagement::api-or-internal-owner
 user_tenant_roles,usermanagement,active,usermanagement::api-or-internal-owner
 users,usermanagement,active,usermanagement::api-or-internal-owner
+verification_challenges,verification,active,verification::api-or-internal-owner
 work_orders,maintenance,active,maintenance::api-or-internal-owner
 worker_runtime_heartbeats,reliability,active,reliability::api-or-internal-owner
 workflow_catalog,shared,active,shared::api-or-internal-owner

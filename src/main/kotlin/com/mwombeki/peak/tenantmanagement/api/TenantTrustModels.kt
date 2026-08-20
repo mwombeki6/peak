@@ -5,13 +5,48 @@ import java.time.LocalDate
 import java.util.UUID
 import org.springframework.modulith.NamedInterface
 
+/**
+ * A verification case belongs to exactly one of these, enforced at the database by a CHECK
+ * constraint — never both, never neither. The same case/document/review machinery in
+ * [TenantTrustControlService] operates on either without knowing which one it's holding.
+ */
+@NamedInterface("api")
+sealed interface VerificationSubjectRef {
+    data class Tenant(val tenantId: UUID) : VerificationSubjectRef
+    data class Application(val applicationId: UUID) : VerificationSubjectRef
+}
+
 @NamedInterface("api")
 interface TenantTrustControlPort {
-    fun listVerificationCases(tenantId: UUID, platformView: Boolean): List<VerificationCaseSummary>
+    fun listVerificationCases(subject: VerificationSubjectRef, platformView: Boolean): List<VerificationCaseSummary>
     fun createVerificationCase(command: CreateVerificationCaseCommand): VerificationCaseSummary
+    fun requestVerificationDocumentUpload(
+        command: RequestVerificationDocumentUploadCommand,
+    ): VerificationDocumentUploadAuthorization
     fun addVerificationDocument(command: AddVerificationDocumentCommand): VerificationDocumentSummary
-    fun submitVerificationCase(tenantId: UUID, caseId: UUID): VerificationCaseSummary
+
+    /**
+     * Platform-only: a short-lived read URL so FBC can actually look at what an applicant or
+     * tenant submitted before deciding on a case. Never exposed to the subject's own session —
+     * an applicant/tenant already has the object key from [addVerificationDocument]'s response
+     * and needs no signed read of their own upload.
+     */
+    fun requestVerificationDocumentView(
+        subject: VerificationSubjectRef,
+        caseId: UUID,
+        documentId: UUID,
+    ): VerificationDocumentViewAuthorization
+
+    fun submitVerificationCase(subject: VerificationSubjectRef, caseId: UUID): VerificationCaseSummary
     fun reviewVerificationCase(command: ReviewVerificationCaseCommand): VerificationCaseSummary
+
+    /**
+     * Re-points an application's approved verification case (and its documents) onto a freshly
+     * provisioned tenant, and carries the case's own recorded evidence onto [tenant_profiles]
+     * so the new tenant doesn't need a second, redundant KYB review of evidence FBC already
+     * approved. Throws if the application has no approved case.
+     */
+    fun carryForwardVerificationEvidence(applicationId: UUID, tenantId: UUID)
 
     fun listPrivacyRequests(tenantId: UUID, platformView: Boolean): List<PrivacyRequestSummary>
     fun createPrivacyRequest(command: CreatePrivacyRequestCommand): PrivacyRequestSummary
@@ -26,7 +61,8 @@ interface TenantTrustControlPort {
 
 data class VerificationCaseSummary(
     val caseId: UUID,
-    val tenantId: UUID,
+    val tenantId: UUID?,
+    val onboardingApplicationId: UUID?,
     val caseType: String,
     val requiredLevel: String,
     val status: String,
@@ -53,16 +89,17 @@ data class VerificationDocumentSummary(
     val expiresAt: LocalDate?,
     val status: String,
     val rejectionReason: String?,
+    val scanStatus: String,
 )
 
 data class CreateVerificationCaseCommand(
-    val tenantId: UUID,
+    val subject: VerificationSubjectRef,
     val caseType: String,
     val requiredLevel: String,
 )
 
 data class AddVerificationDocumentCommand(
-    val tenantId: UUID,
+    val subject: VerificationSubjectRef,
     val caseId: UUID,
     val documentType: String,
     val documentNumberMasked: String?,
@@ -71,6 +108,24 @@ data class AddVerificationDocumentCommand(
     val mimeType: String,
     val issuedAt: LocalDate?,
     val expiresAt: LocalDate?,
+)
+
+data class RequestVerificationDocumentUploadCommand(
+    val subject: VerificationSubjectRef,
+    val caseId: UUID,
+    val mimeType: String,
+)
+
+/** [uploadUrl] is a single-use, time-limited write authorization — never a bucket credential. */
+data class VerificationDocumentUploadAuthorization(
+    val objectKey: String,
+    val uploadUrl: String,
+    val expiresAt: Instant,
+)
+
+data class VerificationDocumentViewAuthorization(
+    val url: String,
+    val expiresAt: Instant,
 )
 
 enum class VerificationReviewAction {
@@ -82,7 +137,7 @@ enum class VerificationReviewAction {
 }
 
 data class ReviewVerificationCaseCommand(
-    val tenantId: UUID,
+    val subject: VerificationSubjectRef,
     val caseId: UUID,
     val action: VerificationReviewAction,
     val reason: String?,

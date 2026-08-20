@@ -19,6 +19,7 @@ import com.mwombeki.peak.communication.api.NotificationEnqueueReceipt
 import com.mwombeki.peak.communication.api.RecordCommunicationConsentRequest
 import com.mwombeki.peak.communication.api.AssignContactRoleRequest
 import com.mwombeki.peak.communication.api.TemplateMutationReceipt
+import com.mwombeki.peak.communication.api.TemplateResponse
 import java.util.UUID
 import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
@@ -79,6 +80,11 @@ class CommunicationController(
         @RequestBody request: CreateTemplateRequest,
     ): TemplateMutationReceipt {
         return communicationPort.createTemplate(request)
+    }
+
+    @GetMapping("/templates")
+    fun listTemplates(): List<TemplateResponse> {
+        return communicationPort.listTemplates()
     }
 
     @PostMapping("/channels/{channelId}/request-verification")

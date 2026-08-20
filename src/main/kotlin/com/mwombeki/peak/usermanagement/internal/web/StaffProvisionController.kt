@@ -1,5 +1,6 @@
 package com.mwombeki.peak.usermanagement.internal.web
 
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.mwombeki.peak.shared.exception.ApiProblemFactory
 import com.mwombeki.peak.usermanagement.internal.application.StaffProvisionConflictException
 import com.mwombeki.peak.usermanagement.internal.application.StaffProvisionInProgressException
@@ -16,10 +17,12 @@ import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.ExceptionHandler
+import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.bind.annotation.RestControllerAdvice
 
@@ -59,6 +62,24 @@ class StaffProvisionController(
                 ),
             )
     }
+
+    @GetMapping("/tenants/{tenantId}/staff")
+    fun listStaff(
+        @PathVariable tenantId: UUID,
+        @RequestParam(required = false) propertyId: UUID?,
+    ): List<StaffDirectoryHttpEntry> =
+        staff.listStaff(tenantId, propertyId).map {
+            StaffDirectoryHttpEntry(
+                userId = it.userId,
+                fullName = it.fullName,
+                staffNumber = it.staffNumber,
+                phoneNumber = it.phoneNumber,
+                status = it.status,
+                isActive = it.isActive,
+                propertyId = it.propertyId,
+                propertyRoleId = it.propertyRoleId,
+            )
+        }
 
     @PostMapping("/staff/credentials/activate")
     fun activate(
@@ -159,3 +180,17 @@ data class ActivateStaffCredentialHttpRequest(
 )
 
 class StaffActivationRejectedException : RuntimeException()
+
+@JsonInclude(JsonInclude.Include.ALWAYS)
+data class StaffDirectoryHttpEntry(
+    val userId: UUID,
+    val fullName: String,
+    /** Null until a staff number has been allocated, which is a real state during onboarding. */
+    val staffNumber: String?,
+    val phoneNumber: String?,
+    val status: String,
+    val isActive: Boolean,
+    /** Null when the user exists but holds no property role yet. */
+    val propertyId: UUID?,
+    val propertyRoleId: UUID?,
+)

@@ -12,6 +12,8 @@ import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator
 import org.springframework.security.oauth2.jwt.JwtDecoder
 import org.springframework.security.oauth2.jwt.JwtValidators
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder
+import com.mwombeki.peak.shared.context.OnboardingSessionAuthentication
+import com.mwombeki.peak.shared.context.OnboardingSessionLookup
 import com.mwombeki.peak.shared.context.OperationalSessionAuthentication
 import com.mwombeki.peak.shared.context.OperationalSessionLookup
 import org.springframework.beans.factory.ObjectProvider
@@ -41,10 +43,16 @@ class HttpSecurityConfiguration(
     ): OperationalSessionAuthenticationFilter = OperationalSessionAuthenticationFilter(lookup)
 
     @Bean
+    fun onboardingSessionAuthenticationFilter(
+        lookup: OnboardingSessionLookup,
+    ): OnboardingSessionAuthenticationFilter = OnboardingSessionAuthenticationFilter(lookup)
+
+    @Bean
     fun securityFilterChain(
         http: HttpSecurity,
         webSocketHeaderIdentityFilter: WebSocketHeaderIdentityFilter,
         operationalSessionAuthenticationFilter: OperationalSessionAuthenticationFilter,
+        onboardingSessionAuthenticationFilter: OnboardingSessionAuthenticationFilter,
         bearerTokenResolver: ObjectProvider<BearerTokenResolver>,
     ): SecurityFilterChain {
         http
@@ -57,6 +65,7 @@ class HttpSecurityConfiguration(
                 securityContext.requireExplicitSave(false)
             }
             .addFilterBefore(operationalSessionAuthenticationFilter, AuthorizationFilter::class.java)
+            .addFilterBefore(onboardingSessionAuthenticationFilter, AuthorizationFilter::class.java)
             .addFilterBefore(webSocketHeaderIdentityFilter, AuthorizationFilter::class.java)
             .formLogin { formLogin -> formLogin.disable() }
             .httpBasic { httpBasic -> httpBasic.disable() }
@@ -144,7 +153,12 @@ class HttpSecurityConfiguration(
         val delegate = DefaultBearerTokenResolver()
         return BearerTokenResolver { request ->
             val token = delegate.resolve(request)
-            if (token != null && token.startsWith(OperationalSessionAuthentication.TOKEN_PREFIX)) {
+            if (token != null &&
+                (
+                    token.startsWith(OperationalSessionAuthentication.TOKEN_PREFIX) ||
+                        token.startsWith(OnboardingSessionAuthentication.TOKEN_PREFIX)
+                )
+            ) {
                 null
             } else {
                 token

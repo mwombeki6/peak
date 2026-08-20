@@ -171,9 +171,18 @@ class StaffCredentialService(
      *   locked, or never activated. Deliberately indistinguishable: telling a caller which one
      *   it was tells an attacker which staff numbers exist.
      */
-    fun verify(tenantId: UUID, staffNumber: String, pin: String): UUID? =
+    /**
+     * [staffNumberSuffix] is the local sequence a staff member types on a paired terminal
+     * ("00042"), resolved against [propertyId] — always the trusted device's own property, never
+     * a value the client supplies alongside the suffix. A device paired to property A can never
+     * resolve a number that only exists at property B, even if the raw digits collide, because
+     * the lookup is scoped by property from the start rather than filtered afterwards.
+     */
+    fun verify(tenantId: UUID, propertyId: UUID, staffNumberSuffix: String, pin: String): UUID? =
         transactionTemplate.execute {
-            val userId = resolveStaff(tenantId, staffNumber) ?: return@execute null
+            val localSequence = staffNumberSuffix.trim().toIntOrNull() ?: return@execute null
+            val userId = resolveActiveStaffAtProperty(tenantId, propertyId, localSequence)
+                ?: return@execute null
 
             val credential = jdbcTemplate.query(
                 """
@@ -233,18 +242,45 @@ class StaffCredentialService(
         )
     }
 
+    /**
+     * By the full formatted number ("ST-H8Q5T2MV-00042"), not scoped to a trusted device — used
+     * where there is no paired terminal to supply a property, such as the phone-assisted
+     * activation link a new hire opens on their own phone before they've ever touched a POS.
+     */
     private fun resolveStaff(tenantId: UUID, staffNumber: String): UUID? =
         jdbcTemplate.query(
             """
-            SELECT id FROM users
-            WHERE tenant_id = ?
-              AND staff_number = ?
-              AND status = 'active'
-              AND is_active
-              AND deleted_at IS NULL
+            SELECT u.id FROM users u
+            JOIN property_staff_numbers psn
+              ON psn.tenant_id = u.tenant_id AND psn.user_id = u.id
+            WHERE u.tenant_id = ?
+              AND psn.staff_number = ?
+              AND psn.status = 'ACTIVE'
+              AND u.status = 'active'
+              AND u.is_active
+              AND u.deleted_at IS NULL
             """.trimIndent(),
             { rs, _ -> rs.getObject("id", UUID::class.java) },
             tenantId, staffNumber.trim(),
+        ).firstOrNull()
+
+    /** By the local sequence a staff member types on a paired terminal, scoped to that device's own property. */
+    private fun resolveActiveStaffAtProperty(tenantId: UUID, propertyId: UUID, localSequence: Int): UUID? =
+        jdbcTemplate.query(
+            """
+            SELECT u.id FROM users u
+            JOIN property_staff_numbers psn
+              ON psn.tenant_id = u.tenant_id AND psn.user_id = u.id
+            WHERE u.tenant_id = ?
+              AND psn.property_id = ?
+              AND psn.local_sequence = ?
+              AND psn.status = 'ACTIVE'
+              AND u.status = 'active'
+              AND u.is_active
+              AND u.deleted_at IS NULL
+            """.trimIndent(),
+            { rs, _ -> rs.getObject("id", UUID::class.java) },
+            tenantId, propertyId, localSequence,
         ).firstOrNull()
 
     /**

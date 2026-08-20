@@ -7,6 +7,7 @@ import com.mwombeki.peak.pos.api.PosConfigurationResponse
 import com.mwombeki.peak.pos.api.PosMenuCategoryResponse
 import com.mwombeki.peak.pos.api.PosMenuItemResponse
 import com.mwombeki.peak.pos.api.PosNotFoundException
+import com.mwombeki.peak.pos.api.PosOutletResponse
 import java.math.RoundingMode
 import java.util.UUID
 import org.springframework.jdbc.core.JdbcTemplate
@@ -156,6 +157,38 @@ class PosConfigurationService(
                 request.name.required("name"),
                 price,
                 request.taxRateId,
+            )
+        }
+    }
+
+    /**
+     * Deactivated outlets stay in the list behind [PosOutletResponse.isActive]. An outlet a
+     * hotel has stopped selling from is still part of its configuration, and hiding it makes a
+     * wizard report the property has no outlets when it has one it needs to reopen.
+     */
+    fun listOutlets(propertyId: UUID): List<PosOutletResponse> {
+        return commandExecutor.read(propertyId) { actor ->
+            jdbcTemplate.query(
+                """
+                SELECT id, property_id, revenue_center_id, name, type, is_active
+                FROM outlets
+                WHERE tenant_id = ?
+                  AND property_id = ?
+                  AND deleted_at IS NULL
+                ORDER BY name, id
+                """.trimIndent(),
+                { rs, _ ->
+                    PosOutletResponse(
+                        id = rs.getObject("id", UUID::class.java),
+                        propertyId = rs.getObject("property_id", UUID::class.java),
+                        revenueCenterId = rs.getObject("revenue_center_id", UUID::class.java),
+                        name = rs.getString("name"),
+                        type = rs.getString("type"),
+                        isActive = rs.getBoolean("is_active"),
+                    )
+                },
+                actor.tenantId,
+                propertyId,
             )
         }
     }

@@ -9,6 +9,7 @@ enum class RequestIdentityMode {
     PLATFORM,
     PUBLIC,
     SUPPORT,
+    ONBOARDING_APPLICANT,
 }
 
 @NamedInterface("context")
@@ -50,5 +51,20 @@ sealed interface RequestIdentity {
         override val correlationId: String? = null,
     ) : RequestIdentity {
         override val mode = RequestIdentityMode.SUPPORT
+    }
+
+    /**
+     * A prospect, not a tenant. Bound to exactly one [applicationId] and nothing else — no
+     * tenant_id, no property, no staff permission. This is deliberately not [Public] with an
+     * optional tenant id: [Public] means "no strong identity yet, treat carefully"; this means
+     * "a specific, narrow, already-authenticated scope that must never widen to tenant
+     * authority," which `assert_no_mixed_context()` also enforces at the database.
+     */
+    @NamedInterface("context")
+    data class OnboardingApplicant(
+        val applicationId: UUID,
+        override val correlationId: String? = null,
+    ) : RequestIdentity {
+        override val mode = RequestIdentityMode.ONBOARDING_APPLICANT
     }
 }

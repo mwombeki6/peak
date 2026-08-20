@@ -1,0 +1,10 @@
+# Local E2E fix: podman-compose concatenates healthcheck test arrays from merged
+# compose files, producing ["CMD","mc","ready","local","CMD","curl","-fsS",...],
+# which mc rejects. Redefine the healthcheck cleanly for this run.
+services:
+  minio:
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10

@@ -130,7 +130,8 @@ data class ProvisionTenantAdministratorCommand(
 data class InviteTenantAdministratorCommand(
     val tenantId: UUID,
     val fullName: String,
-    val email: String,
+    val email: String? = null,
+    val phoneNumber: String? = null,
     val expiresInHours: Long = 72,
 )
 

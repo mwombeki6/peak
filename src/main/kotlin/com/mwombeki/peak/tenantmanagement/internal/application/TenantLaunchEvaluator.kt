@@ -143,7 +143,25 @@ class TenantLaunchEvaluator(
             )
         }
         if (!peakCovered) {
-            return payPeak(tenantId, openPurchaseId)
+            // Paying Peak is a tenant-identity action (`staff_permission` on
+            // `.../billing/purchases`); a platform session gets a 403 on it. The platform
+            // operator's job ends at provisioning the administrator — advertising the real
+            // action here would be showing a button that only 403s, which is worse than not
+            // showing one. See docs/api-gaps-for-claude.md in peak-platform-web for the
+            // reproduction this closes.
+            return if (isPlatformSession()) {
+                TenantOnboardingNextAction(
+                    step = STEP_PAY_PEAK,
+                    title = "Waiting on the tenant to pay Peak",
+                    why = "Peak cover is billed with tenant identity, after the administrator " +
+                        "activates. A platform session cannot execute this step.",
+                    method = "GET",
+                    path = "/api/v1/platform/tenants/$tenantId/onboarding",
+                    bodyHint = null,
+                )
+            } else {
+                payPeak(tenantId, openPurchaseId)
+            }
         }
         if (!propertyModuleEnabled) {
             return TenantOnboardingNextAction(
@@ -207,12 +225,18 @@ class TenantLaunchEvaluator(
     }
 
     private fun administratorStatus(tenantId: UUID): String {
-        return when (requestContextHolder.currentOrNull()?.identity) {
-            is RequestIdentity.Platform, is RequestIdentity.Support ->
-                administratorReadinessPort.readiness(tenantId).status
-            else -> tenantVisibleAdministratorStatus(tenantId)
+        return if (isPlatformSession()) {
+            administratorReadinessPort.readiness(tenantId).status
+        } else {
+            tenantVisibleAdministratorStatus(tenantId)
         }
     }
+
+    private fun isPlatformSession(): Boolean =
+        when (requestContextHolder.currentOrNull()?.identity) {
+            is RequestIdentity.Platform, is RequestIdentity.Support -> true
+            else -> false
+        }
 
     /**
      * `tenant_administrator_readiness()` is platform-only (it refuses a mixed

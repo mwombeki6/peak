@@ -729,7 +729,7 @@ export interface paths {
          * Request
          * @description Request
          */
-        post: operations["request"];
+        post: operations["request_1"];
         delete?: never;
         options?: never;
         head?: never;
@@ -922,6 +922,46 @@ export interface paths {
          * @description Create Plan
          */
         post: operations["createPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/onboarding/{applicationId}/verification-cases/{caseId}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Review Verification Case
+         * @description Review Verification Case
+         */
+        post: operations["reviewVerificationCase_1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/onboarding/{applicationId}/provision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Provision Tenant
+         * @description Provision Tenant
+         */
+        post: operations["provisionTenant"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1179,7 +1219,27 @@ export interface paths {
          * Verification Cases
          * @description Verification Cases
          */
-        get: operations["verificationCases_1"];
+        get: operations["verificationCases_2"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/tenants/{tenantId}/verification-cases/{caseId}/documents/{documentId}/view-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Request Verification Document View
+         * @description Request Verification Document View
+         */
+        get: operations["requestVerificationDocumentView"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1379,7 +1439,7 @@ export interface paths {
          * List
          * @description List
          */
-        get: operations["list_6"];
+        get: operations["list_7"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1420,6 +1480,86 @@ export interface paths {
          * @description List Platform Permissions
          */
         get: operations["listPlatformPermissions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/onboarding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Applications
+         * @description List Applications
+         */
+        get: operations["listApplications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/onboarding/{applicationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Application
+         * @description Application
+         */
+        get: operations["application"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/onboarding/{applicationId}/verification-cases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Verification Cases
+         * @description Verification Cases
+         */
+        get: operations["verificationCases_3"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/onboarding/{applicationId}/verification-cases/{caseId}/documents/{documentId}/view-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Request Verification Document View
+         * @description Request Verification Document View
+         */
+        get: operations["requestVerificationDocumentView_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1854,6 +1994,7 @@ export interface components {
             /** Format: uuid */
             planId?: string;
             businessEmail?: string;
+            tenantNumber?: string;
             nextAction?: components["schemas"]["TenantOnboardingNextAction"] | null;
         };
         ReviewVerificationCaseHttpRequest: {
@@ -1868,7 +2009,9 @@ export interface components {
             /** Format: uuid */
             caseId?: string;
             /** Format: uuid */
-            tenantId?: string;
+            tenantId?: string | null;
+            /** Format: uuid */
+            onboardingApplicationId?: string | null;
             caseType?: string;
             requiredLevel?: string;
             status?: string;
@@ -2058,7 +2201,8 @@ export interface components {
         InviteTenantAdministratorHttpRequest: {
             fullName: string;
             /** Format: email */
-            email: string;
+            email?: string | null;
+            phoneNumber: string | null;
             /** Format: int64 */
             expiresInHours?: number;
         };
@@ -2067,7 +2211,8 @@ export interface components {
             invitationId?: string;
             /** Format: uuid */
             tenantId?: string;
-            email?: string;
+            email?: string | null;
+            phoneNumber?: string | null;
             /** Format: uuid */
             tenantRoleId?: string;
             /** Format: date-time */
@@ -2223,6 +2368,14 @@ export interface components {
             maxOutlets?: number;
             monthlyUsd?: number;
             annualUsd?: number;
+        };
+        PlatformOnboardingReviewHttpRequest: {
+            /** @enum {string} */
+            action: "START_REVIEW" | "REQUEST_INFORMATION" | "APPROVE" | "REJECT" | "SUSPEND";
+            reason?: string | null;
+            riskRating?: string | null;
+            /** Format: date-time */
+            expiresAt?: string | null;
         };
         ServiceHealthHttpRequest: {
             status: string;
@@ -2383,6 +2536,11 @@ export interface components {
             approve?: boolean;
             reason?: string | null;
         };
+        VerificationDocumentViewAuthorization: {
+            url?: string;
+            /** Format: date-time */
+            expiresAt?: string;
+        };
         TenantControlOverview: {
             tenant?: components["schemas"]["TenantCatalogItem"];
             legalName?: string;
@@ -2501,6 +2659,36 @@ export interface components {
             code?: string;
             namespace?: string;
             description?: string | null;
+        };
+        OnboardingApplicationQueueItem: {
+            /** Format: uuid */
+            applicationId?: string;
+            representativeFullName?: string;
+            representativePhone?: string;
+            businessName?: string | null;
+            applicationStatus?: string;
+            /** Format: uuid */
+            caseId?: string | null;
+            caseStatus?: string | null;
+            /** Format: date-time */
+            caseSubmittedAt?: string | null;
+            /** Format: date-time */
+            createdAt?: string;
+        };
+        OnboardingApplicationDetail: {
+            /** Format: uuid */
+            applicationId?: string;
+            representativeFullName?: string;
+            representativePhone?: string;
+            businessName?: string | null;
+            legalName?: string | null;
+            businessEmail?: string | null;
+            countryCode?: string;
+            status?: string;
+            /** Format: uuid */
+            tenantId?: string | null;
+            /** Format: date-time */
+            createdAt?: string;
         };
         FleetSnapshot: {
             services?: components["schemas"]["PlatformServiceSummary"][];
@@ -2667,6 +2855,7 @@ export interface components {
             expiresAt?: string | null;
             status?: string;
             rejectionReason?: string | null;
+            scanStatus?: string;
         };
         TenantWorkflowStepSummary: {
             stepKey?: string;
@@ -5363,7 +5552,7 @@ export interface operations {
             };
         };
     };
-    request: {
+    request_1: {
         parameters: {
             query?: never;
             header?: {
@@ -6169,6 +6358,133 @@ export interface operations {
             };
         };
     };
+    reviewVerificationCase_1: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                applicationId: string;
+                caseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformOnboardingReviewHttpRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["VerificationCaseSummary"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    provisionTenant: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Required by replay-protected commands; reuse returns the stored response. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                applicationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["TenantResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
     recordHealth: {
         parameters: {
             query?: never;
@@ -6933,7 +7249,7 @@ export interface operations {
             };
         };
     };
-    verificationCases_1: {
+    verificationCases_2: {
         parameters: {
             query?: never;
             header?: never;
@@ -6951,6 +7267,66 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["VerificationCaseSummary"][];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    requestVerificationDocumentView: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+                caseId: string;
+                documentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["VerificationDocumentViewAuthorization"];
                 };
             };
             /** @description Invalid request */
@@ -7517,7 +7893,7 @@ export interface operations {
             };
         };
     };
-    list_6: {
+    list_7: {
         parameters: {
             query?: {
                 tenantId?: string;
@@ -7651,6 +8027,240 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["PlatformPermissionHttpResponse"][];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    listApplications: {
+        parameters: {
+            query?: {
+                status?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["OnboardingApplicationQueueItem"][];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    application: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                applicationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["OnboardingApplicationDetail"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    verificationCases_3: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                applicationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["VerificationCaseSummary"][];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Insufficient permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Resource not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    requestVerificationDocumentView_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                applicationId: string;
+                caseId: string;
+                documentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["VerificationDocumentViewAuthorization"];
                 };
             };
             /** @description Invalid request */

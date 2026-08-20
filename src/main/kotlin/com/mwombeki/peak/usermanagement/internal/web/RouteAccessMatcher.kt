@@ -130,6 +130,7 @@ class RouteAccessMatcher {
             is RequestIdentity.Public -> tenantId
             is RequestIdentity.Support -> tenantId
             is RequestIdentity.Platform -> null
+            is RequestIdentity.OnboardingApplicant -> null
         }
     }
 
@@ -138,6 +139,7 @@ class RouteAccessMatcher {
             is RequestIdentity.Public -> propertyId
             is RequestIdentity.Platform,
             is RequestIdentity.Support,
+            is RequestIdentity.OnboardingApplicant,
             is RequestIdentity.Tenant -> null
         }
     }

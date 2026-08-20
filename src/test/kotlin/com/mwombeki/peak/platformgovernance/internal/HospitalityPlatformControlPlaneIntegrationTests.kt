@@ -1,5 +1,6 @@
 package com.mwombeki.peak.platformgovernance.internal
 
+import com.mwombeki.peak.FakeClamAvServer
 import com.mwombeki.peak.TestcontainersConfiguration
 import com.mwombeki.peak.platformgovernance.api.AssignPlatformReleaseCommand
 import com.mwombeki.peak.platformgovernance.api.ChangePlatformReleaseCommand
@@ -28,6 +29,8 @@ import com.mwombeki.peak.property.api.PortfolioRolloutTarget
 import com.mwombeki.peak.property.api.PortfolioTemplateAction
 import com.mwombeki.peak.property.api.RolloutPortfolioConfigCommand
 import com.mwombeki.peak.property.api.UpdatePortfolioRolloutCommand
+import com.mwombeki.peak.reliability.api.OutboxDestination
+import com.mwombeki.peak.reliability.internal.OutboxWorkerProcessor
 import com.mwombeki.peak.shared.context.AssuranceLevel
 import com.mwombeki.peak.shared.context.AuthenticationAssurance
 import com.mwombeki.peak.shared.context.RequestContext
@@ -42,6 +45,7 @@ import com.mwombeki.peak.tenantmanagement.api.PlatformCommercialControlPort
 import com.mwombeki.peak.tenantmanagement.api.PlatformTenantControlPort
 import com.mwombeki.peak.tenantmanagement.api.PrivacyRequestAction
 import com.mwombeki.peak.tenantmanagement.api.ProcessPrivacyRequestCommand
+import com.mwombeki.peak.tenantmanagement.api.RequestVerificationDocumentUploadCommand
 import com.mwombeki.peak.tenantmanagement.api.ReviewIdentityConnectionCommand
 import com.mwombeki.peak.tenantmanagement.api.ReviewVerificationCaseCommand
 import com.mwombeki.peak.tenantmanagement.api.TenantTrustControlPort
@@ -49,11 +53,18 @@ import com.mwombeki.peak.tenantmanagement.api.TenantControlAction
 import com.mwombeki.peak.tenantmanagement.api.TenantControlTransitionCommand
 import com.mwombeki.peak.tenantmanagement.api.UpsertIdentityConnectionCommand
 import com.mwombeki.peak.tenantmanagement.api.VerificationReviewAction
+import com.mwombeki.peak.tenantmanagement.api.VerificationSubjectRef
 import com.mwombeki.peak.usermanagement.api.BreakGlassAccessPort
 import com.mwombeki.peak.usermanagement.api.DecideBreakGlassAccessCommand
 import com.mwombeki.peak.usermanagement.api.RequestBreakGlassAccessCommand
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.security.MessageDigest
 import java.time.Instant
 import java.time.LocalDate
+import java.util.HexFormat
 import java.util.UUID
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -65,10 +76,12 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.annotation.Import
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.test.context.DynamicPropertyRegistry
+import org.springframework.test.context.DynamicPropertySource
 import org.testcontainers.junit.jupiter.Testcontainers
 
 @Import(TestcontainersConfiguration::class)
-@SpringBootTest
+@SpringBootTest(properties = ["peak.testcontainers.minio.enabled=true"])
 @Testcontainers(disabledWithoutDocker = true)
 class HospitalityPlatformControlPlaneIntegrationTests {
     @Autowired private lateinit var tenantControl: PlatformTenantControlPort
@@ -82,6 +95,26 @@ class HospitalityPlatformControlPlaneIntegrationTests {
     @Autowired private lateinit var portfolio: PortfolioControlPort
     @Autowired private lateinit var contextHolder: RequestContextHolder
     @Autowired private lateinit var jdbc: JdbcTemplate
+    @Autowired private lateinit var outboxWorkerProcessor: OutboxWorkerProcessor
+    private val httpClient: HttpClient = HttpClient.newHttpClient()
+
+    companion object {
+        private val fakeClamAv = FakeClamAvServer()
+
+        @JvmStatic
+        @DynamicPropertySource
+        fun kycStorageProperties(registry: DynamicPropertyRegistry) {
+            val container = TestcontainersConfiguration.sharedMinioContainer
+            container.start()
+            registry.add("peak.verification.storage.enabled") { "true" }
+            registry.add("peak.verification.storage.endpoint") { container.s3URL }
+            registry.add("peak.verification.storage.access-key") { container.userName }
+            registry.add("peak.verification.storage.secret-key") { container.password }
+            registry.add("peak.verification.malware-scan.enabled") { "true" }
+            registry.add("peak.verification.malware-scan.host") { "localhost" }
+            registry.add("peak.verification.malware-scan.port") { fakeClamAv.port }
+        }
+    }
 
     @AfterTest
     fun clearContext() = contextHolder.clear()
@@ -99,25 +132,39 @@ class HospitalityPlatformControlPlaneIntegrationTests {
         assertEquals(1, commercial.captureUsageSnapshot(fixture.tenantId, LocalDate.now()).propertyCount)
 
         tenant(fixture)
+        val subject = VerificationSubjectRef.Tenant(fixture.tenantId)
         val verification = trust.createVerificationCase(
-            CreateVerificationCaseCommand(fixture.tenantId, "initial_onboarding", "standard"),
+            CreateVerificationCaseCommand(subject, "initial_onboarding", "standard"),
         )
         tenant(fixture)
+        val uploadAuthorization = trust.requestVerificationDocumentUpload(
+            RequestVerificationDocumentUploadCommand(subject, verification.caseId, "application/pdf"),
+        )
+        val documentBytes = "not a real PDF, just test bytes".toByteArray()
+        val putResponse = httpClient.send(
+            HttpRequest.newBuilder(URI.create(uploadAuthorization.uploadUrl))
+                .PUT(HttpRequest.BodyPublishers.ofByteArray(documentBytes))
+                .build(),
+            HttpResponse.BodyHandlers.discarding(),
+        )
+        assertEquals(200, putResponse.statusCode())
+        tenant(fixture)
         trust.addVerificationDocument(AddVerificationDocumentCommand(
-            fixture.tenantId, verification.caseId, "business_registration", "***1234",
-            "verification/${verification.caseId}.pdf", "a".repeat(64), "application/pdf",
+            subject, verification.caseId, "business_registration", "***1234",
+            uploadAuthorization.objectKey, documentBytes.sha256Hex(), "application/pdf",
             LocalDate.now().minusYears(1), LocalDate.now().plusYears(1),
         ))
+        outboxWorkerProcessor.processBatchBlocking(OutboxDestination.DOCUMENT_SCAN)
         tenant(fixture)
-        trust.submitVerificationCase(fixture.tenantId, verification.caseId)
+        trust.submitVerificationCase(subject, verification.caseId)
         platform(root)
         trust.reviewVerificationCase(ReviewVerificationCaseCommand(
-            fixture.tenantId, verification.caseId, VerificationReviewAction.START_REVIEW,
+            subject, verification.caseId, VerificationReviewAction.START_REVIEW,
             null, "low", null,
         ))
         platform(root)
         val approved = trust.reviewVerificationCase(ReviewVerificationCaseCommand(
-            fixture.tenantId, verification.caseId, VerificationReviewAction.APPROVE,
+            subject, verification.caseId, VerificationReviewAction.APPROVE,
             "Evidence verified", "low", null,
         ))
         assertEquals("approved", approved.status)
@@ -607,6 +654,9 @@ class HospitalityPlatformControlPlaneIntegrationTests {
             "corr-$token", "idem-$token", "POST", "/api/v1/tenants/${fixture.tenantId}",
         ))
     }
+
+    private fun ByteArray.sha256Hex(): String =
+        HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(this))
 
     private data class Fixture(
         val tenantId: UUID,

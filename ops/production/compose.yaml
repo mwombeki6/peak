@@ -96,6 +96,103 @@ services:
     ports:
       - "${KEYCLOAK_BIND_ADDRESS}:8081:8080"
 
+  valkey:
+    image: valkey/valkey:9.1.1@sha256:3acc0687f2a2e1091fae6450d7842dd658c941338cf0a873ddd9e14b9e4ea4dd
+    restart: unless-stopped
+    # Nothing in here is authoritative. Every key is a rate-limit counter, a send
+    # cooldown, a short-lived revocation cache or presence, so the server is told to
+    # keep none of it: no snapshot, no append-only file, and deliberately no volume.
+    # Losing the whole keyspace on restart is the designed behaviour, and the
+    # PostgreSQL limiter behind RateLimitStore is what keeps refusals honest while
+    # it is gone.
+    #
+    # An eviction policy rather than the noeviction default for the same reason. At
+    # the memory ceiling a cache should shed its coldest keys; refusing writes would
+    # turn a full cache into failed staff logins.
+    command:
+      - valkey-server
+      - --requirepass
+      - ${VALKEY_PASSWORD}
+      - --maxmemory
+      - ${VALKEY_MAXMEMORY}
+      - --maxmemory-policy
+      - ${VALKEY_MAXMEMORY_POLICY}
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+    # The image leaves PID 1 as root and drops to uid 999 from its entrypoint.
+    # Naming the account keeps root out of the container entirely.
+    user: valkey
+    security_opt:
+      - no-new-privileges:true
+    # Above maxmemory, not equal to it: allocator fragmentation and client output
+    # buffers live outside the keyspace budget, and a cgroup kill loses the cache
+    # rather than evicting from it.
+    mem_limit: 384m
+    cpus: 0.5
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli -a ${VALKEY_PASSWORD} --no-auth-warning ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Backs peak.reporting.storage and peak.verification.storage, on separate buckets on this
+  # one instance. Unlike Valkey, what's in here is authoritative — KYC evidence and report
+  # exports, not a cache — so it gets a real volume and no eviction policy.
+  #
+  # peak-api/-platform/-worker don't depend_on this and it isn't in the readiness group below,
+  # for the same reason Valkey isn't: KYB document upload/review and report generation degrade
+  # on their own if this is down, but reservations, check-in, POS and cash settlement never
+  # touch it and must not be held hostage to it.
+  minio:
+    # Not digest-pinned like postgres/valkey above — pin this to a verified digest before
+    # using this file for a real deployment; fabricating one here would be worse than
+    # leaving it a tag.
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      # One root credential for the one instance backing both buckets. True per-bucket
+      # credential isolation (a MinIO IAM user + policy scoped to each bucket) needs an
+      # init step beyond what a compose file declares on its own — not done here. Until
+      # then, PEAK_REPORT_STORAGE_ACCESS_KEY/SECRET_KEY and
+      # PEAK_VERIFICATION_STORAGE_ACCESS_KEY/SECRET_KEY must both resolve to this pair.
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BROWSER: "off"
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 128
+    volumes:
+      - peak-minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  clamav:
+    # Not digest-pinned, same caveat as minio above.
+    image: clamav/clamav:1.4
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g
+    cpus: 1.0
+    volumes:
+      - peak-clamav-data:/var/lib/clamav
+    healthcheck:
+      # First start pulls virus definitions before clamd is ready to answer — slow.
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 300s
+
   peak-migration:
     image: ${PEAK_IMAGE}
     restart: "no"
@@ -239,6 +336,17 @@ services:
       PEAK_FISCAL_PRODUCTION_APPROVED_PROVIDER_CODES: ${PEAK_FISCAL_PRODUCTION_APPROVED_PROVIDER_CODES}
       PEAK_FISCAL_GATEWAY_CREDENTIAL: ${PEAK_FISCAL_GATEWAY_CREDENTIAL}
       PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS: ${PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS}
+      # No depends_on on valkey, and no valkey member in the readiness group below.
+      # Both are deliberate. Reservations, check-in, POS ordering, housekeeping and
+      # cash settlement never touch it, so a Valkey that is down or not yet up must
+      # not stop this service starting or report it unready. What an outage does cost
+      # is the fast limiter: RateLimitStore falls through to PostgreSQL and the
+      # refusals go on happening.
+      PEAK_VALKEY_ENABLED: ${PEAK_VALKEY_ENABLED}
+      PEAK_VALKEY_HOST: ${PEAK_VALKEY_HOST}
+      PEAK_VALKEY_PORT: ${PEAK_VALKEY_PORT}
+      PEAK_VALKEY_PASSWORD: ${VALKEY_PASSWORD}
+      PEAK_VALKEY_TIMEOUT: ${PEAK_VALKEY_TIMEOUT}
       PEAK_OUTBOX_WORKER_HEALTH_REQUIRED: "true"
       MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: readinessState,db,keycloakDiscovery,workerRuntime,realtimeJournal,clickPesa
       PEAK_DB_POOL_MAX_SIZE: ${PEAK_DB_POOL_MAX_SIZE}
@@ -266,6 +374,20 @@ services:
       PEAK_REPORT_STORAGE_SECRET_KEY: ${PEAK_REPORT_STORAGE_SECRET_KEY}
       PEAK_REPORT_STORAGE_BUCKET: ${PEAK_REPORT_STORAGE_BUCKET}
       PEAK_REPORT_STORAGE_REGION: ${PEAK_REPORT_STORAGE_REGION}
+      PEAK_VERIFICATION_STORAGE_ENABLED: ${PEAK_VERIFICATION_STORAGE_ENABLED}
+      PEAK_VERIFICATION_STORAGE_ENDPOINT: ${PEAK_VERIFICATION_STORAGE_ENDPOINT}
+      PEAK_VERIFICATION_STORAGE_ACCESS_KEY: ${PEAK_VERIFICATION_STORAGE_ACCESS_KEY}
+      PEAK_VERIFICATION_STORAGE_SECRET_KEY: ${PEAK_VERIFICATION_STORAGE_SECRET_KEY}
+      PEAK_VERIFICATION_STORAGE_BUCKET: ${PEAK_VERIFICATION_STORAGE_BUCKET}
+      PEAK_VERIFICATION_STORAGE_REGION: ${PEAK_VERIFICATION_STORAGE_REGION}
+      PEAK_VERIFICATION_MALWARE_SCAN_ENABLED: ${PEAK_VERIFICATION_MALWARE_SCAN_ENABLED}
+      PEAK_VERIFICATION_MALWARE_SCAN_HOST: ${PEAK_VERIFICATION_MALWARE_SCAN_HOST}
+      PEAK_VERIFICATION_MALWARE_SCAN_PORT: ${PEAK_VERIFICATION_MALWARE_SCAN_PORT}
+      PEAK_IDENTITY_KEYCLOAK_ENABLED: ${PEAK_IDENTITY_KEYCLOAK_ENABLED}
+      PEAK_IDENTITY_KEYCLOAK_BASE_URL: ${PEAK_IDENTITY_KEYCLOAK_BASE_URL}
+      PEAK_IDENTITY_KEYCLOAK_REALM: ${PEAK_IDENTITY_KEYCLOAK_REALM}
+      PEAK_IDENTITY_KEYCLOAK_CLIENT_ID: ${PEAK_IDENTITY_KEYCLOAK_CLIENT_ID}
+      PEAK_IDENTITY_KEYCLOAK_CLIENT_SECRET: ${PEAK_IDENTITY_KEYCLOAK_CLIENT_SECRET}
     depends_on:
       postgres:
         condition: service_healthy
@@ -313,6 +435,12 @@ services:
       PEAK_ENVELOPE_KEY_BASE64: ${PEAK_ENVELOPE_KEY_BASE64}
       PEAK_ENVELOPE_PREVIOUS_KEY_REFERENCE: ${PEAK_ENVELOPE_PREVIOUS_KEY_REFERENCE}
       PEAK_ENVELOPE_PREVIOUS_KEY_BASE64: ${PEAK_ENVELOPE_PREVIOUS_KEY_BASE64}
+      # Optional infrastructure here too; see peak-api.
+      PEAK_VALKEY_ENABLED: ${PEAK_VALKEY_ENABLED}
+      PEAK_VALKEY_HOST: ${PEAK_VALKEY_HOST}
+      PEAK_VALKEY_PORT: ${PEAK_VALKEY_PORT}
+      PEAK_VALKEY_PASSWORD: ${VALKEY_PASSWORD}
+      PEAK_VALKEY_TIMEOUT: ${PEAK_VALKEY_TIMEOUT}
       PEAK_OUTBOX_WORKER_ENABLED: "false"
       PEAK_OUTBOX_WORKER_HEALTH_REQUIRED: "true"
       PEAK_DB_POOL_MAX_SIZE: ${PEAK_DB_POOL_MAX_SIZE}
@@ -327,6 +455,15 @@ services:
       PEAK_REPORT_STORAGE_SECRET_KEY: ${PEAK_REPORT_STORAGE_SECRET_KEY}
       PEAK_REPORT_STORAGE_BUCKET: ${PEAK_REPORT_STORAGE_BUCKET}
       PEAK_REPORT_STORAGE_REGION: ${PEAK_REPORT_STORAGE_REGION}
+      PEAK_VERIFICATION_STORAGE_ENABLED: ${PEAK_VERIFICATION_STORAGE_ENABLED}
+      PEAK_VERIFICATION_STORAGE_ENDPOINT: ${PEAK_VERIFICATION_STORAGE_ENDPOINT}
+      PEAK_VERIFICATION_STORAGE_ACCESS_KEY: ${PEAK_VERIFICATION_STORAGE_ACCESS_KEY}
+      PEAK_VERIFICATION_STORAGE_SECRET_KEY: ${PEAK_VERIFICATION_STORAGE_SECRET_KEY}
+      PEAK_VERIFICATION_STORAGE_BUCKET: ${PEAK_VERIFICATION_STORAGE_BUCKET}
+      PEAK_VERIFICATION_STORAGE_REGION: ${PEAK_VERIFICATION_STORAGE_REGION}
+      PEAK_VERIFICATION_MALWARE_SCAN_ENABLED: ${PEAK_VERIFICATION_MALWARE_SCAN_ENABLED}
+      PEAK_VERIFICATION_MALWARE_SCAN_HOST: ${PEAK_VERIFICATION_MALWARE_SCAN_HOST}
+      PEAK_VERIFICATION_MALWARE_SCAN_PORT: ${PEAK_VERIFICATION_MALWARE_SCAN_PORT}
       PEAK_OTLP_METRICS_EXPORT_ENABLED: ${PEAK_OTLP_METRICS_EXPORT_ENABLED}
       PEAK_OTLP_LOGGING_EXPORT_ENABLED: ${PEAK_OTLP_LOGGING_EXPORT_ENABLED}
       PEAK_OTLP_TRACING_EXPORT_ENABLED: ${PEAK_OTLP_TRACING_EXPORT_ENABLED}
@@ -387,6 +524,12 @@ services:
       PEAK_FISCAL_PRODUCTION_APPROVED_PROVIDER_CODES: ${PEAK_FISCAL_PRODUCTION_APPROVED_PROVIDER_CODES}
       PEAK_FISCAL_GATEWAY_CREDENTIAL: ${PEAK_FISCAL_GATEWAY_CREDENTIAL}
       PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS: ${PEAK_OUTBOUND_PROVIDER_ALLOWED_HOSTS}
+      # Optional infrastructure here too; see peak-api.
+      PEAK_VALKEY_ENABLED: ${PEAK_VALKEY_ENABLED}
+      PEAK_VALKEY_HOST: ${PEAK_VALKEY_HOST}
+      PEAK_VALKEY_PORT: ${PEAK_VALKEY_PORT}
+      PEAK_VALKEY_PASSWORD: ${VALKEY_PASSWORD}
+      PEAK_VALKEY_TIMEOUT: ${PEAK_VALKEY_TIMEOUT}
       PEAK_WORKER_DB_POOL_MAX_SIZE: ${PEAK_WORKER_DB_POOL_MAX_SIZE}
       PEAK_WORKER_DB_POOL_MIN_IDLE: ${PEAK_WORKER_DB_POOL_MIN_IDLE}
       PEAK_DB_CONNECTION_TIMEOUT: ${PEAK_DB_CONNECTION_TIMEOUT}
@@ -402,6 +545,15 @@ services:
       PEAK_REPORT_STORAGE_SECRET_KEY: ${PEAK_REPORT_STORAGE_SECRET_KEY}
       PEAK_REPORT_STORAGE_BUCKET: ${PEAK_REPORT_STORAGE_BUCKET}
       PEAK_REPORT_STORAGE_REGION: ${PEAK_REPORT_STORAGE_REGION}
+      PEAK_VERIFICATION_STORAGE_ENABLED: ${PEAK_VERIFICATION_STORAGE_ENABLED}
+      PEAK_VERIFICATION_STORAGE_ENDPOINT: ${PEAK_VERIFICATION_STORAGE_ENDPOINT}
+      PEAK_VERIFICATION_STORAGE_ACCESS_KEY: ${PEAK_VERIFICATION_STORAGE_ACCESS_KEY}
+      PEAK_VERIFICATION_STORAGE_SECRET_KEY: ${PEAK_VERIFICATION_STORAGE_SECRET_KEY}
+      PEAK_VERIFICATION_STORAGE_BUCKET: ${PEAK_VERIFICATION_STORAGE_BUCKET}
+      PEAK_VERIFICATION_STORAGE_REGION: ${PEAK_VERIFICATION_STORAGE_REGION}
+      PEAK_VERIFICATION_MALWARE_SCAN_ENABLED: ${PEAK_VERIFICATION_MALWARE_SCAN_ENABLED}
+      PEAK_VERIFICATION_MALWARE_SCAN_HOST: ${PEAK_VERIFICATION_MALWARE_SCAN_HOST}
+      PEAK_VERIFICATION_MALWARE_SCAN_PORT: ${PEAK_VERIFICATION_MALWARE_SCAN_PORT}
     depends_on:
       postgres:
         condition: service_healthy
@@ -409,3 +561,5 @@ services:
 volumes:
   peak-postgres-data:
   peak-keycloak-db-data:
+  peak-minio-data:
+  peak-clamav-data:

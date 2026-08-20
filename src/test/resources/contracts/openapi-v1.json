@@ -5827,6 +5827,166 @@
         }
       }
     },
+    "/api/v1/verifications" : {
+      "post" : {
+        "tags" : [ "verification-controller" ],
+        "summary" : "Request",
+        "description" : "Request",
+        "operationId" : "request",
+        "parameters" : [ {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RequestVerificationHttpRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VerificationChallengeHttpResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/verifications/confirm" : {
+      "post" : {
+        "tags" : [ "verification-controller" ],
+        "summary" : "Confirm",
+        "description" : "Confirm",
+        "operationId" : "confirm",
+        "parameters" : [ {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ConfirmVerificationHttpRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VerificationOutcomeHttpResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/tenants/{tenantId}/verification-cases" : {
       "get" : {
         "tags" : [ "tenant-trust-controller" ],
@@ -6120,6 +6280,102 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/VerificationDocumentSummary"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tenants/{tenantId}/verification-cases/{caseId}/documents/upload-url" : {
+      "post" : {
+        "tags" : [ "tenant-trust-controller" ],
+        "summary" : "Request Verification Document Upload",
+        "description" : "Request Verification Document Upload",
+        "operationId" : "requestVerificationDocumentUpload",
+        "parameters" : [ {
+          "name" : "tenantId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "caseId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/VerificationDocumentUploadHttpRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VerificationDocumentUploadAuthorization"
                 }
               }
             }
@@ -7161,6 +7417,84 @@
       }
     },
     "/api/v1/tenants/{tenantId}/staff" : {
+      "get" : {
+        "tags" : [ "staff-provision-controller" ],
+        "summary" : "List Staff",
+        "description" : "List Staff",
+        "operationId" : "listStaff",
+        "parameters" : [ {
+          "name" : "tenantId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "propertyId",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/StaffDirectoryHttpEntry"
+                  }
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      },
       "post" : {
         "tags" : [ "staff-provision-controller" ],
         "summary" : "Provision",
@@ -12708,6 +13042,76 @@
       }
     },
     "/api/v1/properties/{propertyId}/rates" : {
+      "get" : {
+        "tags" : [ "property-management-controller" ],
+        "summary" : "List Base Rates",
+        "description" : "List Base Rates",
+        "operationId" : "listBaseRates",
+        "parameters" : [ {
+          "name" : "propertyId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/BaseRateResponse"
+                  }
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      },
       "post" : {
         "tags" : [ "property-management-controller" ],
         "summary" : "Configure Base Rate",
@@ -13851,6 +14255,456 @@
         }
       }
     },
+    "/api/v1/properties/{propertyId}/pos-print-jobs/{jobId}/reprint" : {
+      "post" : {
+        "tags" : [ "pos-print-job-controller" ],
+        "summary" : "Reprint",
+        "description" : "Reprint",
+        "operationId" : "reprint",
+        "parameters" : [ {
+          "name" : "propertyId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "jobId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PosPrintJobResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/properties/{propertyId}/pos-print-jobs/{jobId}/reclaim" : {
+      "post" : {
+        "tags" : [ "pos-print-job-controller" ],
+        "summary" : "Reclaim",
+        "description" : "Reclaim",
+        "operationId" : "reclaim",
+        "parameters" : [ {
+          "name" : "propertyId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "jobId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PosPrintJobReclaimRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PosPrintJobResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/properties/{propertyId}/pos-print-jobs/{jobId}/printed" : {
+      "post" : {
+        "tags" : [ "pos-print-job-controller" ],
+        "summary" : "Printed",
+        "description" : "Printed",
+        "operationId" : "printed",
+        "parameters" : [ {
+          "name" : "propertyId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "jobId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PosPrintJobResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/properties/{propertyId}/pos-print-jobs/{jobId}/failed" : {
+      "post" : {
+        "tags" : [ "pos-print-job-controller" ],
+        "summary" : "Failed",
+        "description" : "Failed",
+        "operationId" : "failed",
+        "parameters" : [ {
+          "name" : "propertyId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "jobId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PosPrintJobFailureRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PosPrintJobResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/properties/{propertyId}/pos-print-jobs/{jobId}/claim" : {
+      "post" : {
+        "tags" : [ "pos-print-job-controller" ],
+        "summary" : "Claim",
+        "description" : "Claim",
+        "operationId" : "claim",
+        "parameters" : [ {
+          "name" : "propertyId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "jobId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PosPrintJobResponse"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/properties/{propertyId}/pos-orders" : {
       "post" : {
         "tags" : [ "pos-order-controller" ],
@@ -14332,6 +15186,76 @@
       }
     },
     "/api/v1/properties/{propertyId}/pos-config/outlets" : {
+      "get" : {
+        "tags" : [ "pos-configuration-controller" ],
+        "summary" : "List Outlets",
+        "description" : "List Outlets",
+        "operationId" : "listOutlets",
+        "parameters" : [ {
+          "name" : "propertyId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/PosOutletResponse"
+                  }
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      },
       "post" : {
         "tags" : [ "pos-configuration-controller" ],
         "summary" : "Create Outlet",
@@ -18265,7 +19189,7 @@
         "tags" : [ "housekeeping-controller" ],
         "summary" : "Claim",
         "description" : "Claim",
-        "operationId" : "claim",
+        "operationId" : "claim_1",
         "parameters" : [ {
           "name" : "propertyId",
           "in" : "path",
@@ -25177,7 +26101,7 @@
         "tags" : [ "break-glass-access-controller" ],
         "summary" : "Request",
         "description" : "Request",
-        "operationId" : "request",
+        "operationId" : "request_1",
         "parameters" : [ {
           "name" : "Idempotency-Key",
           "in" : "header",
@@ -26146,6 +27070,180 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/PlanSummary"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/onboarding/{applicationId}/verification-cases/{caseId}/review" : {
+      "post" : {
+        "tags" : [ "platform-onboarding-controller" ],
+        "summary" : "Review Verification Case",
+        "description" : "Review Verification Case",
+        "operationId" : "reviewVerificationCase_1",
+        "parameters" : [ {
+          "name" : "applicationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "caseId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PlatformOnboardingReviewHttpRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VerificationCaseSummary"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/onboarding/{applicationId}/provision" : {
+      "post" : {
+        "tags" : [ "platform-onboarding-controller" ],
+        "summary" : "Provision Tenant",
+        "description" : "Provision Tenant",
+        "operationId" : "provisionTenant",
+        "parameters" : [ {
+          "name" : "applicationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TenantResponse"
                 }
               }
             }
@@ -27476,6 +28574,976 @@
         "security" : [ ]
       }
     },
+    "/api/v1/onboarding/verify-phone" : {
+      "post" : {
+        "tags" : [ "onboarding-controller" ],
+        "summary" : "Verify Phone",
+        "description" : "Verify Phone",
+        "operationId" : "verifyPhone",
+        "parameters" : [ {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/VerifyPhoneHttpRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/OnboardingSessionReceipt"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/onboarding/request-access" : {
+      "post" : {
+        "tags" : [ "onboarding-controller" ],
+        "summary" : "Request Access",
+        "description" : "Request Access",
+        "operationId" : "requestAccess",
+        "parameters" : [ {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RequestAccessHttpRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RequestAccessReceipt"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/onboarding/me/verification-cases" : {
+      "get" : {
+        "tags" : [ "onboarding-controller" ],
+        "summary" : "Verification Cases",
+        "description" : "Verification Cases",
+        "operationId" : "verificationCases_1",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/VerificationCaseSummary"
+                  }
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [ "onboarding-controller" ],
+        "summary" : "Create Verification Case",
+        "description" : "Create Verification Case",
+        "operationId" : "createVerificationCase_1",
+        "parameters" : [ {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateVerificationCaseHttpRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VerificationCaseSummary"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/onboarding/me/verification-cases/{caseId}/submit" : {
+      "post" : {
+        "tags" : [ "onboarding-controller" ],
+        "summary" : "Submit Verification Case",
+        "description" : "Submit Verification Case",
+        "operationId" : "submitVerificationCase_1",
+        "parameters" : [ {
+          "name" : "caseId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VerificationCaseSummary"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/onboarding/me/verification-cases/{caseId}/documents" : {
+      "post" : {
+        "tags" : [ "onboarding-controller" ],
+        "summary" : "Add Verification Document",
+        "description" : "Add Verification Document",
+        "operationId" : "addVerificationDocument_1",
+        "parameters" : [ {
+          "name" : "caseId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/OnboardingVerificationDocumentHttpRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VerificationDocumentSummary"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/onboarding/me/verification-cases/{caseId}/documents/upload-url" : {
+      "post" : {
+        "tags" : [ "onboarding-controller" ],
+        "summary" : "Request Verification Document Upload",
+        "description" : "Request Verification Document Upload",
+        "operationId" : "requestVerificationDocumentUpload_1",
+        "parameters" : [ {
+          "name" : "caseId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/OnboardingVerificationDocumentUploadHttpRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VerificationDocumentUploadAuthorization"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/onboarding/me/profile" : {
+      "post" : {
+        "tags" : [ "onboarding-controller" ],
+        "summary" : "Update Profile",
+        "description" : "Update Profile",
+        "operationId" : "updateProfile",
+        "parameters" : [ {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/UpdateProfileHttpRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK"
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/invitations/{invitationToken}/verify-code" : {
+      "post" : {
+        "tags" : [ "account-activation-controller" ],
+        "summary" : "Verify Invitation Code",
+        "description" : "Verify Invitation Code",
+        "operationId" : "verifyInvitationCode",
+        "parameters" : [ {
+          "name" : "invitationToken",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/VerifyCodeHttpRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SetupGrant"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        },
+        "security" : [ ]
+      }
+    },
+    "/api/v1/invitations/{invitationToken}/set-credential" : {
+      "post" : {
+        "tags" : [ "account-activation-controller" ],
+        "summary" : "Set Invitation Credential",
+        "description" : "Set Invitation Credential",
+        "operationId" : "setInvitationCredential",
+        "parameters" : [ {
+          "name" : "invitationToken",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SetCredentialHttpRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CredentialAccepted"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        },
+        "security" : [ ]
+      }
+    },
+    "/api/v1/invitations/{invitationToken}/send-code" : {
+      "post" : {
+        "tags" : [ "account-activation-controller" ],
+        "summary" : "Send Invitation Code",
+        "description" : "Send Invitation Code",
+        "operationId" : "sendInvitationCode",
+        "parameters" : [ {
+          "name" : "invitationToken",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CodeDispatch"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        },
+        "security" : [ ]
+      }
+    },
+    "/api/v1/invitations/{invitationToken}/confirm-recovery-code" : {
+      "post" : {
+        "tags" : [ "account-activation-controller" ],
+        "summary" : "Confirm Recovery Code",
+        "description" : "Confirm Recovery Code",
+        "operationId" : "confirmRecoveryCode",
+        "parameters" : [ {
+          "name" : "invitationToken",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ConfirmRecoveryHttpRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CredentialAccepted"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        },
+        "security" : [ ]
+      }
+    },
     "/api/v1/invitations/accept" : {
       "post" : {
         "tags" : [ "tenant-user-invitation-controller" ],
@@ -27816,6 +29884,67 @@
       }
     },
     "/api/v1/communication/templates" : {
+      "get" : {
+        "tags" : [ "communication-controller" ],
+        "summary" : "List Templates",
+        "description" : "List Templates",
+        "operationId" : "listTemplates",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/TemplateResponse"
+                  }
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      },
       "post" : {
         "tags" : [ "communication-controller" ],
         "summary" : "Create Template",
@@ -28685,6 +30814,249 @@
             }
           }
         }
+      }
+    },
+    "/api/v1/auth/recovery/verify-code" : {
+      "post" : {
+        "tags" : [ "account-activation-controller" ],
+        "summary" : "Verify Recovery Code",
+        "description" : "Verify Recovery Code",
+        "operationId" : "verifyRecoveryCode",
+        "parameters" : [ {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RecoveryVerifyHttpRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SetupGrant"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        },
+        "security" : [ ]
+      }
+    },
+    "/api/v1/auth/recovery/start" : {
+      "post" : {
+        "tags" : [ "account-activation-controller" ],
+        "summary" : "Start Recovery",
+        "description" : "Start Recovery",
+        "operationId" : "startRecovery",
+        "parameters" : [ {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RecoveryStartHttpRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CodeDispatch"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        },
+        "security" : [ ]
+      }
+    },
+    "/api/v1/auth/recovery/set-credential" : {
+      "post" : {
+        "tags" : [ "account-activation-controller" ],
+        "summary" : "Set Recovery Credential",
+        "description" : "Set Recovery Credential",
+        "operationId" : "setRecoveryCredential",
+        "parameters" : [ {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Required by replay-protected commands; reuse returns the stored response.",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 200
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RecoverySetCredentialHttpRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CredentialAccepted"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        },
+        "security" : [ ]
       }
     },
     "/api/v1/properties/{propertyId}/reservations/{reservationId}" : {
@@ -30022,6 +32394,86 @@
         }
       }
     },
+    "/api/v1/tenants/{tenantId}/devices" : {
+      "get" : {
+        "tags" : [ "device-pairing-controller" ],
+        "summary" : "List Devices",
+        "description" : "List Devices",
+        "operationId" : "listDevices",
+        "parameters" : [ {
+          "name" : "tenantId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "propertyId",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/PairedDeviceHttpSummary"
+                  }
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/tenants/{tenantId}/commercial" : {
       "get" : {
         "tags" : [ "tenant-commercial-controller" ],
@@ -31146,6 +33598,85 @@
         }
       }
     },
+    "/api/v1/properties/{propertyId}/pos-print-jobs" : {
+      "get" : {
+        "tags" : [ "pos-print-job-controller" ],
+        "summary" : "List",
+        "description" : "List",
+        "operationId" : "list_5",
+        "parameters" : [ {
+          "name" : "propertyId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "status",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/PosPrintJobResponse"
+                  }
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/properties/{propertyId}/pos-orders/{orderId}" : {
       "get" : {
         "tags" : [ "pos-order-controller" ],
@@ -31755,7 +34286,7 @@
         "tags" : [ "kitchen-ticket-controller" ],
         "summary" : "List",
         "description" : "List",
-        "operationId" : "list_5",
+        "operationId" : "list_6",
         "parameters" : [ {
           "name" : "propertyId",
           "in" : "path",
@@ -32834,7 +35365,7 @@
         "tags" : [ "platform-tenant-trust-controller" ],
         "summary" : "Verification Cases",
         "description" : "Verification Cases",
-        "operationId" : "verificationCases_1",
+        "operationId" : "verificationCases_2",
         "parameters" : [ {
           "name" : "tenantId",
           "in" : "path",
@@ -32854,6 +35385,91 @@
                   "items" : {
                     "$ref" : "#/components/schemas/VerificationCaseSummary"
                   }
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/tenants/{tenantId}/verification-cases/{caseId}/documents/{documentId}/view-url" : {
+      "get" : {
+        "tags" : [ "platform-tenant-trust-controller" ],
+        "summary" : "Request Verification Document View",
+        "description" : "Request Verification Document View",
+        "operationId" : "requestVerificationDocumentView",
+        "parameters" : [ {
+          "name" : "tenantId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "caseId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "documentId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VerificationDocumentViewAuthorization"
                 }
               }
             }
@@ -33561,7 +36177,7 @@
         "tags" : [ "platform-support-controller" ],
         "summary" : "List",
         "description" : "List",
-        "operationId" : "list_6",
+        "operationId" : "list_7",
         "parameters" : [ {
           "name" : "tenantId",
           "in" : "query",
@@ -33737,6 +36353,306 @@
                   "items" : {
                     "$ref" : "#/components/schemas/PlatformPermissionHttpResponse"
                   }
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/onboarding" : {
+      "get" : {
+        "tags" : [ "platform-onboarding-controller" ],
+        "summary" : "List Applications",
+        "description" : "List Applications",
+        "operationId" : "listApplications",
+        "parameters" : [ {
+          "name" : "status",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/OnboardingApplicationQueueItem"
+                  }
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/onboarding/{applicationId}" : {
+      "get" : {
+        "tags" : [ "platform-onboarding-controller" ],
+        "summary" : "Application",
+        "description" : "Application",
+        "operationId" : "application",
+        "parameters" : [ {
+          "name" : "applicationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/OnboardingApplicationDetail"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/onboarding/{applicationId}/verification-cases" : {
+      "get" : {
+        "tags" : [ "platform-onboarding-controller" ],
+        "summary" : "Verification Cases",
+        "description" : "Verification Cases",
+        "operationId" : "verificationCases_3",
+        "parameters" : [ {
+          "name" : "applicationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/VerificationCaseSummary"
+                  }
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/onboarding/{applicationId}/verification-cases/{caseId}/documents/{documentId}/view-url" : {
+      "get" : {
+        "tags" : [ "platform-onboarding-controller" ],
+        "summary" : "Request Verification Document View",
+        "description" : "Request Verification Document View",
+        "operationId" : "requestVerificationDocumentView_1",
+        "parameters" : [ {
+          "name" : "applicationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "caseId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "documentId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/VerificationDocumentViewAuthorization"
                 }
               }
             }
@@ -34204,6 +37120,75 @@
             }
           }
         }
+      }
+    },
+    "/api/v1/invitations/{invitationToken}" : {
+      "get" : {
+        "tags" : [ "account-activation-controller" ],
+        "summary" : "Invitation",
+        "description" : "Invitation",
+        "operationId" : "invitation",
+        "parameters" : [ {
+          "name" : "invitationToken",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/InvitationDetails"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Invalid request",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Authentication required",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403" : {
+            "description" : "Insufficient permission",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Resource not found",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          }
+        },
+        "security" : [ ]
       }
     },
     "/api/v1/devices/pairing-requests/{pairingRequestId}" : {
@@ -35299,6 +38284,9 @@
           },
           "replayed" : {
             "type" : "boolean"
+          },
+          "propertyNumber" : {
+            "type" : [ "string", "null" ]
           }
         }
       },
@@ -36553,6 +39541,62 @@
           }
         }
       },
+      "RequestVerificationHttpRequest" : {
+        "type" : "object",
+        "properties" : {
+          "purpose" : {
+            "type" : "string",
+            "minLength" : 1
+          },
+          "destination" : {
+            "type" : "string",
+            "minLength" : 1
+          },
+          "subjectRef" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "destination", "purpose" ]
+      },
+      "VerificationChallengeHttpResponse" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "expiresAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "ConfirmVerificationHttpRequest" : {
+        "type" : "object",
+        "properties" : {
+          "purpose" : {
+            "type" : "string",
+            "minLength" : 1
+          },
+          "destination" : {
+            "type" : "string",
+            "minLength" : 1
+          },
+          "code" : {
+            "type" : "string",
+            "minLength" : 1
+          }
+        },
+        "required" : [ "code", "destination", "purpose" ]
+      },
+      "VerificationOutcomeHttpResponse" : {
+        "type" : "object",
+        "properties" : {
+          "verified" : {
+            "type" : "boolean"
+          }
+        }
+      },
       "CreateVerificationCaseHttpRequest" : {
         "type" : "object",
         "properties" : {
@@ -36575,7 +39619,11 @@
             "format" : "uuid"
           },
           "tenantId" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
+            "format" : "uuid"
+          },
+          "onboardingApplicationId" : {
+            "type" : [ "string", "null" ],
             "format" : "uuid"
           },
           "caseType" : {
@@ -36664,6 +39712,9 @@
           },
           "rejectionReason" : {
             "type" : [ "string", "null" ]
+          },
+          "scanStatus" : {
+            "type" : "string"
           }
         }
       },
@@ -36701,6 +39752,32 @@
           }
         },
         "required" : [ "contentHash", "documentType", "mimeType", "storageObjectKey" ]
+      },
+      "VerificationDocumentUploadHttpRequest" : {
+        "type" : "object",
+        "properties" : {
+          "mimeType" : {
+            "type" : "string",
+            "minLength" : 1,
+            "pattern" : "[a-zA-Z0-9.+-]+/[a-zA-Z0-9.+-]+"
+          }
+        },
+        "required" : [ "mimeType" ]
+      },
+      "VerificationDocumentUploadAuthorization" : {
+        "type" : "object",
+        "properties" : {
+          "objectKey" : {
+            "type" : "string"
+          },
+          "uploadUrl" : {
+            "type" : "string"
+          },
+          "expiresAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
       },
       "TenantUserLifecycleHttpResponse" : {
         "type" : "object",
@@ -36791,8 +39868,11 @@
         "type" : "object",
         "properties" : {
           "email" : {
-            "type" : "string",
-            "format" : "email",
+            "type" : [ "string", "null" ],
+            "format" : "email"
+          },
+          "phoneNumber" : {
+            "type" : [ "string", "null" ],
             "minLength" : 1
           },
           "tenantRoleId" : {
@@ -36812,7 +39892,7 @@
             "additionalProperties" : { }
           }
         },
-        "required" : [ "email", "tenantRoleId" ]
+        "required" : [ "phoneNumber", "tenantRoleId" ]
       },
       "TenantUserInvitationHttpResponse" : {
         "type" : "object",
@@ -36826,7 +39906,10 @@
             "format" : "uuid"
           },
           "email" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
+          },
+          "phoneNumber" : {
+            "type" : [ "string", "null" ]
           },
           "tenantRoleId" : {
             "type" : "string",
@@ -38455,6 +41538,107 @@
           }
         },
         "required" : [ "outletId" ]
+      },
+      "PosPrintJobResponse" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "propertyId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "outletId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "printerRouteId" : {
+            "type" : [ "string", "null" ],
+            "format" : "uuid"
+          },
+          "jobType" : {
+            "type" : "string"
+          },
+          "sourceType" : {
+            "type" : "string"
+          },
+          "sourceId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "sourceVersion" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "reprint" : {
+            "type" : "boolean"
+          },
+          "reprintedFromJobId" : {
+            "type" : [ "string", "null" ],
+            "format" : "uuid"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "document" : {
+            "type" : "object",
+            "additionalProperties" : { }
+          },
+          "claimedByDeviceId" : {
+            "type" : [ "string", "null" ],
+            "format" : "uuid"
+          },
+          "claimedAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "printedAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "failedAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "attempts" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "lastError" : {
+            "type" : [ "string", "null" ]
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "replayed" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "PosPrintJobReclaimRequest" : {
+        "type" : "object",
+        "properties" : {
+          "reason" : {
+            "type" : "string",
+            "maxLength" : 500,
+            "minLength" : 3
+          }
+        },
+        "required" : [ "reason" ]
+      },
+      "PosPrintJobFailureRequest" : {
+        "type" : "object",
+        "properties" : {
+          "error" : {
+            "type" : "string",
+            "maxLength" : 500,
+            "minLength" : 3
+          }
+        },
+        "required" : [ "error" ]
       },
       "CreatePosOrderRequest" : {
         "type" : "object",
@@ -41365,6 +44549,9 @@
           "businessEmail" : {
             "type" : "string"
           },
+          "tenantNumber" : {
+            "type" : "string"
+          },
           "nextAction" : {
             "oneOf" : [ {
               "$ref" : "#/components/schemas/TenantOnboardingNextAction"
@@ -41717,8 +44904,11 @@
             "minLength" : 1
           },
           "email" : {
-            "type" : "string",
-            "format" : "email",
+            "type" : [ "string", "null" ],
+            "format" : "email"
+          },
+          "phoneNumber" : {
+            "type" : [ "string", "null" ],
             "minLength" : 1
           },
           "expiresInHours" : {
@@ -41728,7 +44918,7 @@
             "minimum" : 1
           }
         },
-        "required" : [ "email", "fullName" ]
+        "required" : [ "fullName", "phoneNumber" ]
       },
       "TenantUserInvitationReceipt" : {
         "type" : "object",
@@ -41742,7 +44932,10 @@
             "format" : "uuid"
           },
           "email" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
+          },
+          "phoneNumber" : {
+            "type" : [ "string", "null" ]
           },
           "tenantRoleId" : {
             "type" : "string",
@@ -42146,6 +45339,26 @@
           }
         },
         "required" : [ "code", "name" ]
+      },
+      "PlatformOnboardingReviewHttpRequest" : {
+        "type" : "object",
+        "properties" : {
+          "action" : {
+            "type" : "string",
+            "enum" : [ "START_REVIEW", "REQUEST_INFORMATION", "APPROVE", "REJECT", "SUSPEND" ]
+          },
+          "reason" : {
+            "type" : [ "string", "null" ]
+          },
+          "riskRating" : {
+            "type" : [ "string", "null" ]
+          },
+          "expiresAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "action" ]
       },
       "ServiceHealthHttpRequest" : {
         "type" : "object",
@@ -42563,6 +45776,203 @@
             "type" : "boolean"
           }
         }
+      },
+      "VerifyPhoneHttpRequest" : {
+        "type" : "object",
+        "properties" : {
+          "applicationId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "code" : {
+            "type" : "string",
+            "minLength" : 1
+          }
+        },
+        "required" : [ "code" ]
+      },
+      "OnboardingSessionReceipt" : {
+        "type" : "object",
+        "properties" : {
+          "token" : {
+            "type" : "string"
+          },
+          "expiresAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "RequestAccessHttpRequest" : {
+        "type" : "object",
+        "properties" : {
+          "representativeFullName" : {
+            "type" : "string",
+            "minLength" : 1
+          },
+          "representativePhone" : {
+            "type" : "string",
+            "minLength" : 1
+          },
+          "businessName" : {
+            "type" : [ "string", "null" ]
+          },
+          "countryCode" : {
+            "type" : "string",
+            "minLength" : 1
+          }
+        },
+        "required" : [ "countryCode", "representativeFullName", "representativePhone" ]
+      },
+      "RequestAccessReceipt" : {
+        "type" : "object",
+        "properties" : {
+          "applicationId" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }
+      },
+      "OnboardingVerificationDocumentHttpRequest" : {
+        "type" : "object",
+        "properties" : {
+          "documentType" : {
+            "type" : "string",
+            "minLength" : 1
+          },
+          "documentNumberMasked" : {
+            "type" : [ "string", "null" ]
+          },
+          "storageObjectKey" : {
+            "type" : "string",
+            "minLength" : 1
+          },
+          "contentHash" : {
+            "type" : "string",
+            "minLength" : 1,
+            "pattern" : "[a-fA-F0-9]{64}"
+          },
+          "mimeType" : {
+            "type" : "string",
+            "minLength" : 1,
+            "pattern" : "[a-zA-Z0-9.+-]+/[a-zA-Z0-9.+-]+"
+          },
+          "issuedAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date"
+          },
+          "expiresAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date"
+          }
+        },
+        "required" : [ "contentHash", "documentType", "mimeType", "storageObjectKey" ]
+      },
+      "OnboardingVerificationDocumentUploadHttpRequest" : {
+        "type" : "object",
+        "properties" : {
+          "mimeType" : {
+            "type" : "string",
+            "minLength" : 1,
+            "pattern" : "[a-zA-Z0-9.+-]+/[a-zA-Z0-9.+-]+"
+          }
+        },
+        "required" : [ "mimeType" ]
+      },
+      "UpdateProfileHttpRequest" : {
+        "type" : "object",
+        "properties" : {
+          "legalName" : {
+            "type" : "string",
+            "minLength" : 1
+          },
+          "businessEmail" : {
+            "type" : "string",
+            "format" : "email",
+            "minLength" : 1
+          }
+        },
+        "required" : [ "businessEmail", "legalName" ]
+      },
+      "VerifyCodeHttpRequest" : {
+        "type" : "object",
+        "properties" : {
+          "code" : {
+            "type" : "string",
+            "minLength" : 1
+          }
+        },
+        "required" : [ "code" ]
+      },
+      "SetupGrant" : {
+        "type" : "object",
+        "properties" : {
+          "setupGrant" : {
+            "type" : "string"
+          },
+          "expiresInSeconds" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "SetCredentialHttpRequest" : {
+        "type" : "object",
+        "properties" : {
+          "setupGrant" : {
+            "type" : "string",
+            "minLength" : 1
+          },
+          "password" : {
+            "type" : "string",
+            "minLength" : 1
+          }
+        },
+        "required" : [ "password", "setupGrant" ]
+      },
+      "CredentialAccepted" : {
+        "type" : "object",
+        "properties" : {
+          "signedIn" : {
+            "type" : "boolean"
+          },
+          "redirectTo" : {
+            "type" : [ "string", "null" ]
+          }
+        }
+      },
+      "CodeDispatch" : {
+        "type" : "object",
+        "properties" : {
+          "maskedEmail" : {
+            "type" : [ "string", "null" ]
+          },
+          "resendAvailableInSeconds" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "expiresInSeconds" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "debugCode" : {
+            "type" : [ "string", "null" ]
+          }
+        }
+      },
+      "ConfirmRecoveryHttpRequest" : {
+        "type" : "object",
+        "properties" : {
+          "setupGrant" : {
+            "type" : "string",
+            "minLength" : 1
+          },
+          "code" : {
+            "type" : "string",
+            "minLength" : 1
+          }
+        },
+        "required" : [ "code", "setupGrant" ]
       },
       "AcceptTenantUserInvitationHttpRequest" : {
         "type" : "object",
@@ -43012,6 +46422,48 @@
           }
         }
       },
+      "RecoveryVerifyHttpRequest" : {
+        "type" : "object",
+        "properties" : {
+          "identifier" : {
+            "type" : "string",
+            "minLength" : 1
+          },
+          "code" : {
+            "type" : "string",
+            "minLength" : 1
+          }
+        },
+        "required" : [ "code", "identifier" ]
+      },
+      "RecoveryStartHttpRequest" : {
+        "type" : "object",
+        "properties" : {
+          "identifier" : {
+            "type" : "string",
+            "minLength" : 1
+          }
+        },
+        "required" : [ "identifier" ]
+      },
+      "RecoverySetCredentialHttpRequest" : {
+        "type" : "object",
+        "properties" : {
+          "identifier" : {
+            "type" : "string",
+            "minLength" : 1
+          },
+          "setupGrant" : {
+            "type" : "string",
+            "minLength" : 1
+          },
+          "password" : {
+            "type" : "string",
+            "minLength" : 1
+          }
+        },
+        "required" : [ "identifier", "password", "setupGrant" ]
+      },
       "AmendReservationRequest" : {
         "type" : "object",
         "properties" : {
@@ -43074,6 +46526,38 @@
           },
           "phonePrimary" : {
             "type" : [ "string", "null" ]
+          }
+        }
+      },
+      "StaffDirectoryHttpEntry" : {
+        "type" : "object",
+        "properties" : {
+          "userId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "fullName" : {
+            "type" : "string"
+          },
+          "staffNumber" : {
+            "type" : [ "string", "null" ]
+          },
+          "phoneNumber" : {
+            "type" : [ "string", "null" ]
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "propertyId" : {
+            "type" : [ "string", "null" ],
+            "format" : "uuid"
+          },
+          "propertyRoleId" : {
+            "type" : [ "string", "null" ],
+            "format" : "uuid"
+          },
+          "active" : {
+            "type" : "boolean"
           }
         }
       },
@@ -43432,6 +46916,46 @@
           },
           "configured" : {
             "type" : "boolean"
+          }
+        }
+      },
+      "PairedDeviceHttpSummary" : {
+        "type" : "object",
+        "properties" : {
+          "deviceId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "propertyId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "outletId" : {
+            "type" : [ "string", "null" ],
+            "format" : "uuid"
+          },
+          "deviceCode" : {
+            "type" : "string"
+          },
+          "terminalName" : {
+            "type" : "string"
+          },
+          "mode" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "keyFingerprint" : {
+            "type" : "string"
+          },
+          "pairedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "revokedAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
           }
         }
       },
@@ -44058,6 +47582,36 @@
           }
         }
       },
+      "BaseRateResponse" : {
+        "type" : "object",
+        "properties" : {
+          "roomTypeId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "propertyId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "roomTypeName" : {
+            "type" : "string"
+          },
+          "roomTypeCode" : {
+            "type" : [ "string", "null" ]
+          },
+          "basePrice" : {
+            "type" : "number",
+            "format" : "double"
+          },
+          "maxOccupancy" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "active" : {
+            "type" : "boolean"
+          }
+        }
+      },
       "PosRoomChargeCandidateResponse" : {
         "type" : "object",
         "properties" : {
@@ -44096,6 +47650,32 @@
           },
           "grossSales" : {
             "type" : "number"
+          }
+        }
+      },
+      "PosOutletResponse" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "propertyId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "revenueCenterId" : {
+            "type" : [ "string", "null" ],
+            "format" : "uuid"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "type" : {
+            "type" : "string"
+          },
+          "active" : {
+            "type" : "boolean"
           }
         }
       },
@@ -44841,6 +48421,18 @@
           }
         }
       },
+      "VerificationDocumentViewAuthorization" : {
+        "type" : "object",
+        "properties" : {
+          "url" : {
+            "type" : "string"
+          },
+          "expiresAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
       "TenantActivationAction" : {
         "type" : "object",
         "properties" : {
@@ -45166,6 +48758,80 @@
           }
         }
       },
+      "OnboardingApplicationQueueItem" : {
+        "type" : "object",
+        "properties" : {
+          "applicationId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "representativeFullName" : {
+            "type" : "string"
+          },
+          "representativePhone" : {
+            "type" : "string"
+          },
+          "businessName" : {
+            "type" : [ "string", "null" ]
+          },
+          "applicationStatus" : {
+            "type" : "string"
+          },
+          "caseId" : {
+            "type" : [ "string", "null" ],
+            "format" : "uuid"
+          },
+          "caseStatus" : {
+            "type" : [ "string", "null" ]
+          },
+          "caseSubmittedAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "OnboardingApplicationDetail" : {
+        "type" : "object",
+        "properties" : {
+          "applicationId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "representativeFullName" : {
+            "type" : "string"
+          },
+          "representativePhone" : {
+            "type" : "string"
+          },
+          "businessName" : {
+            "type" : [ "string", "null" ]
+          },
+          "legalName" : {
+            "type" : [ "string", "null" ]
+          },
+          "businessEmail" : {
+            "type" : [ "string", "null" ]
+          },
+          "countryCode" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "tenantId" : {
+            "type" : [ "string", "null" ],
+            "format" : "uuid"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
       "FleetSnapshot" : {
         "type" : "object",
         "properties" : {
@@ -45384,6 +49050,39 @@
           }
         }
       },
+      "InvitationDetails" : {
+        "type" : "object",
+        "properties" : {
+          "inviteeName" : {
+            "type" : "string"
+          },
+          "maskedEmail" : {
+            "type" : [ "string", "null" ]
+          },
+          "maskedPhone" : {
+            "type" : [ "string", "null" ]
+          },
+          "organisationName" : {
+            "type" : "string"
+          },
+          "propertyName" : {
+            "type" : [ "string", "null" ]
+          },
+          "expiresAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "allowedCredentials" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
       "PairingStatusHttpResponse" : {
         "type" : "object",
         "properties" : {
@@ -45402,6 +49101,31 @@
           },
           "mode" : {
             "type" : [ "string", "null" ]
+          }
+        }
+      },
+      "TemplateResponse" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "subject" : {
+            "type" : [ "string", "null" ]
+          },
+          "content" : {
+            "type" : "string"
+          },
+          "channelType" : {
+            "type" : "string"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
           }
         }
       },

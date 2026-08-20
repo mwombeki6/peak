@@ -352,6 +352,82 @@ class OnboardingWizardIntegrationTests {
             .andExpect(jsonPath("$.steps[?(@.key == 'pay_peak')].status", hasItem("blocked")))
     }
 
+    /**
+     * The platform-scoped read must never advertise a nextAction the platform session cannot
+     * execute. `POST .../billing/purchases` requires tenant identity (`staff_permission`); a
+     * platform operator hitting it gets a 403. Advertising it anyway is what
+     * `docs/api-gaps-for-claude.md` in peak-platform-web calls the exact reproduction of this bug.
+     */
+    @Test
+    fun theSameUnpaidTenantAdvertisesNoExecutableActionToAPlatformSession() {
+        val platformUserId = insertPlatformActor(
+            "platform.tenants.manage",
+            "platform.tenants.view",
+            "platform.security.manage",
+        )
+        val planId = insertPlan()
+        val slug = "paypeak-platform-${UUID.randomUUID().toString().take(8)}"
+
+        val register = mockMvc.perform(
+            post("/api/v1/platform/tenants")
+                .secureJson(
+                    """
+                    {
+                      "name": "Pay Peak Platform Co",
+                      "slug": "$slug",
+                      "planId": "$planId",
+                      "legalName": "Pay Peak Platform Limited",
+                      "businessEmail": "ops-$slug@example.com",
+                      "businessPhone": "+255712345678",
+                      "registeredAddress": {"city": "Dar es Salaam", "countryCode": "TZ"}
+                    }
+                    """.trimIndent(),
+                )
+                .platform(platformUserId, "corr-paypeak-platform-register", "idem-paypeak-platform-register-$slug"),
+        )
+            .andExpect(status().isCreated)
+            .andReturn()
+        val tenantId = UUID.fromString(JsonPath.read(register.response.contentAsString, "$.id"))
+
+        mockMvc.perform(
+            post("/api/v1/platform/tenants/$tenantId/administrators")
+                .secureJson(
+                    """
+                    {
+                      "fullName": "Pay Peak Platform GM",
+                      "email": "gm-$slug@example.com",
+                      "issuer": "https://auth.peak.test/realms/peak",
+                      "subject": "paypeak-platform-admin-$tenantId"
+                    }
+                    """.trimIndent(),
+                )
+                .platform(platformUserId, "corr-paypeak-platform-admin", "idem-paypeak-platform-admin-$tenantId"),
+        )
+            .andExpect(status().isCreated)
+
+        jdbcTemplate.update(
+            "UPDATE tenant_subscriptions SET status = 'cancelled' WHERE tenant_id = ?",
+            tenantId,
+        )
+
+        mockMvc.perform(
+            get("/api/v1/platform/tenants/$tenantId/onboarding")
+                .secure(true)
+                .platform(platformUserId, "corr-paypeak-platform-unpaid"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.canCreateProperties").value(false))
+            .andExpect(jsonPath("$.currentStep").value("pay_peak"))
+            .andExpect(jsonPath("$.nextAction.step").value("pay_peak"))
+            .andExpect(jsonPath("$.nextAction.method").value("GET"))
+            .andExpect(
+                jsonPath(
+                    "$.nextAction.path",
+                    org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("/billing/purchases")),
+                ),
+            )
+    }
+
     private fun expectNextActionPath(
         tenantId: UUID,
         tenantUserId: UUID,

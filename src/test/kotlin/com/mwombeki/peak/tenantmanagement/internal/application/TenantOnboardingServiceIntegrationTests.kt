@@ -107,6 +107,57 @@ class TenantOnboardingServiceIntegrationTests {
     }
 
     @Test
+    fun assignsAnImmutableCrockfordTenantNumberOnRegistration() {
+        val platformUserId = UUID.randomUUID()
+        val planId = UUID.randomUUID()
+        insertPlatformFixture(platformUserId)
+        insertPlan(planId)
+        requestContextHolder.set(platformContext(platformUserId, "corr-tenant-number-1"))
+
+        val first = tenantOnboardingPort.registerNewTenant(
+            TenantRegisterRequest(
+                name = "Peak Arusha",
+                slug = "peak-arusha",
+                planId = planId,
+                legalName = "Peak Arusha Limited",
+                tradingName = null,
+                businessRegistrationNumber = null,
+                businessEmail = "ops@peak-arusha.example",
+                businessPhone = "+255712000001",
+                registeredAddress = mapOf("city" to "Arusha", "countryCode" to "TZ"),
+            ),
+        )
+
+        requestContextHolder.clear()
+        requestContextHolder.set(platformContext(platformUserId, "corr-tenant-number-2"))
+        val second = tenantOnboardingPort.registerNewTenant(
+            TenantRegisterRequest(
+                name = "Peak Mwanza",
+                slug = "peak-mwanza",
+                planId = planId,
+                legalName = "Peak Mwanza Limited",
+                tradingName = null,
+                businessRegistrationNumber = null,
+                businessEmail = "ops@peak-mwanza.example",
+                businessPhone = "+255712000002",
+                registeredAddress = mapOf("city" to "Mwanza", "countryCode" to "TZ"),
+            ),
+        )
+
+        val tenantNumberPattern = Regex("^TN-[0-9ABCDEFGHJKMNPQRSTVWXYZ]{8}$")
+        assertTrue(tenantNumberPattern.matches(first.tenantNumber), "unexpected format: ${first.tenantNumber}")
+        assertTrue(tenantNumberPattern.matches(second.tenantNumber), "unexpected format: ${second.tenantNumber}")
+        assertTrue(first.tenantNumber != second.tenantNumber)
+
+        val stored = jdbcTemplate.queryForObject(
+            "SELECT tenant_number FROM tenants WHERE id = ?",
+            String::class.java,
+            first.id,
+        )
+        assertEquals(first.tenantNumber, stored)
+    }
+
+    @Test
     fun allowsSupportTenantLookupOnlyForTheExactApprovedSession() {
         val platformUserId = UUID.randomUUID()
         val tenantId = UUID.randomUUID()

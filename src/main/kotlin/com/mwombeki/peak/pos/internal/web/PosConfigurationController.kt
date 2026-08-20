@@ -6,6 +6,7 @@ import com.mwombeki.peak.pos.api.CreatePosOutletRequest
 import com.mwombeki.peak.pos.api.PosConfigurationResponse
 import com.mwombeki.peak.pos.api.PosMenuCategoryResponse
 import com.mwombeki.peak.pos.api.PosMenuItemResponse
+import com.mwombeki.peak.pos.api.PosOutletResponse
 import com.mwombeki.peak.pos.internal.PosConfigurationService
 import jakarta.validation.Valid
 import java.util.UUID
@@ -44,6 +45,11 @@ class PosConfigurationController(
         @PathVariable propertyId: UUID,
         @Valid @RequestBody request: CreatePosMenuItemRequest,
     ): PosConfigurationResponse = service.createMenuItem(propertyId, request)
+
+    @GetMapping("/outlets")
+    fun listOutlets(
+        @PathVariable propertyId: UUID,
+    ): List<PosOutletResponse> = service.listOutlets(propertyId)
 
     @GetMapping("/menu-categories")
     fun listMenuCategories(

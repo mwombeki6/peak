@@ -253,6 +253,15 @@ data class CreatePosMenuItemRequest(
     val price: BigDecimal,
 )
 
+data class PosOutletResponse(
+    val id: UUID,
+    val propertyId: UUID,
+    val revenueCenterId: UUID?,
+    val name: String,
+    val type: String,
+    val isActive: Boolean,
+)
+
 data class PosMenuCategoryResponse(
     val id: UUID,
     val outletId: UUID,
@@ -286,3 +295,50 @@ class PosNotFoundException(message: String) :
 
 class PosConflictException(message: String) :
     PosException(message, HttpStatus.CONFLICT, "POS_CONFLICT")
+
+/**
+ * A tenant whose business verification isn't complete has no backend enforcement anywhere else
+ * against operating hospitality commands — tenant_allows_operational_writes() only checks
+ * lifecycle status (trial/active), never business verification, and every other operationally
+ * guarded table intentionally stays that way (see PosCommandExecutor.requireTenantBusinessVerified
+ * for why this check is POS-scoped rather than a change to that shared function). A tenant
+ * created through the direct platform-registration path (POST /api/v1/platform/tenants, which
+ * never runs the applicant->KYB->approval gate) can otherwise reach POS with zero verification.
+ */
+class PosTenantNotVerifiedException(message: String) :
+    PosException(message, HttpStatus.FORBIDDEN, "POS_TENANT_NOT_VERIFIED")
+
+data class PosPrintJobFailureRequest(
+    @field:NotBlank
+    @field:Size(min = 3, max = 500)
+    val error: String,
+)
+
+data class PosPrintJobReclaimRequest(
+    @field:NotBlank
+    @field:Size(min = 3, max = 500)
+    val reason: String,
+)
+
+data class PosPrintJobResponse(
+    val id: UUID,
+    val propertyId: UUID,
+    val outletId: UUID,
+    val printerRouteId: UUID?,
+    val jobType: String,
+    val sourceType: String,
+    val sourceId: UUID,
+    val sourceVersion: Long,
+    val reprint: Boolean,
+    val reprintedFromJobId: UUID?,
+    val status: String,
+    val document: Map<String, Any?>,
+    val claimedByDeviceId: UUID?,
+    val claimedAt: Instant?,
+    val printedAt: Instant?,
+    val failedAt: Instant?,
+    val attempts: Int,
+    val lastError: String?,
+    val createdAt: Instant,
+    val replayed: Boolean = false,
+)

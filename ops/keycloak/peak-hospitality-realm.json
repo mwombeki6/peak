@@ -53,7 +53,7 @@
   "otpPolicyLookAheadWindow": 1,
   "otpPolicyPeriod": 30,
   "otpPolicyCodeReusable": false,
-  "passwordPolicy": "length(15) and digits(1) and upperCase(1) and lowerCase(1) and specialChars(1) and notUsername(undefined) and notEmail(undefined) and passwordHistory(5)",
+  "passwordPolicy": "length(10) and digits(1) and lowerCase(1) and notUsername(undefined) and notEmail(undefined)",
   "webAuthnPolicyRpEntityName": "Peak Hospitality",
   "webAuthnPolicySignatureAlgorithms": [
     "ES256",
@@ -125,7 +125,7 @@
       "alias": "webauthn-register",
       "name": "Webauthn Register",
       "providerId": "webauthn-register",
-      "enabled": true,
+      "enabled": false,
       "defaultAction": false,
       "priority": 20,
       "config": {}
@@ -134,7 +134,7 @@
       "alias": "webauthn-register-passwordless",
       "name": "Webauthn Register Passwordless",
       "providerId": "webauthn-register-passwordless",
-      "enabled": true,
+      "enabled": false,
       "defaultAction": false,
       "priority": 25,
       "config": {}

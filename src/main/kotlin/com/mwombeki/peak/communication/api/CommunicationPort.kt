@@ -26,6 +26,7 @@ interface CommunicationPort {
         request: RecordCommunicationConsentRequest,
     ): CommunicationConsentReceipt
     fun createTemplate(request: CreateTemplateRequest): TemplateMutationReceipt
+    fun listTemplates(): List<TemplateResponse>
     fun verifyChannel(channelId: UUID, token: String): ChannelVerificationReceipt
     fun requestChannelVerification(channelId: UUID): ChannelVerificationRequestReceipt
     fun listDeliveryRequests(): List<DeliveryRequestResponse>
@@ -219,6 +220,21 @@ data class ReportRecipientResponse(
 data class TemplateMutationReceipt(
     val templateId: UUID,
     val replayed: Boolean,
+)
+
+/**
+ * `channelType` is the stored canonical channel, not the `type` string the caller sent to
+ * [CreateTemplateRequest]. `createTemplate` normalizes through `canonicalChannel()` before
+ * writing, so echoing the request wording back would let a provider's spelling travel out of
+ * the module as though it were the contract.
+ */
+data class TemplateResponse(
+    val id: UUID,
+    val name: String,
+    val subject: String?,
+    val content: String,
+    val channelType: String,
+    val createdAt: OffsetDateTime,
 )
 
 data class ChannelVerificationRequestReceipt(

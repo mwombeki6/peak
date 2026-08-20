@@ -454,10 +454,16 @@ class RouteAccessMatrixCoverageIntegrationTests {
             // not share a route or a credential source.
             startsWith("/api/v1/platform-billing/webhooks/") -> GuardMode.PUBLIC_TOKEN
             startsWith("/api/v1/communication/webhooks/") -> GuardMode.PUBLIC_TOKEN
-            this == "/api/v1/invitations/accept" -> GuardMode.PUBLIC_TOKEN
+            startsWith("/api/v1/invitations/") -> GuardMode.PUBLIC_TOKEN
+            startsWith("/api/v1/auth/recovery") -> GuardMode.PUBLIC_TOKEN
             this == "/api/v1/staff/sessions" ||
                     this == "/api/v1/staff/credentials/activate" ||
                     startsWith("/api/v1/devices/") -> GuardMode.PUBLIC_TOKEN
+            this == "/api/v1/verifications" || this == "/api/v1/verifications/confirm" ->
+                GuardMode.PUBLIC_TOKEN
+            this == "/api/v1/onboarding/request-access" ||
+                    this == "/api/v1/onboarding/verify-phone" -> GuardMode.PUBLIC_TOKEN
+            startsWith("/api/v1/onboarding/me/") -> GuardMode.AUTHENTICATED_IDENTITY
             startsWith("/api/v1/tenants/") -> GuardMode.STAFF_PERMISSION
             startsWith("/api/v1/properties") -> GuardMode.STAFF_PERMISSION
             startsWith("/api/v1/communication") -> GuardMode.STAFF_PERMISSION
@@ -479,10 +485,16 @@ class RouteAccessMatrixCoverageIntegrationTests {
             // satisfies the check constraint and then denies every callback at runtime.
             startsWith("/api/v1/platform-billing/webhooks/") -> RouteScope.PUBLIC
             startsWith("/api/v1/communication/webhooks/") -> RouteScope.PUBLIC
-            this == "/api/v1/invitations/accept" -> RouteScope.PUBLIC
+            startsWith("/api/v1/invitations/") -> RouteScope.PUBLIC
+            startsWith("/api/v1/auth/recovery") -> RouteScope.PUBLIC
             this == "/api/v1/staff/sessions" ||
                     this == "/api/v1/staff/credentials/activate" ||
                     startsWith("/api/v1/devices/") -> RouteScope.PUBLIC
+            this == "/api/v1/verifications" || this == "/api/v1/verifications/confirm" ->
+                RouteScope.PUBLIC
+            this == "/api/v1/onboarding/request-access" ||
+                    this == "/api/v1/onboarding/verify-phone" -> RouteScope.PUBLIC
+            startsWith("/api/v1/onboarding/me/") -> RouteScope.ONBOARDING_APPLICATION
             startsWith("/api/v1/tenants/") -> RouteScope.TENANT
             this == "/api/v1/properties" -> RouteScope.TENANT
             // First hotel is a tenant act: no propertyId exists yet.

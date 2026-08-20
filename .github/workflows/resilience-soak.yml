@@ -68,6 +68,7 @@ jobs:
             -e 's|^KEYCLOAK_SMTP_USER=.*|KEYCLOAK_SMTP_USER=soak-keycloak-smtp-user|' \
             -e 's|^KEYCLOAK_SMTP_PASSWORD=.*|KEYCLOAK_SMTP_PASSWORD=soak-keycloak-smtp-password|' \
             -e 's|^KEYCLOAK_RECONCILER_SECRET=.*|KEYCLOAK_RECONCILER_SECRET=soak-reconciler-secret|' \
+            -e 's|^VALKEY_PASSWORD=.*|VALKEY_PASSWORD=soak-valkey-password|' \
             -e 's|^PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=.*|PEAK_COMMUNICATION_DELIVERY_HTTP_PROVIDER_API_KEY=soak-communication-key|' \
             -e 's|^PEAK_COMMUNICATION_PROVIDERS_BEEM_API_KEY=.*|PEAK_COMMUNICATION_PROVIDERS_BEEM_API_KEY=soak-beem-api-key|' \
             -e 's|^PEAK_COMMUNICATION_PROVIDERS_BEEM_SECRET_KEY=.*|PEAK_COMMUNICATION_PROVIDERS_BEEM_SECRET_KEY=soak-beem-secret-key|' \
@@ -80,6 +81,10 @@ jobs:
             -e 's|^PEAK_GUEST_IDENTITY_HASH_KEY=.*|PEAK_GUEST_IDENTITY_HASH_KEY=soak-guest-identity-hmac-key-2026|' \
             -e 's|^PEAK_REPORT_STORAGE_ACCESS_KEY=.*|PEAK_REPORT_STORAGE_ACCESS_KEY=soak-report-access-key|' \
             -e 's|^PEAK_REPORT_STORAGE_SECRET_KEY=.*|PEAK_REPORT_STORAGE_SECRET_KEY=soak-report-secret-key|' \
+            -e 's|^MINIO_ROOT_USER=.*|MINIO_ROOT_USER=soak-minio-root-user|' \
+            -e 's|^MINIO_ROOT_PASSWORD=.*|MINIO_ROOT_PASSWORD=soak-minio-root-password|' \
+            -e 's|^PEAK_VERIFICATION_STORAGE_ACCESS_KEY=.*|PEAK_VERIFICATION_STORAGE_ACCESS_KEY=soak-verification-access-key|' \
+            -e 's|^PEAK_VERIFICATION_STORAGE_SECRET_KEY=.*|PEAK_VERIFICATION_STORAGE_SECRET_KEY=soak-verification-secret-key|' \
             "$RUNNER_TEMP/peak-soak.env"
           ops/scripts/validate-production-env.sh "$RUNNER_TEMP/peak-soak.env"
       - name: Run endurance profile and recovery drill

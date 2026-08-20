@@ -10,8 +10,10 @@ import com.mwombeki.peak.reliability.api.IdempotencyReservation
 import com.mwombeki.peak.reliability.api.OutboxDestination
 import com.mwombeki.peak.reliability.api.OutboxEventCommand
 import com.mwombeki.peak.reliability.api.OutboxPort
+import com.mwombeki.peak.shared.context.DatabaseSessionContext
 import com.mwombeki.peak.shared.context.RequestContextHolder
 import com.mwombeki.peak.shared.context.RequestIdentity
+import com.mwombeki.peak.shared.outbound.KYC_DOCUMENT_OBJECT_STORAGE_QUALIFIER
 import com.mwombeki.peak.shared.outbound.ObjectStoragePort
 import com.mwombeki.peak.shared.outbound.StoreObject
 import com.mwombeki.peak.tenantmanagement.api.AddVerificationDocumentCommand
@@ -27,13 +29,17 @@ import com.mwombeki.peak.tenantmanagement.api.PlatformControlNotFoundException
 import com.mwombeki.peak.tenantmanagement.api.PrivacyRequestAction
 import com.mwombeki.peak.tenantmanagement.api.PrivacyRequestSummary
 import com.mwombeki.peak.tenantmanagement.api.ProcessPrivacyRequestCommand
+import com.mwombeki.peak.tenantmanagement.api.RequestVerificationDocumentUploadCommand
 import com.mwombeki.peak.tenantmanagement.api.ReviewIdentityConnectionCommand
 import com.mwombeki.peak.tenantmanagement.api.ReviewVerificationCaseCommand
 import com.mwombeki.peak.tenantmanagement.api.TenantTrustControlPort
 import com.mwombeki.peak.tenantmanagement.api.UpsertIdentityConnectionCommand
 import com.mwombeki.peak.tenantmanagement.api.VerificationCaseSummary
 import com.mwombeki.peak.tenantmanagement.api.VerificationDocumentSummary
+import com.mwombeki.peak.tenantmanagement.api.VerificationDocumentUploadAuthorization
+import com.mwombeki.peak.tenantmanagement.api.VerificationDocumentViewAuthorization
 import com.mwombeki.peak.tenantmanagement.api.VerificationReviewAction
+import com.mwombeki.peak.tenantmanagement.api.VerificationSubjectRef
 import com.mwombeki.peak.usermanagement.api.PlatformAccessPort
 import com.mwombeki.peak.usermanagement.api.PlatformAccessRequest
 import com.mwombeki.peak.usermanagement.api.TenantPermissionAccessPort
@@ -41,10 +47,12 @@ import com.mwombeki.peak.usermanagement.api.TenantPermissionAccessRequest
 import java.security.MessageDigest
 import java.sql.ResultSet
 import java.sql.Timestamp
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import java.util.UUID
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
@@ -58,28 +66,32 @@ class TenantTrustControlService(
     private val tenantPermissionAccessPort: TenantPermissionAccessPort,
     private val platformAccessPort: PlatformAccessPort,
     private val requestContextHolder: RequestContextHolder,
+    private val databaseSessionContext: DatabaseSessionContext,
     private val idempotencyPort: IdempotencyPort,
     private val auditPort: AuditPort,
     private val outboxPort: OutboxPort,
     private val objectStoragePort: ObjectStoragePort,
+    @param:Qualifier(KYC_DOCUMENT_OBJECT_STORAGE_QUALIFIER)
+    private val kycDocumentStoragePort: ObjectStoragePort,
     private val objectMapper: ObjectMapper,
 ) : TenantTrustControlPort {
 
     override fun listVerificationCases(
-        tenantId: UUID,
+        subject: VerificationSubjectRef,
         platformView: Boolean,
     ): List<VerificationCaseSummary> {
-        return read(tenantId, platformView, "tenant.verification.view", PLATFORM_VERIFICATION) {
+        return readForSubject(subject, platformView, "tenant.verification.view", PLATFORM_VERIFICATION) {
+            val (clause, param) = subjectWhereClause(subject, "verification_case")
             jdbcTemplate.query(
                 """
                 $VERIFICATION_CASE_SELECT
-                WHERE verification_case.tenant_id = ?
+                WHERE $clause
                 ORDER BY verification_case.created_at DESC, verification_case.id DESC
                 LIMIT 200
                 """.trimIndent(),
                 { rs, _ -> mapVerificationCase(rs) },
-                tenantId,
-            ).map { case -> case.copy(documents = verificationDocuments(tenantId, case.caseId)) }
+                param,
+            ).map { case -> case.copy(documents = verificationDocuments(subject, case.caseId)) }
         }
     }
 
@@ -88,45 +100,76 @@ class TenantTrustControlService(
     ): VerificationCaseSummary {
         val type = command.caseType.normalizedVerificationCaseType()
         val level = command.requiredLevel.normalizedVerificationLevel()
-        return tenantMutation(
+        val subject = command.subject
+        return subjectMutation(
             operation = "tenant.verification.case.create",
-            tenantId = command.tenantId,
-            permission = "tenant.profile.manage",
+            subject = subject,
+            tenantPermission = "tenant.profile.manage",
             payload = command,
             resourceType = "tenant_verification_cases",
             responseType = VerificationCaseSummary::class.java,
         ) { reservationId ->
+            val (clause, param) = subjectWhereClause(subject)
             val open = jdbcTemplate.queryForObject(
                 """
                 SELECT EXISTS (
                     SELECT 1 FROM tenant_verification_cases
-                    WHERE tenant_id = ? AND status IN (
+                    WHERE $clause AND status IN (
                         'draft', 'submitted', 'under_review', 'needs_information'
                     )
                 )
                 """.trimIndent(),
                 Boolean::class.java,
-                command.tenantId,
+                param,
             ) == true
-            if (open) throw PlatformControlConflictException("Tenant already has an open verification case")
+            if (open) throw PlatformControlConflictException("An open verification case already exists")
             val id = UUID.randomUUID()
             jdbcTemplate.update(
                 """
                 INSERT INTO tenant_verification_cases (
-                    id, tenant_id, case_type, required_level, status, risk_rating
-                ) VALUES (?, ?, ?, ?, 'draft', 'low')
+                    id, tenant_id, onboarding_application_id, case_type, required_level, status, risk_rating
+                ) VALUES (?, ?, ?, ?, ?, 'draft', 'low')
                 """.trimIndent(),
-                id, command.tenantId, type, level,
+                id,
+                (subject as? VerificationSubjectRef.Tenant)?.tenantId,
+                (subject as? VerificationSubjectRef.Application)?.applicationId,
+                type, level,
             )
-            verificationCase(command.tenantId, id).also {
-                recordTenantSideEffects(
-                    command.tenantId, "tenant.verification.case.created",
+            verificationCase(subject, id).also {
+                recordSubjectSideEffects(
+                    subject, "tenant.verification.case.created",
                     "tenant_verification_cases", id,
                     mapOf("caseId" to id, "caseType" to type, "requiredLevel" to level),
                     reservationId,
                 )
             }
         }
+    }
+
+    override fun requestVerificationDocumentUpload(
+        command: RequestVerificationDocumentUploadCommand,
+    ): VerificationDocumentUploadAuthorization {
+        require(command.mimeType in ALLOWED_VERIFICATION_MIME_TYPES) {
+            "Unsupported verification document content type"
+        }
+        val subject = command.subject
+        return requireNotNull(
+            transactionTemplate.execute {
+                authorizeSubjectAccess(subject, "tenant.profile.manage")
+                val case = lockedVerificationCase(subject, command.caseId)
+                require(case.status in setOf("draft", "needs_information")) {
+                    "Documents can be added only while a case is draft or needs information"
+                }
+                // Opaque and case-scoped: never a filename, never guessable, and the prefix
+                // lets addVerificationDocument reject a key issued for a different case.
+                val objectKey = "kyc/${command.caseId}/${UUID.randomUUID()}"
+                VerificationDocumentUploadAuthorization(
+                    objectKey = objectKey,
+                    uploadUrl = kycDocumentStoragePort.presignedPut(objectKey, UPLOAD_URL_EXPIRY),
+                    expiresAt = Instant.now().plus(UPLOAD_URL_EXPIRY),
+                )
+            },
+        )
     }
 
     override fun addVerificationDocument(
@@ -142,38 +185,68 @@ class TenantTrustControlService(
         require(command.storageObjectKey.matches(SAFE_OBJECT_KEY)) {
             "Invalid verification document storage key"
         }
+        require(command.storageObjectKey.startsWith("kyc/${command.caseId}/")) {
+            "Document storage key was not issued for this case"
+        }
         if (command.issuedAt != null && command.expiresAt != null) {
             require(command.expiresAt > command.issuedAt) { "Document expiry must follow issue date" }
         }
-        return tenantMutation(
+        val subject = command.subject
+        return subjectMutation(
             operation = "tenant.verification.document.add",
-            tenantId = command.tenantId,
-            permission = "tenant.profile.manage",
+            subject = subject,
+            tenantPermission = "tenant.profile.manage",
             payload = command,
             resourceType = "tenant_verification_documents",
             responseType = VerificationDocumentSummary::class.java,
         ) { reservationId ->
-            val case = lockedVerificationCase(command.tenantId, command.caseId)
+            val case = lockedVerificationCase(subject, command.caseId)
             require(case.status in setOf("draft", "needs_information")) {
                 "Documents can be added only while a case is draft or needs information"
+            }
+            // The caller's claimed key is never trusted on its own — it must actually be a
+            // byte-bearing object in the private KYC bucket, and within the size ceiling.
+            // What it does not yet verify is that the bytes match contentHash or are actually
+            // the claimed mimeType; that happens when the scan step reads them (not built yet).
+            val stored = kycDocumentStoragePort.stat(command.storageObjectKey)
+                ?: throw PlatformControlConflictException(
+                    "Document was not found in storage — upload it before adding it to the case",
+                )
+            require(stored.contentLength in 1..MAX_VERIFICATION_DOCUMENT_BYTES) {
+                "Uploaded document size is outside the allowed range"
             }
             val id = UUID.randomUUID()
             jdbcTemplate.update(
                 """
                 INSERT INTO tenant_verification_documents (
-                    id, tenant_id, verification_case_id, document_type,
+                    id, tenant_id, onboarding_application_id, verification_case_id, document_type,
                     document_number_masked, storage_object_key, content_hash,
                     mime_type, issued_at, expires_at, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'submitted')
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'submitted')
                 """.trimIndent(),
-                id, command.tenantId, command.caseId, documentType,
+                id,
+                (subject as? VerificationSubjectRef.Tenant)?.tenantId,
+                (subject as? VerificationSubjectRef.Application)?.applicationId,
+                command.caseId, documentType,
                 command.documentNumberMasked?.trim()?.take(100), command.storageObjectKey,
                 command.contentHash, command.mimeType,
                 command.issuedAt, command.expiresAt,
             )
-            verificationDocument(command.tenantId, command.caseId, id).also {
-                recordTenantSideEffects(
-                    command.tenantId, "tenant.verification.document.added",
+            outboxPort.enqueue(
+                OutboxEventCommand(
+                    aggregateType = "tenant_verification_documents",
+                    aggregateId = id,
+                    tenantId = (subject as? VerificationSubjectRef.Tenant)?.tenantId,
+                    eventType = "tenant.verification.document.scan_requested",
+                    destination = OutboxDestination.DOCUMENT_SCAN,
+                    payload = mapOf("documentId" to id, "objectKey" to command.storageObjectKey),
+                    idempotencyKeyId = reservationId,
+                    priority = 3,
+                ),
+            )
+            verificationDocument(subject, command.caseId, id).also {
+                recordSubjectSideEffects(
+                    subject, "tenant.verification.document.added",
                     "tenant_verification_documents", id,
                     mapOf(
                         "caseId" to command.caseId,
@@ -187,47 +260,74 @@ class TenantTrustControlService(
         }
     }
 
-    override fun submitVerificationCase(tenantId: UUID, caseId: UUID): VerificationCaseSummary {
-        return tenantMutation(
+    override fun requestVerificationDocumentView(
+        subject: VerificationSubjectRef,
+        caseId: UUID,
+        documentId: UUID,
+    ): VerificationDocumentViewAuthorization {
+        return readForSubject(subject, platformView = true, "tenant.verification.view", PLATFORM_VERIFICATION) {
+            val (clause, param) = subjectWhereClause(subject)
+            val objectKey = jdbcTemplate.queryForList(
+                """
+                SELECT storage_object_key FROM tenant_verification_documents
+                WHERE $clause AND verification_case_id = ? AND id = ?
+                """.trimIndent(),
+                String::class.java,
+                param, caseId, documentId,
+            ).singleOrNull()
+                ?: throw PlatformControlNotFoundException("Verification document was not found")
+            VerificationDocumentViewAuthorization(
+                url = kycDocumentStoragePort.presignedGet(objectKey, VIEW_URL_EXPIRY),
+                expiresAt = Instant.now().plus(VIEW_URL_EXPIRY),
+            )
+        }
+    }
+
+    override fun submitVerificationCase(subject: VerificationSubjectRef, caseId: UUID): VerificationCaseSummary {
+        return subjectMutation(
             operation = "tenant.verification.case.submit",
-            tenantId = tenantId,
-            permission = "tenant.profile.manage",
-            payload = mapOf("tenantId" to tenantId, "caseId" to caseId),
+            subject = subject,
+            tenantPermission = "tenant.profile.manage",
+            payload = mapOf("subject" to subject, "caseId" to caseId),
             resourceType = "tenant_verification_cases",
             responseType = VerificationCaseSummary::class.java,
         ) { reservationId ->
-            val case = lockedVerificationCase(tenantId, caseId)
+            val case = lockedVerificationCase(subject, caseId)
             require(case.status in setOf("draft", "needs_information")) {
                 "Only draft or needs-information cases can be submitted"
             }
+            val (docClause, docParam) = subjectWhereClause(subject)
             val documentCount = jdbcTemplate.queryForObject(
                 """
                 SELECT count(*) FROM tenant_verification_documents
-                WHERE tenant_id = ? AND verification_case_id = ? AND status <> 'rejected'
+                WHERE $docClause AND verification_case_id = ? AND status <> 'rejected'
                 """.trimIndent(),
                 Int::class.java,
-                tenantId, caseId,
+                docParam, caseId,
             ) ?: 0
             require(documentCount > 0) { "Verification case requires at least one document" }
+            val (caseClause, caseParam) = subjectWhereClause(subject)
             jdbcTemplate.update(
                 """
                 UPDATE tenant_verification_cases SET status = 'submitted',
                     submitted_at = COALESCE(submitted_at, now()),
                     submitted_by_user_id = ?, rejection_reason = NULL
-                WHERE tenant_id = ? AND id = ?
+                WHERE $caseClause AND id = ?
                 """.trimIndent(),
-                currentTenantUserId(tenantId), tenantId, caseId,
+                currentSubjectUserId(subject), caseParam, caseId,
             )
-            jdbcTemplate.update(
-                """
-                UPDATE tenant_control_states SET verification_status = 'pending', version = version + 1
-                WHERE tenant_id = ?
-                """.trimIndent(),
-                tenantId,
-            )
-            verificationCase(tenantId, caseId).also {
-                recordTenantSideEffects(
-                    tenantId, "tenant.verification.case.submitted",
+            if (subject is VerificationSubjectRef.Tenant) {
+                jdbcTemplate.update(
+                    """
+                    UPDATE tenant_control_states SET verification_status = 'pending', version = version + 1
+                    WHERE tenant_id = ?
+                    """.trimIndent(),
+                    subject.tenantId,
+                )
+            }
+            verificationCase(subject, caseId).also {
+                recordSubjectSideEffects(
+                    subject, "tenant.verification.case.submitted",
                     "tenant_verification_cases", caseId,
                     mapOf("caseId" to caseId, "documentCount" to documentCount),
                     reservationId,
@@ -239,17 +339,21 @@ class TenantTrustControlService(
     override fun reviewVerificationCase(
         command: ReviewVerificationCaseCommand,
     ): VerificationCaseSummary {
+        val subject = command.subject
+        val tenantId = (subject as? VerificationSubjectRef.Tenant)?.tenantId
         return platformMutation(
             operation = "platform.tenant.verification.${command.action.name.lowercase()}",
-            tenantId = command.tenantId,
+            tenantId = tenantId,
             permission = PLATFORM_VERIFICATION,
             payload = command,
             resourceType = "tenant_verification_cases",
             responseType = VerificationCaseSummary::class.java,
         ) { reservationId ->
-            val before = lockedVerificationCase(command.tenantId, command.caseId)
+            val before = lockedVerificationCase(subject, command.caseId)
             val actor = currentPlatformUserId()
             val risk = command.riskRating?.normalizedRisk() ?: before.riskRating
+            val (caseClause, caseParam) = subjectWhereClause(subject)
+            val (docClause, docParam) = subjectWhereClause(subject)
             when (command.action) {
                 VerificationReviewAction.START_REVIEW -> {
                     require(before.status == "submitted") { "Only submitted cases can start review" }
@@ -258,11 +362,13 @@ class TenantTrustControlService(
                         UPDATE tenant_verification_cases SET status = 'under_review',
                             risk_rating = ?, assigned_platform_user_id = ?,
                             review_started_at = COALESCE(review_started_at, now())
-                        WHERE tenant_id = ? AND id = ?
+                        WHERE $caseClause AND id = ?
                         """.trimIndent(),
-                        risk, actor, command.tenantId, command.caseId,
+                        risk, actor, caseParam, command.caseId,
                     )
-                    updateVerificationControl(command.tenantId, "under_review")
+                    if (subject is VerificationSubjectRef.Tenant) {
+                        updateVerificationControl(subject.tenantId, "under_review")
+                    }
                 }
                 VerificationReviewAction.REQUEST_INFORMATION -> {
                     require(before.status in setOf("submitted", "under_review")) {
@@ -274,31 +380,44 @@ class TenantTrustControlService(
                         UPDATE tenant_verification_cases SET status = 'needs_information',
                             assigned_platform_user_id = COALESCE(assigned_platform_user_id, ?),
                             metadata = metadata || jsonb_build_object('informationRequest', ?)
-                        WHERE tenant_id = ? AND id = ?
+                        WHERE $caseClause AND id = ?
                         """.trimIndent(),
-                        actor, command.reason.trim(), command.tenantId, command.caseId,
+                        actor, command.reason.trim(), caseParam, command.caseId,
                     )
-                    updateVerificationControl(command.tenantId, "needs_information")
+                    if (subject is VerificationSubjectRef.Tenant) {
+                        updateVerificationControl(subject.tenantId, "needs_information")
+                    }
                 }
                 VerificationReviewAction.APPROVE -> {
                     require(before.status == "under_review") { "Only cases under review can be approved" }
                     val rejected = jdbcTemplate.queryForObject(
                         """
                         SELECT EXISTS (SELECT 1 FROM tenant_verification_documents
-                        WHERE tenant_id = ? AND verification_case_id = ? AND status = 'rejected')
+                        WHERE $docClause AND verification_case_id = ? AND status = 'rejected')
                         """.trimIndent(),
-                        Boolean::class.java, command.tenantId, command.caseId,
+                        Boolean::class.java, docParam, command.caseId,
                     ) == true
                     require(!rejected) { "A case with rejected documents cannot be approved" }
+                    val unscanned = jdbcTemplate.queryForObject(
+                        """
+                        SELECT EXISTS (SELECT 1 FROM tenant_verification_documents
+                        WHERE $docClause AND verification_case_id = ?
+                          AND status <> 'rejected' AND scan_status <> 'clean')
+                        """.trimIndent(),
+                        Boolean::class.java, docParam, command.caseId,
+                    ) == true
+                    require(!unscanned) {
+                        "All documents must pass malware scanning before the case can be approved"
+                    }
                     jdbcTemplate.update(
                         """
                         UPDATE tenant_verification_documents
                         SET status = 'approved', verified_at = now(),
                             verified_by_platform_user_id = ?
-                        WHERE tenant_id = ? AND verification_case_id = ?
+                        WHERE $docClause AND verification_case_id = ?
                           AND status = 'submitted'
                         """.trimIndent(),
-                        actor, command.tenantId, command.caseId,
+                        actor, docParam, command.caseId,
                     )
                     jdbcTemplate.update(
                         """
@@ -306,24 +425,29 @@ class TenantTrustControlService(
                             risk_rating = ?, assigned_platform_user_id = ?,
                             reviewed_at = now(), approved_at = now(),
                             approved_by_platform_user_id = ?, expires_at = ?
-                        WHERE tenant_id = ? AND id = ?
+                        WHERE $caseClause AND id = ?
                         """.trimIndent(),
                         risk, actor, actor,
-                        command.expiresAt?.let(Timestamp::from), command.tenantId, command.caseId,
+                        command.expiresAt?.let(Timestamp::from), caseParam, command.caseId,
                     )
-                    jdbcTemplate.update(
-                        """
-                        UPDATE tenant_profiles SET verification_status = 'verified',
-                            verification_level = ?, verified_at = now(),
-                            verified_by_platform_user_id = ?, verification_expires_at = ?,
-                            rejection_reason = NULL, updated_at = now()
-                        WHERE tenant_id = ?
-                        """.trimIndent(),
-                        before.requiredLevel, actor,
-                        command.expiresAt?.let(Timestamp::from), command.tenantId,
-                    )
-                    updateVerificationControl(command.tenantId, "verified")
-                    completeOnboardingStep(command.tenantId, "verify_business")
+                    if (subject is VerificationSubjectRef.Tenant) {
+                        jdbcTemplate.update(
+                            """
+                            UPDATE tenant_profiles SET verification_status = 'verified',
+                                verification_level = ?, verified_at = now(),
+                                verified_by_platform_user_id = ?, verification_expires_at = ?,
+                                rejection_reason = NULL, updated_at = now()
+                            WHERE tenant_id = ?
+                            """.trimIndent(),
+                            before.requiredLevel, actor,
+                            command.expiresAt?.let(Timestamp::from), subject.tenantId,
+                        )
+                        updateVerificationControl(subject.tenantId, "verified")
+                        completeOnboardingStep(subject.tenantId, "verify_business")
+                    }
+                    // An Application subject's approval only settles the KYB case itself.
+                    // Tenant provisioning is a separate, explicit transition triggered off
+                    // an approved case — never an implicit side effect of reviewing it.
                 }
                 VerificationReviewAction.REJECT -> {
                     require(before.status in setOf("submitted", "under_review")) {
@@ -335,20 +459,22 @@ class TenantTrustControlService(
                         UPDATE tenant_verification_cases SET status = 'rejected',
                             reviewed_at = now(), rejected_at = now(),
                             rejected_by_platform_user_id = ?, rejection_reason = ?
-                        WHERE tenant_id = ? AND id = ?
+                        WHERE $caseClause AND id = ?
                         """.trimIndent(),
-                        actor, command.reason.trim(), command.tenantId, command.caseId,
+                        actor, command.reason.trim(), caseParam, command.caseId,
                     )
-                    jdbcTemplate.update(
-                        """
-                        UPDATE tenant_profiles SET verification_status = 'rejected',
-                            verified_at = NULL, verified_by_platform_user_id = NULL,
-                            rejection_reason = ?, updated_at = now()
-                        WHERE tenant_id = ?
-                        """.trimIndent(),
-                        command.reason.trim(), command.tenantId,
-                    )
-                    updateVerificationControl(command.tenantId, "rejected")
+                    if (subject is VerificationSubjectRef.Tenant) {
+                        jdbcTemplate.update(
+                            """
+                            UPDATE tenant_profiles SET verification_status = 'rejected',
+                                verified_at = NULL, verified_by_platform_user_id = NULL,
+                                rejection_reason = ?, updated_at = now()
+                            WHERE tenant_id = ?
+                            """.trimIndent(),
+                            command.reason.trim(), subject.tenantId,
+                        )
+                        updateVerificationControl(subject.tenantId, "rejected")
+                    }
                 }
                 VerificationReviewAction.SUSPEND -> {
                     require(!command.reason.isNullOrBlank()) { "Suspension reason is required" }
@@ -356,23 +482,25 @@ class TenantTrustControlService(
                         """
                         UPDATE tenant_verification_cases SET status = 'suspended',
                             reviewed_at = now(), rejection_reason = ?
-                        WHERE tenant_id = ? AND id = ?
+                        WHERE $caseClause AND id = ?
                         """.trimIndent(),
-                        command.reason.trim(), command.tenantId, command.caseId,
+                        command.reason.trim(), caseParam, command.caseId,
                     )
-                    jdbcTemplate.update(
-                        """
-                        UPDATE tenant_profiles SET verification_status = 'suspended',
-                            rejection_reason = ?, updated_at = now() WHERE tenant_id = ?
-                        """.trimIndent(),
-                        command.reason.trim(), command.tenantId,
-                    )
-                    updateVerificationControl(command.tenantId, "suspended")
+                    if (subject is VerificationSubjectRef.Tenant) {
+                        jdbcTemplate.update(
+                            """
+                            UPDATE tenant_profiles SET verification_status = 'suspended',
+                                rejection_reason = ?, updated_at = now() WHERE tenant_id = ?
+                            """.trimIndent(),
+                            command.reason.trim(), subject.tenantId,
+                        )
+                        updateVerificationControl(subject.tenantId, "suspended")
+                    }
                 }
             }
-            verificationCase(command.tenantId, command.caseId).also {
+            verificationCase(subject, command.caseId).also {
                 recordPlatformSideEffects(
-                    command.tenantId,
+                    tenantId,
                     "platform.tenants.verification.${command.action.name.lowercase()}",
                     "tenant_verification_cases", command.caseId,
                     mapOf(
@@ -380,10 +508,90 @@ class TenantTrustControlService(
                         "action" to command.action.name,
                         "riskRating" to risk,
                         "reason" to command.reason,
+                        "onboardingApplicationId" to
+                            (subject as? VerificationSubjectRef.Application)?.applicationId,
                     ),
                     reservationId,
                 )
             }
+        }
+    }
+
+    /**
+     * The approved case and its documents don't get re-verified against the new tenant — they
+     * get re-pointed to it. tenant_id/onboarding_application_id stay mutually exclusive (V146's
+     * CHECK constraint), so this is the one moment a case legitimately crosses from one to the
+     * other. tenant_profiles is updated from the case's own recorded evidence (who approved it,
+     * when, until when) rather than a fresh "now" — TenantOperationalReadinessEvaluator reads
+     * tenant_id, verification_status directly, so without this a freshly provisioned tenant
+     * would fail its own activation readiness gate and force a second, redundant KYB review of
+     * evidence FBC already approved.
+     *
+     * Called mid-provisioning from the onboarding module's own platform-authorized transaction
+     * (platform.tenants.manage) rather than the narrower platform.tenants.verification.manage
+     * checks reviewVerificationCase uses — the row is already owned by the caller's request in
+     * every other sense, so a mutation that touches zero rows here is a hard failure rather than
+     * a silently orphaned evidence trail.
+     */
+    override fun carryForwardVerificationEvidence(applicationId: UUID, tenantId: UUID) {
+        val case = jdbcTemplate.queryForList(
+            """
+            SELECT id, required_level, reviewed_at, approved_by_platform_user_id, expires_at
+            FROM tenant_verification_cases
+            WHERE onboarding_application_id = ? AND status = 'approved'
+            ORDER BY created_at DESC LIMIT 1
+            """.trimIndent(),
+            applicationId,
+        ).firstOrNull()
+            ?: throw PlatformControlConflictException(
+                "Application's verification case must be approved before provisioning",
+            )
+        val caseId = case["id"] as UUID
+
+        val repointedCases = jdbcTemplate.update(
+            """
+            UPDATE tenant_verification_cases
+            SET tenant_id = ?, onboarding_application_id = NULL
+            WHERE id = ? AND onboarding_application_id = ?
+            """.trimIndent(),
+            tenantId, caseId, applicationId,
+        )
+        if (repointedCases != 1) {
+            throw PlatformControlConflictException(
+                "Could not carry the verification case forward onto the new tenant",
+            )
+        }
+        jdbcTemplate.update(
+            """
+            UPDATE tenant_verification_documents
+            SET tenant_id = ?, onboarding_application_id = NULL
+            WHERE verification_case_id = ? AND onboarding_application_id = ?
+            """.trimIndent(),
+            tenantId, caseId, applicationId,
+        )
+
+        val updatedProfiles = jdbcTemplate.update(
+            """
+            UPDATE tenant_profiles
+            SET verification_status = 'verified',
+                verification_level = ?,
+                verified_at = ?,
+                verified_by_platform_user_id = ?,
+                verification_expires_at = ?,
+                rejection_reason = NULL,
+                updated_at = now()
+            WHERE tenant_id = ?
+            """.trimIndent(),
+            case["required_level"],
+            case["reviewed_at"],
+            case["approved_by_platform_user_id"],
+            case["expires_at"],
+            tenantId,
+        )
+        if (updatedProfiles != 1) {
+            throw PlatformControlConflictException(
+                "Could not carry business verification forward onto the new tenant's profile",
+            )
         }
     }
 
@@ -846,6 +1054,73 @@ class TenantTrustControlService(
         },
     )
 
+    private fun <T> readForSubject(
+        subject: VerificationSubjectRef,
+        platformView: Boolean,
+        tenantPermission: String,
+        platformPermission: String,
+        block: () -> T,
+    ): T = requireNotNull(
+        transactionTemplate.execute {
+            if (platformView) {
+                platformAccessPort.requireAuthorized(
+                    PlatformAccessRequest(
+                        (subject as? VerificationSubjectRef.Tenant)?.tenantId,
+                        platformPermission,
+                        "platform.tenant.trust.view",
+                    ),
+                )
+            } else {
+                authorizeSubjectAccess(subject, tenantPermission)
+            }
+            block()
+        },
+    )
+
+    /**
+     * A Tenant subject is authorized the usual way, against the caller's tenant permission.
+     * An Application subject has no permission set at all — the ONBOARDING_APPLICANT session
+     * itself, scoped to exactly one applicationId, is the only credential that can exist for
+     * it, so matching identity to subject *is* the authorization.
+     */
+    private fun authorizeSubjectAccess(subject: VerificationSubjectRef, tenantPermission: String) {
+        when (subject) {
+            is VerificationSubjectRef.Tenant -> tenantPermissionAccessPort.requireAuthorized(
+                TenantPermissionAccessRequest(subject.tenantId, tenantPermission),
+            )
+            is VerificationSubjectRef.Application -> {
+                val identity = requestContextHolder.current().identity
+                require(
+                    identity is RequestIdentity.OnboardingApplicant &&
+                        identity.applicationId == subject.applicationId,
+                ) { "Onboarding session does not match the target application" }
+                // JdbcTenantPermissionAccessPort/JdbcPlatformAccessPort bind as a side effect
+                // of their own DB round-trip; this branch had no such call, so without this
+                // the RLS policy's id = current_onboarding_application_id() branch always saw
+                // NULL and every write here was rejected — proven by
+                // VerificationCaseApplicationSubjectRlsIntegrationTests, which fails with a
+                // real Postgres RLS violation without this line.
+                databaseSessionContext.bind(identity)
+            }
+        }
+    }
+
+    private fun subjectWhereClause(subject: VerificationSubjectRef, alias: String? = null): Pair<String, UUID> {
+        val prefix = alias?.let { "$it." } ?: ""
+        return when (subject) {
+            is VerificationSubjectRef.Tenant -> "${prefix}tenant_id = ?" to subject.tenantId
+            is VerificationSubjectRef.Application ->
+                "${prefix}onboarding_application_id = ?" to subject.applicationId
+        }
+    }
+
+    private fun currentSubjectUserId(subject: VerificationSubjectRef): UUID? = when (subject) {
+        is VerificationSubjectRef.Tenant -> currentTenantUserId(subject.tenantId)
+        // No `users` row exists for a pre-tenant applicant — leaving this null is correct,
+        // not a gap: the case is already scoped 1:1 to the application via its FK.
+        is VerificationSubjectRef.Application -> null
+    }
+
     private fun <T : Any> tenantMutation(
         operation: String,
         tenantId: UUID,
@@ -866,7 +1141,7 @@ class TenantTrustControlService(
 
     private fun <T : Any> platformMutation(
         operation: String,
-        tenantId: UUID,
+        tenantId: UUID?,
         permission: String,
         payload: Any,
         resourceType: String,
@@ -882,9 +1157,24 @@ class TenantTrustControlService(
         block = block,
     )
 
+    /** Like [tenantMutation], but for a subject that may be a Tenant or an Application. */
+    private fun <T : Any> subjectMutation(
+        operation: String,
+        subject: VerificationSubjectRef,
+        tenantPermission: String,
+        payload: Any,
+        resourceType: String,
+        responseType: Class<T>,
+        block: (UUID) -> T,
+    ): T = mutate(
+        operation, (subject as? VerificationSubjectRef.Tenant)?.tenantId, payload, resourceType, responseType,
+        authorize = { authorizeSubjectAccess(subject, tenantPermission) },
+        block = block,
+    )
+
     private fun <T : Any> mutate(
         operation: String,
-        tenantId: UUID,
+        tenantId: UUID?,
         payload: Any,
         resourceType: String,
         responseType: Class<T>,
@@ -945,7 +1235,7 @@ class TenantTrustControlService(
     }
 
     private fun recordPlatformSideEffects(
-        tenantId: UUID,
+        tenantId: UUID?,
         action: String,
         type: String,
         id: UUID,
@@ -963,8 +1253,48 @@ class TenantTrustControlService(
         enqueue(tenantId, action, type, id, payload, reservationId)
     }
 
+    /**
+     * A Tenant subject's own mutations are already audited as tenant events; this is the
+     * sink for an Application subject, which has no tenant yet to attribute an event to and
+     * is not a platform user either — `platform_audit_logs` is the closest existing table,
+     * so the application id travels in the payload to keep the trail queryable.
+     */
+    private fun recordSubjectSideEffects(
+        subject: VerificationSubjectRef,
+        action: String,
+        type: String,
+        id: UUID,
+        payload: Map<String, Any?>,
+        reservationId: UUID,
+    ) {
+        when (subject) {
+            is VerificationSubjectRef.Tenant -> recordTenantSideEffects(
+                subject.tenantId, action, type, id, payload, reservationId,
+            )
+            is VerificationSubjectRef.Application -> {
+                // pms_app (what an applicant's session runs as) has no direct grant on
+                // platform_audit_logs — only pms_platform does, per V14 — so this goes through
+                // the same SECURITY DEFINER shape as the rest of the pre-tenant path rather
+                // than auditPort.recordPlatformEvent, which would fail with a permission
+                // error. The payload here is domain-shaped (ids, type strings, hashes), never
+                // a raw secret, so skipping AuditPayloadSanitizer is deliberate, not an oversight.
+                jdbcTemplate.queryForList(
+                    "SELECT record_onboarding_platform_audit_event(?, ?, ?, ?::jsonb, ?)",
+                    action,
+                    type,
+                    id,
+                    objectMapper.writeValueAsString(
+                        payload + ("onboardingApplicationId" to subject.applicationId),
+                    ),
+                    requestContextHolder.current().correlationId,
+                )
+                enqueue(null, action, type, id, payload, reservationId)
+            }
+        }
+    }
+
     private fun enqueue(
-        tenantId: UUID,
+        tenantId: UUID?,
         action: String,
         type: String,
         id: UUID,
@@ -1002,26 +1332,29 @@ class TenantTrustControlService(
         else -> throw IllegalStateException("Platform identity is required")
     }
 
-    private fun verificationCase(tenantId: UUID, caseId: UUID): VerificationCaseSummary {
+    private fun verificationCase(subject: VerificationSubjectRef, caseId: UUID): VerificationCaseSummary {
+        val (clause, param) = subjectWhereClause(subject, "verification_case")
         return jdbcTemplate.query(
-            "$VERIFICATION_CASE_SELECT WHERE verification_case.tenant_id = ? AND verification_case.id = ?",
-            { rs, _ -> mapVerificationCase(rs) }, tenantId, caseId,
-        ).singleOrNull()?.let { it.copy(documents = verificationDocuments(tenantId, caseId)) }
+            "$VERIFICATION_CASE_SELECT WHERE $clause AND verification_case.id = ?",
+            { rs, _ -> mapVerificationCase(rs) }, param, caseId,
+        ).singleOrNull()?.let { it.copy(documents = verificationDocuments(subject, caseId)) }
             ?: throw PlatformControlNotFoundException("Verification case was not found")
     }
 
-    private fun lockedVerificationCase(tenantId: UUID, caseId: UUID): VerificationCaseSummary {
+    private fun lockedVerificationCase(subject: VerificationSubjectRef, caseId: UUID): VerificationCaseSummary {
+        val (clause, param) = subjectWhereClause(subject)
         jdbcTemplate.queryForList(
-            "SELECT id FROM tenant_verification_cases WHERE tenant_id = ? AND id = ? FOR UPDATE",
-            tenantId, caseId,
+            "SELECT id FROM tenant_verification_cases WHERE $clause AND id = ? FOR UPDATE",
+            param, caseId,
         ).singleOrNull() ?: throw PlatformControlNotFoundException("Verification case was not found")
-        return verificationCase(tenantId, caseId)
+        return verificationCase(subject, caseId)
     }
 
     private fun mapVerificationCase(rs: ResultSet): VerificationCaseSummary =
         VerificationCaseSummary(
             caseId = rs.getObject("id", UUID::class.java),
             tenantId = rs.getObject("tenant_id", UUID::class.java),
+            onboardingApplicationId = rs.getObject("onboarding_application_id", UUID::class.java),
             caseType = rs.getString("case_type"),
             requiredLevel = rs.getString("required_level"),
             status = rs.getString("status"),
@@ -1036,33 +1369,41 @@ class TenantTrustControlService(
             updatedAt = rs.getTimestamp("updated_at").toInstant(),
         )
 
-    private fun verificationDocuments(tenantId: UUID, caseId: UUID): List<VerificationDocumentSummary> =
-        jdbcTemplate.query(
+    private fun verificationDocuments(
+        subject: VerificationSubjectRef,
+        caseId: UUID,
+    ): List<VerificationDocumentSummary> {
+        val (clause, param) = subjectWhereClause(subject)
+        return jdbcTemplate.query(
             """
             SELECT id, verification_case_id, document_type, document_number_masked,
                    storage_object_key, content_hash, mime_type, issued_at, expires_at,
-                   status, rejection_reason
+                   status, rejection_reason, scan_status
             FROM tenant_verification_documents
-            WHERE tenant_id = ? AND verification_case_id = ?
+            WHERE $clause AND verification_case_id = ?
             ORDER BY created_at, id
             """.trimIndent(),
-            { rs, _ -> mapVerificationDocument(rs) }, tenantId, caseId,
+            { rs, _ -> mapVerificationDocument(rs) }, param, caseId,
         )
+    }
 
     private fun verificationDocument(
-        tenantId: UUID,
+        subject: VerificationSubjectRef,
         caseId: UUID,
         documentId: UUID,
-    ): VerificationDocumentSummary = jdbcTemplate.query(
-        """
-        SELECT id, verification_case_id, document_type, document_number_masked,
-               storage_object_key, content_hash, mime_type, issued_at, expires_at,
-               status, rejection_reason
-        FROM tenant_verification_documents
-        WHERE tenant_id = ? AND verification_case_id = ? AND id = ?
-        """.trimIndent(),
-        { rs, _ -> mapVerificationDocument(rs) }, tenantId, caseId, documentId,
-    ).singleOrNull() ?: throw PlatformControlNotFoundException("Verification document was not found")
+    ): VerificationDocumentSummary {
+        val (clause, param) = subjectWhereClause(subject)
+        return jdbcTemplate.query(
+            """
+            SELECT id, verification_case_id, document_type, document_number_masked,
+                   storage_object_key, content_hash, mime_type, issued_at, expires_at,
+                   status, rejection_reason, scan_status
+            FROM tenant_verification_documents
+            WHERE $clause AND verification_case_id = ? AND id = ?
+            """.trimIndent(),
+            { rs, _ -> mapVerificationDocument(rs) }, param, caseId, documentId,
+        ).singleOrNull() ?: throw PlatformControlNotFoundException("Verification document was not found")
+    }
 
     private fun mapVerificationDocument(rs: ResultSet) = VerificationDocumentSummary(
         documentId = rs.getObject("id", UUID::class.java),
@@ -1076,6 +1417,7 @@ class TenantTrustControlService(
         expiresAt = rs.getObject("expires_at", LocalDate::class.java),
         status = rs.getString("status"),
         rejectionReason = rs.getString("rejection_reason"),
+        scanStatus = rs.getString("scan_status"),
     )
 
     private fun privacyRequest(tenantId: UUID, requestId: UUID): PrivacyRequestSummary =
@@ -1195,6 +1537,9 @@ class TenantTrustControlService(
     private companion object {
         const val PLATFORM_VERIFICATION = "platform.tenants.verification.manage"
         val SAFE_OBJECT_KEY = Regex("[A-Za-z0-9][A-Za-z0-9/_ .-]{0,499}")
+        val UPLOAD_URL_EXPIRY: Duration = Duration.ofMinutes(10)
+        val VIEW_URL_EXPIRY: Duration = Duration.ofMinutes(10)
+        const val MAX_VERIFICATION_DOCUMENT_BYTES = 10L * 1024 * 1024
         val ALLOWED_VERIFICATION_MIME_TYPES = setOf(
             "application/pdf", "image/jpeg", "image/png", "image/webp",
         )
@@ -1212,6 +1557,7 @@ class TenantTrustControlService(
         )
         val VERIFICATION_CASE_SELECT = """
             SELECT verification_case.id, verification_case.tenant_id,
+                   verification_case.onboarding_application_id,
                    verification_case.case_type, verification_case.required_level,
                    verification_case.status, verification_case.risk_rating,
                    verification_case.assigned_platform_user_id,

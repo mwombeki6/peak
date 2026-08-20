@@ -96,6 +96,7 @@ data class StaffSessionHttpRequest(
     @field:NotBlank val deviceCode: String,
     @field:NotNull val challengeId: UUID,
     @field:NotBlank val signature: String,
+    /** The local sequence typed on this terminal ("00042"), not the full staff number. */
     @field:NotBlank val staffNumber: String,
     @field:NotBlank val pin: String,
 )

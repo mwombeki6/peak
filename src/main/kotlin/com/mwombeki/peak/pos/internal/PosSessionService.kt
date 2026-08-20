@@ -24,6 +24,7 @@ class PosSessionService(
     private val jdbcTemplate: JdbcTemplate,
     private val commandExecutor: PosCommandExecutor,
     private val realtime: ObjectProvider<RealtimePort>,
+    private val printJobs: PosPrintJobService,
 ) {
     fun openSession(
         propertyId: UUID,
@@ -245,6 +246,9 @@ class PosSessionService(
                             ),
                         )
                     }
+                }
+                .also { closed ->
+                    printJobs.enqueueShiftReport(actor.tenantId, propertyId, closed)
                 }
         }
     }

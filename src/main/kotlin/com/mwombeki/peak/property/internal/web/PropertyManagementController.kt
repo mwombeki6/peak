@@ -2,6 +2,7 @@ package com.mwombeki.peak.property.internal.web
 
 import com.mwombeki.peak.shared.exception.ApiProblemFactory
 
+import com.mwombeki.peak.property.api.BaseRateResponse
 import com.mwombeki.peak.property.api.BuildingResponse
 import com.mwombeki.peak.property.api.CreateBuildingRequest
 import com.mwombeki.peak.property.api.CreateDepartmentRequest
@@ -404,6 +405,13 @@ class PropertyManagementController(
         @RequestBody request: SetBaseRateRequest,
     ): PropertyChildMutationReceipt {
         return propertyPort.setRoomTypeBaseRate(propertyId, request)
+    }
+
+    @GetMapping("/{propertyId}/rates")
+    fun listBaseRates(
+        @PathVariable propertyId: UUID,
+    ): List<BaseRateResponse> {
+        return propertyPort.listRoomTypeBaseRates(propertyId)
     }
 
     @PostMapping("/taxes")

@@ -36,6 +36,7 @@ class PosOrderService(
     private val realtime: ObjectProvider<RealtimePort>,
     private val requestContextHolder: RequestContextHolder,
     private val roomCharge: PosRoomChargeService,
+    private val printJobs: PosPrintJobService,
 ) {
     fun createOrder(
         propertyId: UUID,
@@ -306,6 +307,11 @@ class PosOrderService(
                         ),
                         idempotencyKeyId = idempotencyKeyId,
                     )
+                }
+                .also { settled ->
+                    if (method != "mobile_money") {
+                        printJobs.enqueueReceipt(actor.tenantId, propertyId, settled)
+                    }
                 }
                 .also { settled ->
                     realtime.ifAvailable {

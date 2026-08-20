@@ -295,6 +295,31 @@ class ProductionReadinessValidatorTests {
     }
 
     @Test
+    fun rejectsActivationCodeExposureInProduction() {
+        val error = assertFailsWith<IllegalStateException> {
+            validator(
+                environment = secureProdEnvironment()
+                    .withProperty("spring.datasource.username", "peak_app")
+                    .withProperty("spring.datasource.password", "not-local-secret")
+                    .withProperty("spring.flyway.enabled", "false")
+                    .withProperty(
+                        "peak.usermanagement.activation.expose-code-in-response",
+                        "true",
+                    ),
+                runtimeProperties = PeakRuntimeProperties(PeakRuntimeMode.API),
+                httpSecurityProperties = secureHttpProperties(),
+                requestContextProperties = secureRequestContextProperties(),
+            ).afterSingletonsInstantiated()
+        }
+
+        assertTrue(
+            requireNotNull(error.message).contains(
+                "peak.usermanagement.activation.expose-code-in-response must be false in prod",
+            ),
+        )
+    }
+
+    @Test
     fun rejectsDisabledRuntimeRouteBoundaryInProduction() {
         val error = assertFailsWith<IllegalStateException> {
             validator(
@@ -506,6 +531,14 @@ class ProductionReadinessValidatorTests {
             .withProperty(
                 "peak.communication.invitation.acceptance-base-url",
                 "https://app.peak.example.com/invitations/accept",
+            )
+            .withProperty(
+                "peak.communication.invitation.hospitality-acceptance-base-url",
+                "https://hospitality.peak.example.com/invitations/accept",
+            )
+            .withProperty(
+                "peak.communication.invitation.platform-acceptance-base-url",
+                "https://platform.peak.example.com/invitations/accept",
             )
     }
 }

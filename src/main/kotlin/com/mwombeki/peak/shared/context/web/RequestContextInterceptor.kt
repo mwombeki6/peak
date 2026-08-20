@@ -60,6 +60,7 @@ class RequestContextInterceptor(
             "tenant_user_id",
             "platform_user_id",
             "property_id",
+            "onboarding_application_id",
         ).forEach(MDC::remove)
     }
 
@@ -85,6 +86,10 @@ class RequestContextInterceptor(
             is RequestIdentity.Public -> {
                 identity.tenantId?.let { MDC.put("tenant_id", it.toString()) }
                 identity.propertyId?.let { MDC.put("property_id", it.toString()) }
+            }
+
+            is RequestIdentity.OnboardingApplicant -> {
+                MDC.put("onboarding_application_id", identity.applicationId.toString())
             }
         }
     }

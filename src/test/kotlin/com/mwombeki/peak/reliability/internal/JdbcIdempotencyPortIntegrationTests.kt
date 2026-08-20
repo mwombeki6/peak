@@ -245,6 +245,187 @@ class JdbcIdempotencyPortIntegrationTests {
     }
 
     @Test
+    fun twoOnboardingApplicantsReusingTheSameKeyAreCompletelyIndependent() {
+        val applicationA = UUID.randomUUID()
+        val applicationB = UUID.randomUUID()
+        val sharedKey = "idem-${UUID.randomUUID()}"
+
+        val startedA = transactionTemplate.execute {
+            requestContextHolder.set(onboardingApplicantContext(applicationA, sharedKey))
+            idempotencyPort.reserve(command("applicant-a"))
+        }
+        val startedB = transactionTemplate.execute {
+            requestContextHolder.set(onboardingApplicantContext(applicationB, sharedKey))
+            idempotencyPort.reserve(command("applicant-b"))
+        }
+
+        assertTrue(startedA is IdempotencyReservation.Started)
+        assertTrue(startedB is IdempotencyReservation.Started)
+        assertTrue(startedA.recordId != startedB.recordId)
+
+        transactionTemplate.executeWithoutResult {
+            requestContextHolder.set(onboardingApplicantContext(applicationA, sharedKey))
+            idempotencyPort.markSucceeded(startedA.recordId, 201, mapOf("id" to "case-a"), null)
+        }
+
+        // B's own key is still untouched — no replay of A's response, no conflict either.
+        val stillA = transactionTemplate.execute {
+            requestContextHolder.set(onboardingApplicantContext(applicationA, sharedKey))
+            idempotencyPort.reserve(command("applicant-a"))
+        }
+        assertTrue(stillA is IdempotencyReservation.Replay)
+        assertTrue(stillA.responseBody.orEmpty().contains("case-a"))
+
+        val stillB = transactionTemplate.execute {
+            requestContextHolder.set(onboardingApplicantContext(applicationB, sharedKey))
+            idempotencyPort.reserve(command("applicant-b"))
+        }
+        assertTrue(stillB is IdempotencyReservation.InProgress)
+        assertEquals(startedB.recordId, stillB.recordId)
+    }
+
+    @Test
+    fun twoPlatformActorsReusingTheSameKeyAreIndependent() {
+        val platformUserA = UUID.randomUUID()
+        val platformUserB = UUID.randomUUID()
+        val sharedKey = "idem-${UUID.randomUUID()}"
+
+        val startedA = transactionTemplate.execute {
+            requestContextHolder.set(platformContext(platformUserA, sharedKey))
+            idempotencyPort.reserve(command("platform-a"))
+        }
+        val startedB = transactionTemplate.execute {
+            requestContextHolder.set(platformContext(platformUserB, sharedKey))
+            idempotencyPort.reserve(command("platform-b"))
+        }
+
+        assertTrue(startedA is IdempotencyReservation.Started)
+        assertTrue(startedB is IdempotencyReservation.Started)
+        assertTrue(startedA.recordId != startedB.recordId)
+    }
+
+    @Test
+    fun twoTenantsReusingTheSameKeyAreIsolated() {
+        val planId = UUID.randomUUID()
+        val tenantA = UUID.randomUUID()
+        val tenantB = UUID.randomUUID()
+        val sharedKey = "idem-${UUID.randomUUID()}"
+
+        val startedA = transactionTemplate.execute {
+            insertPlan(planId)
+            insertTenant(tenantA, planId)
+            insertTenant(tenantB, planId)
+            requestContextHolder.set(tenantContext(tenantA, UUID.randomUUID(), sharedKey))
+            idempotencyPort.reserve(command("tenant-a"))
+        }
+        val startedB = transactionTemplate.execute {
+            requestContextHolder.set(tenantContext(tenantB, UUID.randomUUID(), sharedKey))
+            idempotencyPort.reserve(command("tenant-b"))
+        }
+
+        assertTrue(startedA is IdempotencyReservation.Started)
+        assertTrue(startedB is IdempotencyReservation.Started)
+        assertTrue(startedA.recordId != startedB.recordId)
+    }
+
+    @Test
+    fun twoUsersInTheSameTenantReusingTheSameKeyDoNotReplayEachOther() {
+        val planId = UUID.randomUUID()
+        val tenantId = UUID.randomUUID()
+        val userA = UUID.randomUUID()
+        val userB = UUID.randomUUID()
+        val sharedKey = "idem-${UUID.randomUUID()}"
+
+        val startedA = transactionTemplate.execute {
+            insertPlan(planId)
+            insertTenant(tenantId, planId)
+            requestContextHolder.set(tenantContext(tenantId, userA, sharedKey))
+            idempotencyPort.reserve(command("user-a"))
+        }
+        transactionTemplate.executeWithoutResult {
+            requestContextHolder.set(tenantContext(tenantId, userA, sharedKey))
+            idempotencyPort.markSucceeded(
+                requireNotNull(startedA).recordId, 201, mapOf("id" to "user-a-result"), null,
+            )
+        }
+
+        // Same tenant, same key, a different tenant user — must not see user A's cached result.
+        val startedB = transactionTemplate.execute {
+            requestContextHolder.set(tenantContext(tenantId, userB, sharedKey))
+            idempotencyPort.reserve(command("user-a"))
+        }
+        assertTrue(startedB is IdempotencyReservation.Started)
+        assertTrue(startedB.recordId != requireNotNull(startedA).recordId)
+    }
+
+    @Test
+    fun concurrentDifferentActorsSharingAKeyRemainIndependent() {
+        val platformUserA = UUID.randomUUID()
+        val platformUserB = UUID.randomUUID()
+        val sharedKey = "idem-${UUID.randomUUID()}"
+        val executor = Executors.newFixedThreadPool(2)
+        val ready = CountDownLatch(2)
+        val start = CountDownLatch(1)
+
+        try {
+            val futures = listOf(platformUserA, platformUserB).map { userId ->
+                executor.submit<IdempotencyReservation?> {
+                    ready.countDown()
+                    assertTrue(start.await(5, TimeUnit.SECONDS))
+                    transactionTemplate.execute {
+                        requestContextHolder.set(platformContext(userId, sharedKey))
+                        idempotencyPort.reserve(command("actor-$userId"))
+                    }
+                }
+            }
+
+            assertTrue(ready.await(5, TimeUnit.SECONDS))
+            start.countDown()
+            val results = futures.map { it.get(10, TimeUnit.SECONDS) }
+
+            assertEquals(2, results.count { it is IdempotencyReservation.Started })
+            assertEquals(
+                2,
+                jdbcTemplate.queryForObject(
+                    "SELECT count(*) FROM idempotency_keys WHERE idempotency_key = ?",
+                    Int::class.java,
+                    sharedKey,
+                ),
+            )
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun guestsInDifferentTenantsReusingTheSameKeyAreIndependentNotGloballyShared() {
+        val planId = UUID.randomUUID()
+        val tenantA = UUID.randomUUID()
+        val tenantB = UUID.randomUUID()
+        val propertyA = UUID.randomUUID()
+        val propertyB = UUID.randomUUID()
+        val sharedKey = "idem-${UUID.randomUUID()}"
+
+        val startedA = transactionTemplate.execute {
+            insertPlan(planId)
+            insertTenant(tenantA, planId)
+            insertTenant(tenantB, planId)
+            insertProperty(propertyA, tenantA)
+            insertProperty(propertyB, tenantB)
+            requestContextHolder.set(guestContext(tenantA, propertyA, sharedKey))
+            idempotencyPort.reserve(command("guest-a"))
+        }
+        val startedB = transactionTemplate.execute {
+            requestContextHolder.set(guestContext(tenantB, propertyB, sharedKey))
+            idempotencyPort.reserve(command("guest-b"))
+        }
+
+        assertTrue(startedA is IdempotencyReservation.Started)
+        assertTrue(startedB is IdempotencyReservation.Started)
+        assertTrue(startedA.recordId != startedB.recordId)
+    }
+
+    @Test
     fun reservesTenantScopedCommand() {
         val tenantId = UUID.randomUUID()
         val tenantUserId = UUID.randomUUID()
@@ -298,6 +479,58 @@ class JdbcIdempotencyPortIntegrationTests {
         )
     }
 
+    private fun tenantContext(
+        tenantId: UUID,
+        tenantUserId: UUID,
+        idempotencyKey: String?,
+    ): RequestContext {
+        return RequestContext(
+            identity = RequestIdentity.Tenant(
+                tenantId = tenantId,
+                tenantUserId = tenantUserId,
+                correlationId = "corr-idem",
+            ),
+            correlationId = "corr-idem",
+            idempotencyKey = idempotencyKey,
+            httpMethod = "POST",
+            requestPath = "/api/v1/tenants/$tenantId/users/invitations",
+        )
+    }
+
+    private fun onboardingApplicantContext(
+        applicationId: UUID,
+        idempotencyKey: String?,
+    ): RequestContext {
+        return RequestContext(
+            identity = RequestIdentity.OnboardingApplicant(
+                applicationId = applicationId,
+                correlationId = "corr-idem",
+            ),
+            correlationId = "corr-idem",
+            idempotencyKey = idempotencyKey,
+            httpMethod = "POST",
+            requestPath = "/api/v1/onboarding/me/verification-cases",
+        )
+    }
+
+    private fun guestContext(
+        tenantId: UUID,
+        propertyId: UUID,
+        idempotencyKey: String?,
+    ): RequestContext {
+        return RequestContext(
+            identity = RequestIdentity.Public(
+                tenantId = tenantId,
+                propertyId = propertyId,
+                correlationId = "corr-idem",
+            ),
+            correlationId = "corr-idem",
+            idempotencyKey = idempotencyKey,
+            httpMethod = "POST",
+            requestPath = "/api/v1/public/properties/$propertyId/reservations",
+        )
+    }
+
     private fun command(
         slug: String,
     ): IdempotencyCommand {
@@ -337,6 +570,16 @@ class JdbcIdempotencyPortIntegrationTests {
             "tenant-$id",
             "tenant_$id".replace("-", "_"),
             planId,
+        )
+    }
+
+    private fun insertProperty(id: UUID, tenantId: UUID) {
+        jdbcTemplate.update(
+            "INSERT INTO properties (id, tenant_id, name, code) VALUES (?, ?, ?, ?)",
+            id,
+            tenantId,
+            "Property $id",
+            "P${id.toString().take(8)}",
         )
     }
 }

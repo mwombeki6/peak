@@ -66,10 +66,17 @@ class OpenApiContractIntegrationTests @Autowired constructor(
             "/api/v1/devices/pairing-requests" to "post",
             "/api/v1/devices/pairing-requests/{pairingRequestId}" to "get",
             "/api/v1/tenants/{tenantId}/devices/pairing-approvals" to "post",
+            "/api/v1/tenants/{tenantId}/devices" to "get",
             "/api/v1/tenants/{tenantId}/devices/{deviceId}/revoke" to "post",
             "/api/v1/devices/challenges" to "post",
             "/api/v1/staff/sessions" to "post",
             "/api/v1/staff/sessions/current" to "delete",
+            "/api/v1/properties/{propertyId}/pos-print-jobs" to "get",
+            "/api/v1/properties/{propertyId}/pos-print-jobs/{jobId}/claim" to "post",
+            "/api/v1/properties/{propertyId}/pos-print-jobs/{jobId}/printed" to "post",
+            "/api/v1/properties/{propertyId}/pos-print-jobs/{jobId}/failed" to "post",
+            "/api/v1/properties/{propertyId}/pos-print-jobs/{jobId}/reclaim" to "post",
+            "/api/v1/properties/{propertyId}/pos-print-jobs/{jobId}/reprint" to "post",
         )
         expected.forEach { (path, method) ->
             assertTrue(
@@ -224,7 +231,8 @@ class OpenApiContractIntegrationTests @Autowired constructor(
                 path == "/api/v1/devices/challenges" ||
                 path == "/api/v1/staff/sessions" ||
                 path == "/api/v1/staff/credentials/activate" ||
-                path == "/api/v1/invitations/accept"
+                path.startsWith("/api/v1/invitations/") ||
+                path.startsWith("/api/v1/auth/recovery")
         }
     }
 }

@@ -6,6 +6,7 @@ import com.mwombeki.peak.shared.outbound.StoredObject
 import io.minio.BucketExistsArgs
 import io.minio.GetBucketEncryptionArgs
 import io.minio.GetBucketPolicyArgs
+import io.minio.GetObjectArgs
 import io.minio.GetPresignedObjectUrlArgs
 import io.minio.Http
 import io.minio.MinioClient
@@ -15,11 +16,13 @@ import io.minio.StatObjectArgs
 import io.minio.ServerSideEncryption
 import io.minio.errors.ErrorResponseException
 import java.io.ByteArrayInputStream
+import java.io.InputStream
 import java.time.Duration
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.boot.health.contributor.Health
 import org.springframework.boot.health.contributor.HealthIndicator
+import org.springframework.context.annotation.Primary
 import org.springframework.stereotype.Component
 import tools.jackson.databind.json.JsonMapper
 
@@ -34,6 +37,7 @@ data class ReportObjectStorageProperties(
 )
 
 @Component
+@Primary
 @ConditionalOnProperty(
     prefix = "peak.reporting.storage",
     name = ["enabled"],
@@ -147,9 +151,48 @@ class S3ReportObjectStorageAdapter(
         )
     }
 
+    override fun presignedPut(
+        objectKey: String,
+        expiry: Duration,
+    ): String {
+        require(!expiry.isZero && !expiry.isNegative) {
+            "Signed URL expiry must be positive"
+        }
+        return client.getPresignedObjectUrl(
+            GetPresignedObjectUrlArgs.builder()
+                .bucket(bucketName)
+                .`object`(objectKey)
+                .method(Http.Method.PUT)
+                .expiry(expiry.seconds.toInt())
+                .build(),
+        )
+    }
+
+    override fun stat(objectKey: String): StoredObject? {
+        val found = statOrNull(objectKey) ?: return null
+        val hash = found.userMetadata().caseInsensitiveValue("sha256")
+            ?: found.headers().caseInsensitiveValue("x-amz-meta-sha256")
+            ?: ""
+        return StoredObject(
+            objectKey = objectKey,
+            etag = found.etag(),
+            contentLength = found.size(),
+            sha256 = hash,
+        )
+    }
+
     override fun delete(objectKey: String) {
         client.removeObject(
             RemoveObjectArgs.builder()
+                .bucket(bucketName)
+                .`object`(objectKey)
+                .build(),
+        )
+    }
+
+    override fun getObject(objectKey: String): InputStream {
+        return client.getObject(
+            GetObjectArgs.builder()
                 .bucket(bucketName)
                 .`object`(objectKey)
                 .build(),
@@ -189,6 +232,7 @@ class S3ReportObjectStorageAdapter(
 }
 
 @Component
+@Primary
 @ConditionalOnProperty(
     prefix = "peak.reporting.storage",
     name = ["enabled"],
@@ -206,7 +250,13 @@ class DisabledReportObjectStorageAdapter(
         error("Report object storage is disabled")
     override fun presignedGet(objectKey: String, expiry: Duration): String =
         error("Report object storage is disabled")
+    override fun presignedPut(objectKey: String, expiry: Duration): String =
+        error("Report object storage is disabled")
+    override fun stat(objectKey: String): StoredObject? =
+        error("Report object storage is disabled")
     override fun delete(objectKey: String) =
+        error("Report object storage is disabled")
+    override fun getObject(objectKey: String): InputStream =
         error("Report object storage is disabled")
 }
 

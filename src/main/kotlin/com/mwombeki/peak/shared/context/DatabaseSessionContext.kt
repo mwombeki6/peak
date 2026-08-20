@@ -35,6 +35,10 @@ class DatabaseSessionContext(
             is RequestIdentity.Public -> {
                 identity.tenantId?.let { setTenantContext(it) }
             }
+
+            is RequestIdentity.OnboardingApplicant -> {
+                setLocal(CURRENT_ONBOARDING_APPLICATION_ID, identity.applicationId.toString())
+            }
         }
 
         jdbcTemplate.execute("select assert_no_mixed_context()")
@@ -44,6 +48,7 @@ class DatabaseSessionContext(
         setLocal(CURRENT_TENANT_ID, "")
         setLocal(CURRENT_TENANT_USER_ID, "")
         setLocal(CURRENT_PLATFORM_USER_ID, "")
+        setLocal(CURRENT_ONBOARDING_APPLICATION_ID, "")
     }
 
     private fun setLocal(name: String, value: String) {
@@ -63,5 +68,6 @@ class DatabaseSessionContext(
         const val CURRENT_TENANT_ID = "app.current_tenant_id"
         const val CURRENT_TENANT_USER_ID = "app.current_tenant_user_id"
         const val CURRENT_PLATFORM_USER_ID = "app.current_platform_user_id"
+        const val CURRENT_ONBOARDING_APPLICATION_ID = "app.current_onboarding_application_id"
     }
 }
